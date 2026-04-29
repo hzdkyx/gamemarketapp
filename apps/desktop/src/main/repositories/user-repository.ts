@@ -1,4 +1,5 @@
 import { getSqliteDatabase } from "../database/database";
+import { toSqliteBoolean, toSqliteDate, toSqliteNullable } from "../database/sqlite-values";
 import type { UserRecord, UserRole, UserStatus } from "../../shared/contracts";
 
 interface UserRow {
@@ -36,6 +37,67 @@ export interface UserWriteRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+interface UserSqliteWriteRecord {
+  id: string | null;
+  name: string | null;
+  username: string | null;
+  passwordHash: string | null;
+  role: string | null;
+  status: string | null;
+  lastLoginAt: string | null;
+  failedLoginAttempts: number;
+  lockedUntil: string | null;
+  mustChangePassword: 0 | 1;
+  allowRevealSecrets: 0 | 1;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+const toSqliteText = (value: unknown): string | null => {
+  const sqliteValue = toSqliteNullable(value);
+
+  if (sqliteValue === null) {
+    return null;
+  }
+
+  return Buffer.isBuffer(sqliteValue) ? sqliteValue.toString("utf8") : String(sqliteValue);
+};
+
+const toSqliteNumber = (value: unknown): number => {
+  const sqliteValue = toSqliteNullable(value);
+
+  if (typeof sqliteValue === "number") {
+    return sqliteValue;
+  }
+
+  if (typeof sqliteValue === "bigint") {
+    return Number(sqliteValue);
+  }
+
+  if (typeof sqliteValue === "string") {
+    const parsed = Number(sqliteValue);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
+};
+
+export const toSqliteUserWriteRecord = (user: UserWriteRecord): UserSqliteWriteRecord => ({
+  id: toSqliteText(user.id),
+  name: toSqliteText(user.name),
+  username: toSqliteText(user.username),
+  passwordHash: toSqliteText(user.passwordHash),
+  role: toSqliteText(user.role),
+  status: toSqliteText(user.status),
+  lastLoginAt: toSqliteDate(user.lastLoginAt),
+  failedLoginAttempts: toSqliteNumber(user.failedLoginAttempts),
+  lockedUntil: toSqliteDate(user.lockedUntil),
+  mustChangePassword: toSqliteBoolean(user.mustChangePassword),
+  allowRevealSecrets: toSqliteBoolean(user.allowRevealSecrets),
+  createdAt: toSqliteDate(user.createdAt),
+  updatedAt: toSqliteDate(user.updatedAt)
+});
 
 const mapUserRow = (row: UserRow): UserWithPasswordHash => ({
   id: row.id,
@@ -169,7 +231,7 @@ export const userRepository = {
           @updatedAt
         )
       `
-    ).run(user);
+    ).run(toSqliteUserWriteRecord(user));
 
     const created = this.getById(user.id);
     if (!created) {
@@ -198,7 +260,7 @@ export const userRepository = {
           updated_at = @updatedAt
         WHERE id = @id
       `
-    ).run(user);
+    ).run(toSqliteUserWriteRecord(user));
 
     const updated = this.getById(user.id);
     if (!updated) {

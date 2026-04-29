@@ -62,6 +62,13 @@ vi.mock("../repositories/user-repository", () => ({
   }
 }));
 
+vi.mock("../logger", () => ({
+  logger: {
+    info: vi.fn(),
+    error: vi.fn()
+  }
+}));
+
 const { authService } = await import("./auth-service");
 const { hashPassword } = await import("./auth-password");
 const { clearSession, createSession } = await import("./auth-session");
@@ -105,6 +112,68 @@ beforeEach(() => {
 });
 
 describe("auth service", () => {
+  it("creates the initial admin and allows login after setup", () => {
+    state.users.clear();
+
+    const admin = authService.setupAdmin({
+      name: "Admin Local",
+      username: "Admin.Local",
+      password: "senha-forte-1",
+      confirmPassword: "senha-forte-1"
+    });
+
+    expect(admin.role).toBe("admin");
+    expect(admin.status).toBe("active");
+    expect(admin.username).toBe("admin.local");
+    expect(admin.mustChangePassword).toBe(false);
+    expect(admin.allowRevealSecrets).toBe(true);
+    expect("passwordHash" in admin).toBe(false);
+
+    const session = authService.login({
+      username: "admin.local",
+      password: "senha-forte-1"
+    });
+    expect(session.user.id).toBe(admin.id);
+    expect(session.permissions.canManageUsers).toBe(true);
+  });
+
+  it("rejects weak initial admin passwords", () => {
+    state.users.clear();
+
+    expect(() =>
+      authService.setupAdmin({
+        name: "Admin Local",
+        username: "admin.local",
+        password: "curta",
+        confirmPassword: "curta"
+      })
+    ).toThrow();
+  });
+
+  it("rejects mismatched initial admin password confirmation", () => {
+    state.users.clear();
+
+    expect(() =>
+      authService.setupAdmin({
+        name: "Admin Local",
+        username: "admin.local",
+        password: "senha-forte-1",
+        confirmPassword: "senha-diferente"
+      })
+    ).toThrow();
+  });
+
+  it("does not create a second initial admin", () => {
+    expect(() =>
+      authService.setupAdmin({
+        name: "Outro Admin",
+        username: "outro.admin",
+        password: "senha-forte-1",
+        confirmPassword: "senha-forte-1"
+      })
+    ).toThrow("Configuração inicial já foi concluída.");
+  });
+
   it("logs in with valid credentials and does not expose password hash", () => {
     const session = authService.login({ username: "ADMIN", password: "senha-forte-1" });
 

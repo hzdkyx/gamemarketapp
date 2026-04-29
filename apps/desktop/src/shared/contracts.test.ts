@@ -162,6 +162,36 @@ describe("auth and user contracts", () => {
     expect(parsed.username).toBe("Admin.Local");
   });
 
+  it("rejects invalid initial admin setup payloads", () => {
+    expect(() =>
+      authSetupAdminInputSchema.parse({
+        name: "Admin",
+        username: "admin local",
+        password: "senha-forte-1",
+        confirmPassword: "senha-forte-1"
+      })
+    ).toThrow();
+
+    expect(() =>
+      authSetupAdminInputSchema.parse({
+        name: "Admin",
+        username: "admin.local",
+        password: "curta",
+        confirmPassword: "curta"
+      })
+    ).toThrow();
+
+    expect(() =>
+      authSetupAdminInputSchema.parse({
+        name: "Admin",
+        username: "admin.local",
+        password: "senha-forte-1",
+        confirmPassword: "senha-diferente",
+        role: "viewer"
+      })
+    ).toThrow();
+  });
+
   it("rejects mismatched user creation passwords", () => {
     expect(() =>
       userCreateInputSchema.parse({

@@ -1,13 +1,15 @@
-import type {
-  AuthBootstrap,
-  AuthChangePasswordInput,
-  AuthLoginInput,
-  AuthSession,
-  AuthSetupAdminInput,
-  UserRecord
+import {
+  authSetupAdminInputSchema,
+  type AuthBootstrap,
+  type AuthChangePasswordInput,
+  type AuthLoginInput,
+  type AuthSession,
+  type AuthSetupAdminInput,
+  type UserRecord
 } from "../../shared/contracts";
 import { randomUUID } from "node:crypto";
 import { userRepository, type UserWriteRecord, type UserWithPasswordHash } from "../repositories/user-repository";
+import { logger } from "../logger";
 import { clearSession, createSession, getCurrentSession, requireSession } from "./auth-session";
 import { hashPassword, verifyPassword } from "./auth-password";
 
@@ -18,6 +20,31 @@ const GENERIC_LOGIN_ERROR = "Usuário ou senha inválidos.";
 const nowIso = (): string => new Date().toISOString();
 
 const normalizeUsername = (username: string): string => username.trim().toLowerCase();
+
+const setupUsernameForLog = (input: AuthSetupAdminInput): string | undefined => {
+  const username = (input as { username?: unknown }).username;
+  return typeof username === "string" ? normalizeUsername(username) : undefined;
+};
+
+const errorForLog = (error: unknown): { name: string; message: string; stack?: string } => {
+  if (error instanceof Error) {
+    const logError: { name: string; message: string; stack?: string } = {
+      name: error.name,
+      message: error.message
+    };
+
+    if (error.stack) {
+      logError.stack = error.stack;
+    }
+
+    return logError;
+  }
+
+  return {
+    name: typeof error,
+    message: String(error)
+  };
+};
 
 const toWriteRecord = (user: UserWithPasswordHash): UserWriteRecord => ({
   id: user.id,
@@ -73,28 +100,41 @@ export const authService = {
   },
 
   setupAdmin(input: AuthSetupAdminInput): UserRecord {
-    if (userRepository.hasAnyAdmin()) {
-      throw new Error("Configuração inicial já foi concluída.");
+    const usernameForLog = setupUsernameForLog(input);
+    logger.info({ username: usernameForLog }, "setupAdmin started");
+
+    try {
+      const parsed = authSetupAdminInputSchema.parse(input);
+
+      if (userRepository.hasAnyAdmin()) {
+        throw new Error("Configuração inicial já foi concluída.");
+      }
+
+      const timestamp = nowIso();
+      const username = normalizeUsername(parsed.username);
+
+      const created = userRepository.insert({
+        id: randomUUID(),
+        name: parsed.name,
+        username,
+        passwordHash: hashPassword(parsed.password),
+        role: "admin",
+        status: "active",
+        lastLoginAt: null,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        mustChangePassword: false,
+        allowRevealSecrets: true,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      });
+
+      logger.info({ userId: created.id, username: created.username }, "Initial admin user created");
+      return created;
+    } catch (error) {
+      logger.error({ error: errorForLog(error), username: usernameForLog }, "setupAdmin failed");
+      throw error;
     }
-
-    const timestamp = nowIso();
-    const username = normalizeUsername(input.username);
-
-    return userRepository.insert({
-      id: randomUUID(),
-      name: input.name,
-      username,
-      passwordHash: hashPassword(input.password),
-      role: "admin",
-      status: "active",
-      lastLoginAt: null,
-      failedLoginAttempts: 0,
-      lockedUntil: null,
-      mustChangePassword: false,
-      allowRevealSecrets: true,
-      createdAt: timestamp,
-      updatedAt: timestamp
-    });
   },
 
   login(input: AuthLoginInput): AuthSession {

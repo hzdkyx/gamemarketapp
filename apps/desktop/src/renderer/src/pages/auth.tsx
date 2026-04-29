@@ -124,8 +124,8 @@ export const InitialSetupPage = (): JSX.Element => {
 
     try {
       await auth.setupAdmin({ name, username, password, confirmPassword });
-    } catch (setupError) {
-      setError(setupError instanceof Error ? setupError.message : "Falha ao criar admin.");
+    } catch {
+      setError("Não foi possível criar o admin inicial. Verifique os dados e tente novamente.");
     } finally {
       setSubmitting(false);
     }
