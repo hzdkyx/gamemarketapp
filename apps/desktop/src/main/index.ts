@@ -9,6 +9,8 @@ import { registerInventoryIpc } from "./ipc/inventory-ipc";
 import { registerOrdersIpc } from "./ipc/orders-ipc";
 import { registerProductsIpc } from "./ipc/products-ipc";
 import { registerSettingsIpc } from "./ipc/settings-ipc";
+import { registerWebhookServerIpc } from "./ipc/webhook-server-ipc";
+import { webhookServerPollingService } from "./integrations/webhook-server/webhook-server-polling-service";
 import { logger } from "./logger";
 import { configureNotificationWindow, notificationService } from "./services/notification-service";
 
@@ -57,6 +59,7 @@ const registerIpcHandlers = (): void => {
   registerDashboardIpc(ipcMain);
   registerSettingsIpc(ipcMain);
   registerGameMarketIpc(ipcMain);
+  registerWebhookServerIpc(ipcMain);
 
   ipcMain.handle("app:get-meta", () => ({
     name: app.getName(),
@@ -79,6 +82,7 @@ app.whenReady().then(() => {
   try {
     const status = initializeDatabase();
     logger.info({ databasePath: status.path }, "SQLite initialized");
+    webhookServerPollingService.refresh();
   } catch (error) {
     logger.error({ error }, "Failed to initialize SQLite");
   }
@@ -93,6 +97,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  webhookServerPollingService.stop();
   if (process.platform !== "darwin") {
     app.quit();
   }

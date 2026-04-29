@@ -27,7 +27,9 @@ import type {
   NotificationSettings,
   UserRecord,
   UserRole,
-  UserStatus
+  UserStatus,
+  WebhookServerSettingsView,
+  WebhookServerSyncSummary
 } from "../../../shared/contracts";
 import { eventTypeValues } from "../../../shared/contracts";
 
@@ -72,6 +74,18 @@ const eventLabels: Record<EventType, string> = {
   "integration.gamemarket.order_updated": "Pedido GameMarket atualizado",
   "integration.gamemarket.product_imported": "Produto GameMarket importado",
   "integration.gamemarket.product_updated": "Produto GameMarket atualizado",
+  "integration.webhook_server.settings_updated": "Configuração Webhook Server atualizada",
+  "integration.webhook_server.connection_tested": "Conexão Webhook Server testada",
+  "integration.webhook_server.connection_failed": "Conexão Webhook Server falhou",
+  "integration.webhook_server.token_revealed": "Token Webhook Server revelado",
+  "integration.webhook_server.sync_started": "Sync Webhook Server iniciada",
+  "integration.webhook_server.sync_completed": "Sync Webhook Server concluída",
+  "integration.webhook_server.sync_failed": "Sync Webhook Server falhou",
+  "integration.webhook_server.test_event_sent": "Evento de teste Webhook Server",
+  "integration.webhook_server.event_imported": "Evento Webhook Server importado",
+  "integration.webhook_server.review_received": "Avaliação GameMarket recebida",
+  "integration.webhook_server.variant_sold_out": "Variante GameMarket esgotada",
+  "integration.webhook_server.unknown_event": "Evento GameMarket desconhecido",
   "system.notification_test": "Teste de notificação"
 };
 
@@ -79,6 +93,12 @@ interface GameMarketFormState {
   apiBaseUrl: string;
   integrationName: string;
   environment: GameMarketEnvironment;
+}
+
+interface WebhookServerFormState {
+  backendUrl: string;
+  pollingEnabled: boolean;
+  pollingIntervalSeconds: number;
 }
 
 interface UserFormState {
@@ -167,6 +187,40 @@ const gameMarketStatusTone = (status: GameMarketSettingsView["connectionStatus"]
   return "warning";
 };
 
+const webhookServerStatusLabel: Record<WebhookServerSettingsView["connectionStatus"], string> = {
+  not_configured: "Não configurado",
+  configured: "Configurado",
+  connecting: "Conectando",
+  connected: "Conectado",
+  error: "Erro",
+  syncing: "Sincronizando",
+  synced: "Sincronizado",
+  partial: "Sync parcial",
+  unavailable: "Indisponível"
+};
+
+const webhookServerStatusTone = (
+  status: WebhookServerSettingsView["connectionStatus"]
+): "success" | "warning" | "danger" | "cyan" | "neutral" => {
+  if (status === "connected" || status === "synced") {
+    return "success";
+  }
+
+  if (status === "error" || status === "unavailable") {
+    return "danger";
+  }
+
+  if (status === "configured" || status === "connecting" || status === "syncing") {
+    return "cyan";
+  }
+
+  if (status === "not_configured") {
+    return "neutral";
+  }
+
+  return "warning";
+};
+
 export const SettingsPage = (): JSX.Element => {
   const api = useMemo(() => getDesktopApi(), []);
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus | null>(null);
@@ -183,6 +237,19 @@ export const SettingsPage = (): JSX.Element => {
   const [gameMarketResult, setGameMarketResult] = useState("");
   const [revealedGameMarketToken, setRevealedGameMarketToken] = useState<string | null>(null);
   const [lastSyncSummary, setLastSyncSummary] = useState<GameMarketSyncSummary | null>(null);
+  const [webhookServerSettings, setWebhookServerSettings] = useState<WebhookServerSettingsView | null>(null);
+  const [webhookServerForm, setWebhookServerForm] = useState<WebhookServerFormState>({
+    backendUrl: "http://localhost:3001",
+    pollingEnabled: false,
+    pollingIntervalSeconds: 60
+  });
+  const [webhookServerToken, setWebhookServerToken] = useState("");
+  const [webhookServerBusy, setWebhookServerBusy] = useState<
+    "saving" | "testing" | "syncing" | "revealing" | "sendingTest" | null
+  >(null);
+  const [webhookServerResult, setWebhookServerResult] = useState("");
+  const [revealedWebhookServerToken, setRevealedWebhookServerToken] = useState<string | null>(null);
+  const [webhookServerSyncSummary, setWebhookServerSyncSummary] = useState<WebhookServerSyncSummary | null>(null);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [userForm, setUserForm] = useState<UserFormState | null>(null);
   const [resetPasswordUser, setResetPasswordUser] = useState<UserRecord | null>(null);
@@ -205,6 +272,10 @@ export const SettingsPage = (): JSX.Element => {
         api.gamemarket.getSettings(),
         api.gamemarket.getLastSyncSummary()
       ]);
+      const [loadedWebhookServerSettings, webhookSyncSummary] = await Promise.all([
+        api.webhookServer.getSettings(),
+        api.webhookServer.getLastSyncSummary()
+      ]);
       setDatabaseStatus(dbStatus);
       setAppMeta(meta);
       setSettings(notificationSettings);
@@ -216,6 +287,13 @@ export const SettingsPage = (): JSX.Element => {
         environment: loadedGameMarketSettings.environment
       });
       setLastSyncSummary(syncSummary);
+      setWebhookServerSettings(loadedWebhookServerSettings);
+      setWebhookServerForm({
+        backendUrl: loadedWebhookServerSettings.backendUrl,
+        pollingEnabled: loadedWebhookServerSettings.pollingEnabled,
+        pollingIntervalSeconds: loadedWebhookServerSettings.pollingIntervalSeconds
+      });
+      setWebhookServerSyncSummary(webhookSyncSummary);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Falha ao carregar configurações.");
     }
@@ -353,6 +431,112 @@ export const SettingsPage = (): JSX.Element => {
     }
   };
 
+  const refreshWebhookServerSettings = async (): Promise<void> => {
+    const [loadedWebhookServerSettings, syncSummary] = await Promise.all([
+      api.webhookServer.getSettings(),
+      api.webhookServer.getLastSyncSummary()
+    ]);
+    setWebhookServerSettings(loadedWebhookServerSettings);
+    setWebhookServerSyncSummary(syncSummary);
+  };
+
+  const saveWebhookServerSettings = async (): Promise<void> => {
+    setWebhookServerBusy("saving");
+    setWebhookServerResult("");
+    setError(null);
+
+    try {
+      const updated = await api.webhookServer.updateSettings({
+        backendUrl: webhookServerForm.backendUrl,
+        pollingEnabled: webhookServerForm.pollingEnabled,
+        pollingIntervalSeconds: webhookServerForm.pollingIntervalSeconds,
+        ...(webhookServerToken.trim() ? { appSyncToken: webhookServerToken.trim() } : {})
+      });
+      setWebhookServerSettings(updated);
+      setWebhookServerToken("");
+      setRevealedWebhookServerToken(null);
+      setWebhookServerResult("Configuração salva.");
+    } catch (saveError) {
+      setWebhookServerResult(saveError instanceof Error ? saveError.message : "Falha ao salvar Webhook Server.");
+    } finally {
+      setWebhookServerBusy(null);
+    }
+  };
+
+  const testWebhookServerConnection = async (): Promise<void> => {
+    setWebhookServerBusy("testing");
+    setWebhookServerResult("Testando backend...");
+    setError(null);
+
+    try {
+      const result = await api.webhookServer.testConnection();
+      setWebhookServerResult(result.safeMessage);
+      await refreshWebhookServerSettings();
+    } catch (testError) {
+      setWebhookServerResult(testError instanceof Error ? testError.message : "Falha ao testar backend.");
+    } finally {
+      setWebhookServerBusy(null);
+    }
+  };
+
+  const sendWebhookServerTestEvent = async (): Promise<void> => {
+    setWebhookServerBusy("sendingTest");
+    setWebhookServerResult("Criando evento de teste...");
+    setError(null);
+
+    try {
+      const result = await api.webhookServer.sendTestEvent();
+      setWebhookServerResult(`Evento remoto ${result.id} criado.`);
+      await refreshWebhookServerSettings();
+    } catch (testError) {
+      setWebhookServerResult(testError instanceof Error ? testError.message : "Falha ao criar evento de teste.");
+    } finally {
+      setWebhookServerBusy(null);
+    }
+  };
+
+  const syncWebhookServerNow = async (): Promise<void> => {
+    setWebhookServerBusy("syncing");
+    setWebhookServerResult("Buscando eventos...");
+    setError(null);
+
+    try {
+      const summary = await api.webhookServer.syncEventsNow();
+      setWebhookServerSyncSummary(summary);
+      setWebhookServerResult(
+        summary.status === "failed"
+          ? summary.errors[0] ?? "Sync falhou."
+          : `${summary.eventsImported} evento(s) importado(s) de ${summary.eventsFound} recebido(s).`
+      );
+      await refreshWebhookServerSettings();
+    } catch (syncError) {
+      setWebhookServerResult(syncError instanceof Error ? syncError.message : "Falha ao buscar eventos.");
+    } finally {
+      setWebhookServerBusy(null);
+    }
+  };
+
+  const revealWebhookServerToken = async (): Promise<void> => {
+    const confirmed = window.confirm("Revelar o App Sync Token nesta tela?");
+    if (!confirmed) {
+      return;
+    }
+
+    setWebhookServerBusy("revealing");
+    setWebhookServerResult("");
+
+    try {
+      const result = await api.webhookServer.revealToken({ confirm: true });
+      setRevealedWebhookServerToken(result.token);
+      setWebhookServerResult("Token revelado nesta sessão.");
+      await refreshWebhookServerSettings();
+    } catch (revealError) {
+      setWebhookServerResult(revealError instanceof Error ? revealError.message : "Falha ao revelar token.");
+    } finally {
+      setWebhookServerBusy(null);
+    }
+  };
+
   const openNewUser = (): void => {
     setUserForm(emptyUserForm);
   };
@@ -452,6 +636,13 @@ export const SettingsPage = (): JSX.Element => {
       : gameMarketBusy === "syncing"
         ? "syncing"
         : gameMarketSettings?.connectionStatus ?? "not_configured";
+  const webhookServerCanCallApi = Boolean(webhookServerSettings?.backendUrl && webhookServerSettings.hasToken);
+  const webhookServerStatus =
+    webhookServerBusy === "testing"
+      ? "connecting"
+      : webhookServerBusy === "syncing" || webhookServerBusy === "sendingTest"
+        ? "syncing"
+        : webhookServerSettings?.connectionStatus ?? "not_configured";
 
   return (
     <div className="grid gap-6 xl:grid-cols-2">
@@ -768,6 +959,198 @@ export const SettingsPage = (): JSX.Element => {
               </div>
             ) : (
               <div className="mt-2 text-sm text-slate-400">Nenhuma sincronização registrada.</div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Webhook Server / Tempo Real</CardTitle>
+          <Badge tone={webhookServerStatusTone(webhookServerStatus)}>
+            {webhookServerStatusLabel[webhookServerStatus]}
+          </Badge>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                <Server size={16} className="text-cyan" />
+                Status da conexão
+              </div>
+              <div className="mt-2 text-sm text-slate-400">{webhookServerStatusLabel[webhookServerStatus]}</div>
+              <div className="mt-2 font-mono text-xs text-slate-500">
+                {webhookServerSettings?.tokenMasked ?? "token não salvo"}
+              </div>
+            </div>
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                <Link2 size={16} className="text-purple" />
+                Backend público
+              </div>
+              <div className="mt-2 break-all font-mono text-xs text-slate-500">
+                {webhookServerSettings?.backendUrl ?? "http://localhost:3001"}
+              </div>
+            </div>
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="text-sm font-semibold text-white">Última verificação</div>
+              <div className="mt-2 text-sm text-slate-400">
+                {formatDateTime(webhookServerSettings?.lastCheckedAt)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="text-sm font-semibold text-white">Último evento recebido</div>
+              <div className="mt-2 text-sm text-slate-400">
+                {formatDateTime(webhookServerSettings?.lastEventReceivedAt)}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-line bg-panelSoft p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-white">Configuração do backend</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  App desktop busca eventos por Bearer token; webhook público usa segredo na URL do Railway.
+                </div>
+              </div>
+              <Badge tone={webhookServerForm.pollingEnabled ? "success" : "neutral"}>
+                {webhookServerForm.pollingEnabled ? "polling ativo" : "polling off"}
+              </Badge>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Backend URL</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={webhookServerForm.backendUrl}
+                  onChange={(event) =>
+                    setWebhookServerForm({ ...webhookServerForm, backendUrl: event.target.value })
+                  }
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">App Sync Token</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  type="password"
+                  value={webhookServerToken}
+                  placeholder={webhookServerSettings?.tokenMasked ?? "Cole o token para salvar"}
+                  autoComplete="off"
+                  onChange={(event) => setWebhookServerToken(event.target.value)}
+                />
+              </label>
+              <label className="flex h-10 items-center justify-between rounded-md border border-line bg-panel px-3">
+                <span className="text-xs font-semibold text-slate-400">Polling ativado</span>
+                <input
+                  className="h-5 w-5 accent-cyan"
+                  type="checkbox"
+                  checked={webhookServerForm.pollingEnabled}
+                  onChange={(event) =>
+                    setWebhookServerForm({ ...webhookServerForm, pollingEnabled: event.target.checked })
+                  }
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Intervalo de polling (segundos)</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  type="number"
+                  min={15}
+                  max={3600}
+                  value={webhookServerForm.pollingIntervalSeconds}
+                  onChange={(event) =>
+                    setWebhookServerForm({
+                      ...webhookServerForm,
+                      pollingIntervalSeconds: Number(event.target.value)
+                    })
+                  }
+                />
+              </label>
+            </div>
+
+            {revealedWebhookServerToken && (
+              <div className="mt-4 rounded-md border border-amber-500/25 bg-amber-500/10 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">
+                  Token revelado
+                </div>
+                <input
+                  className="mt-2 w-full rounded-md border border-amber-500/25 bg-black/30 px-3 py-2 font-mono text-xs text-amber-100"
+                  readOnly
+                  value={revealedWebhookServerToken}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              disabled={webhookServerBusy !== null}
+              onClick={() => void saveWebhookServerSettings()}
+            >
+              <Save size={16} />
+              {webhookServerBusy === "saving" ? "Salvando..." : "Salvar configuração"}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={webhookServerBusy !== null || !webhookServerCanCallApi}
+              onClick={() => void testWebhookServerConnection()}
+            >
+              <Server size={16} />
+              {webhookServerBusy === "testing" ? "Testando..." : "Testar backend"}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={webhookServerBusy !== null || !webhookServerCanCallApi}
+              onClick={() => void sendWebhookServerTestEvent()}
+            >
+              <BellRing size={16} />
+              {webhookServerBusy === "sendingTest" ? "Enviando..." : "Enviar evento de teste"}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={webhookServerBusy !== null || !webhookServerCanCallApi}
+              onClick={() => void syncWebhookServerNow()}
+            >
+              <RefreshCw size={16} />
+              {webhookServerBusy === "syncing" ? "Buscando..." : "Buscar eventos agora"}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={webhookServerBusy !== null || !webhookServerSettings?.hasToken}
+              onClick={() => void revealWebhookServerToken()}
+            >
+              <Eye size={16} />
+              Revelar token
+            </Button>
+          </div>
+
+          <div className="rounded-lg border border-line bg-panelSoft p-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-white">
+              <LockKeyhole size={16} className="text-cyan" />
+              Último erro seguro
+            </div>
+            <div className="mt-2 text-sm leading-6 text-slate-400">
+              {webhookServerResult || webhookServerSettings?.lastError || "Sem erro registrado."}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-line bg-panelSoft p-4">
+            <div className="text-sm font-semibold text-white">Resumo da última busca</div>
+            {webhookServerSyncSummary ? (
+              <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-2">
+                <div>Eventos encontrados: {webhookServerSyncSummary.eventsFound}</div>
+                <div>Eventos importados: {webhookServerSyncSummary.eventsImported}</div>
+                <div>Eventos confirmados: {webhookServerSyncSummary.eventsAcked}</div>
+                <div>Duplicados ignorados: {webhookServerSyncSummary.duplicatesSkipped}</div>
+                <div>Notificações candidatas: {webhookServerSyncSummary.notificationsTriggered}</div>
+                <div>Duração: {webhookServerSyncSummary.durationMs} ms</div>
+                <div>Status: {webhookServerSyncSummary.status}</div>
+              </div>
+            ) : (
+              <div className="mt-2 text-sm text-slate-400">Nenhuma busca registrada.</div>
             )}
           </div>
         </CardContent>

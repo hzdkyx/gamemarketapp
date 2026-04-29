@@ -155,7 +155,7 @@ export const events = sqliteTable("events", {
   id: text("id").primaryKey(),
   eventCode: text("event_code").notNull().unique(),
   source: text("source", {
-    enum: ["manual", "system", "gamemarket_api", "gamemarket_future", "webhook_future"]
+    enum: ["manual", "system", "gamemarket_api", "gamemarket_future", "webhook_future", "webhook_server"]
   }).notNull(),
   type: text("type", {
     enum: [
@@ -187,6 +187,18 @@ export const events = sqliteTable("events", {
       "integration.gamemarket.order_updated",
       "integration.gamemarket.product_imported",
       "integration.gamemarket.product_updated",
+      "integration.webhook_server.settings_updated",
+      "integration.webhook_server.connection_tested",
+      "integration.webhook_server.connection_failed",
+      "integration.webhook_server.token_revealed",
+      "integration.webhook_server.sync_started",
+      "integration.webhook_server.sync_completed",
+      "integration.webhook_server.sync_failed",
+      "integration.webhook_server.test_event_sent",
+      "integration.webhook_server.event_imported",
+      "integration.webhook_server.review_received",
+      "integration.webhook_server.variant_sold_out",
+      "integration.webhook_server.unknown_event",
       "system.notification_test"
     ]
   }).notNull(),
@@ -222,6 +234,16 @@ export const notificationRules = sqliteTable("notification_rules", {
   highlight: integer("highlight", { mode: "boolean" }).notNull().default(true),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull()
+});
+
+export const webhookServerEventImports = sqliteTable("webhook_server_event_imports", {
+  dedupeKey: text("dedupe_key").primaryKey(),
+  remoteEventId: text("remote_event_id").notNull(),
+  externalEventId: text("external_event_id"),
+  payloadHash: text("payload_hash").notNull(),
+  eventType: text("event_type").notNull(),
+  importedEventId: text("imported_event_id").references(() => events.id),
+  importedAt: text("imported_at").notNull()
 });
 
 export const productRelations = relations(products, ({ many }) => ({

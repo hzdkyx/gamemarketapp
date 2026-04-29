@@ -51,12 +51,69 @@ Os schemas Zod aceitam campos extras com `passthrough`, mas validam os campos do
 
 ## Webhooks
 
-Nao foi encontrada secao de webhooks na documentacao local lida. Por isso:
+Nao foi encontrada secao formal de webhooks na documentacao local lida. A UI da GameMarket, porem, mostra criacao de webhook com URL, descricao e selecao de eventos.
 
-- nenhum servidor publico foi criado;
-- nenhum endpoint de webhook foi implementado;
-- nenhum nome oficial de evento externo foi inventado;
-- nenhuma validacao de assinatura/HMAC foi implementada.
+Eventos visiveis na UI:
+
+Produtos:
+
+- Produto Criado
+- Produto Aprovado
+- Produto Rejeitado
+- Sem Estoque
+- Variante Esgotada
+
+Pedidos:
+
+- Pedido Criado
+- Venda Confirmada
+- Pedido Entregue
+- Pedido Concluido
+- Pedido Cancelado
+
+Financeiro:
+
+- Saldo Atualizado
+- Fundos Liberados
+- Saque Solicitado
+- Saque Concluido
+- Saque Rejeitado
+- Reembolso Iniciado
+
+Mediacao e avaliacoes:
+
+- Mediacao Aberta
+- Mediacao Atualizada
+- Mediacao Resolvida
+- Avaliacao Recebida
+
+Estrategia implementada na Fase 5:
+
+- receber `POST /webhooks/gamemarket/:secret`;
+- validar `WEBHOOK_INGEST_SECRET` pela URL cadastrada no painel;
+- salvar payload bruto somente mascarado;
+- salvar headers filtrados, IP/origem, user-agent, hash SHA-256 e timestamps;
+- normalizar apenas quando campos claros indicarem evento;
+- salvar como `gamemarket.unknown` se o payload real vier diferente;
+- expor sync protegido para o app desktop por `Authorization: Bearer APP_SYNC_TOKEN`;
+- nao automatizar entrega.
+
+Eventos prioritarios para cadastrar primeiro:
+
+- Venda Confirmada
+- Mediacao Aberta
+- Reembolso Iniciado
+- Avaliacao Recebida
+- Sem Estoque
+- Variante Esgotada
+
+Depois de validar volume e ruido:
+
+- Pedido Criado
+- Pedido Entregue
+- Pedido Concluido
+- Pedido Cancelado
+- Fundos Liberados
 
 ## Duvidas abertas
 

@@ -717,5 +717,128 @@ export const runtimeMigrations: RuntimeMigration[] = [
 
       PRAGMA foreign_keys = ON;
     `
+  },
+  {
+    id: "0005_phase5_webhook_server",
+    sql: `
+      PRAGMA foreign_keys = OFF;
+
+      CREATE TABLE events_new (
+        id TEXT PRIMARY KEY,
+        event_code TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL CHECK (source IN ('manual', 'system', 'gamemarket_api', 'gamemarket_future', 'webhook_future', 'webhook_server')),
+        type TEXT NOT NULL CHECK (type IN (
+          'order.created',
+          'order.payment_confirmed',
+          'order.awaiting_delivery',
+          'order.delivered',
+          'order.completed',
+          'order.cancelled',
+          'order.refunded',
+          'order.mediation',
+          'order.problem',
+          'inventory.reserved',
+          'inventory.released',
+          'inventory.sold',
+          'inventory.delivered',
+          'inventory.problem',
+          'product.low_stock',
+          'product.out_of_stock',
+          'security.secret_revealed',
+          'integration.gamemarket.settings_updated',
+          'integration.gamemarket.connection_tested',
+          'integration.gamemarket.connection_failed',
+          'integration.gamemarket.token_revealed',
+          'integration.gamemarket.sync_started',
+          'integration.gamemarket.sync_completed',
+          'integration.gamemarket.sync_failed',
+          'integration.gamemarket.order_imported',
+          'integration.gamemarket.order_updated',
+          'integration.gamemarket.product_imported',
+          'integration.gamemarket.product_updated',
+          'integration.webhook_server.settings_updated',
+          'integration.webhook_server.connection_tested',
+          'integration.webhook_server.connection_failed',
+          'integration.webhook_server.token_revealed',
+          'integration.webhook_server.sync_started',
+          'integration.webhook_server.sync_completed',
+          'integration.webhook_server.sync_failed',
+          'integration.webhook_server.test_event_sent',
+          'integration.webhook_server.event_imported',
+          'integration.webhook_server.review_received',
+          'integration.webhook_server.variant_sold_out',
+          'integration.webhook_server.unknown_event',
+          'system.notification_test'
+        )),
+        severity TEXT NOT NULL DEFAULT 'info' CHECK (severity IN ('info', 'success', 'warning', 'critical')),
+        title TEXT NOT NULL,
+        message TEXT,
+        order_id TEXT REFERENCES orders(id) ON DELETE SET NULL,
+        product_id TEXT REFERENCES products(id) ON DELETE SET NULL,
+        inventory_item_id TEXT REFERENCES inventory_items(id) ON DELETE SET NULL,
+        actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        read_at TEXT,
+        raw_payload TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      INSERT INTO events_new (
+        id,
+        event_code,
+        source,
+        type,
+        severity,
+        title,
+        message,
+        order_id,
+        product_id,
+        inventory_item_id,
+        actor_user_id,
+        read_at,
+        raw_payload,
+        created_at
+      )
+      SELECT
+        id,
+        event_code,
+        source,
+        type,
+        severity,
+        title,
+        message,
+        order_id,
+        product_id,
+        inventory_item_id,
+        actor_user_id,
+        read_at,
+        raw_payload,
+        created_at
+      FROM events;
+
+      DROP TABLE events;
+      ALTER TABLE events_new RENAME TO events;
+
+      CREATE TABLE IF NOT EXISTS webhook_server_event_imports (
+        dedupe_key TEXT PRIMARY KEY,
+        remote_event_id TEXT NOT NULL,
+        external_event_id TEXT,
+        payload_hash TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        imported_event_id TEXT REFERENCES events(id) ON DELETE SET NULL,
+        imported_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
+      CREATE INDEX IF NOT EXISTS idx_events_read ON events(read_at);
+      CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
+      CREATE INDEX IF NOT EXISTS idx_events_order ON events(order_id);
+      CREATE INDEX IF NOT EXISTS idx_events_product ON events(product_id);
+      CREATE INDEX IF NOT EXISTS idx_events_inventory_item ON events(inventory_item_id);
+      CREATE INDEX IF NOT EXISTS idx_events_actor ON events(actor_user_id);
+      CREATE INDEX IF NOT EXISTS idx_webhook_server_imports_remote_event ON webhook_server_event_imports(remote_event_id);
+      CREATE INDEX IF NOT EXISTS idx_webhook_server_imports_payload_hash ON webhook_server_event_imports(payload_hash);
+
+      PRAGMA foreign_keys = ON;
+    `
   }
 ];

@@ -50,7 +50,8 @@ export const eventSourceValues = [
   "system",
   "gamemarket_api",
   "gamemarket_future",
-  "webhook_future"
+  "webhook_future",
+  "webhook_server"
 ] as const;
 export const eventSeverityValues = ["info", "success", "warning", "critical"] as const;
 export const eventTypeValues = [
@@ -82,6 +83,18 @@ export const eventTypeValues = [
   "integration.gamemarket.order_updated",
   "integration.gamemarket.product_imported",
   "integration.gamemarket.product_updated",
+  "integration.webhook_server.settings_updated",
+  "integration.webhook_server.connection_tested",
+  "integration.webhook_server.connection_failed",
+  "integration.webhook_server.token_revealed",
+  "integration.webhook_server.sync_started",
+  "integration.webhook_server.sync_completed",
+  "integration.webhook_server.sync_failed",
+  "integration.webhook_server.test_event_sent",
+  "integration.webhook_server.event_imported",
+  "integration.webhook_server.review_received",
+  "integration.webhook_server.variant_sold_out",
+  "integration.webhook_server.unknown_event",
   "system.notification_test"
 ] as const;
 export const eventReadFilterValues = ["all", "read", "unread"] as const;
@@ -90,6 +103,17 @@ export const gamemarketConnectionStatusValues = [
   "not_configured",
   "configured",
   "docs_missing",
+  "connecting",
+  "connected",
+  "error",
+  "syncing",
+  "synced",
+  "partial",
+  "unavailable"
+] as const;
+export const webhookServerConnectionStatusValues = [
+  "not_configured",
+  "configured",
   "connecting",
   "connected",
   "error",
@@ -152,6 +176,7 @@ export const userRoleSchema = z.enum(userRoleValues);
 export const userStatusSchema = z.enum(userStatusValues);
 export const gamemarketEnvironmentSchema = z.enum(gamemarketEnvironmentValues);
 export const gamemarketConnectionStatusSchema = z.enum(gamemarketConnectionStatusValues);
+export const webhookServerConnectionStatusSchema = z.enum(webhookServerConnectionStatusValues);
 
 export const productCreateInputSchema = z
   .object({
@@ -435,6 +460,33 @@ export const gamemarketRevealTokenInputSchema = z
 
 export const gamemarketEmptyInputSchema = z.object({}).strict();
 
+export const webhookServerSettingsUpdateInputSchema = z
+  .object({
+    backendUrl: z
+      .string()
+      .trim()
+      .url("Informe uma URL válida.")
+      .max(500)
+      .optional(),
+    appSyncToken: z.string().trim().min(8, "Token muito curto.").max(500).optional(),
+    clearToken: z.boolean().optional(),
+    pollingEnabled: z.boolean().optional(),
+    pollingIntervalSeconds: z.number().int().min(15).max(3600).optional()
+  })
+  .strict()
+  .refine((input) => !(input.appSyncToken && input.clearToken), {
+    path: ["clearToken"],
+    message: "Não é possível salvar e remover o token na mesma operação."
+  });
+
+export const webhookServerRevealTokenInputSchema = z
+  .object({
+    confirm: z.literal(true)
+  })
+  .strict();
+
+export const webhookServerEmptyInputSchema = z.object({}).strict();
+
 export const authLoginInputSchema = z
   .object({
     username: usernameSchema,
@@ -535,6 +587,7 @@ export type EventType = (typeof eventTypeValues)[number];
 export type EventReadFilter = (typeof eventReadFilterValues)[number];
 export type GameMarketEnvironment = (typeof gamemarketEnvironmentValues)[number];
 export type GameMarketConnectionStatus = (typeof gamemarketConnectionStatusValues)[number];
+export type WebhookServerConnectionStatus = (typeof webhookServerConnectionStatusValues)[number];
 
 export type ProductCreateInput = z.infer<typeof productCreateInputSchema>;
 export type ProductUpdateData = z.infer<typeof productUpdateDataSchema>;
@@ -558,6 +611,8 @@ export type NotificationSettings = z.infer<typeof notificationSettingsSchema>;
 export type NotificationSettingsUpdateInput = z.infer<typeof notificationSettingsUpdateInputSchema>;
 export type GameMarketSettingsUpdateInput = z.infer<typeof gamemarketSettingsUpdateInputSchema>;
 export type GameMarketRevealTokenInput = z.infer<typeof gamemarketRevealTokenInputSchema>;
+export type WebhookServerSettingsUpdateInput = z.infer<typeof webhookServerSettingsUpdateInputSchema>;
+export type WebhookServerRevealTokenInput = z.infer<typeof webhookServerRevealTokenInputSchema>;
 export type AuthLoginInput = z.infer<typeof authLoginInputSchema>;
 export type AuthSetupAdminInput = z.infer<typeof authSetupAdminInputSchema>;
 export type AuthChangePasswordInput = z.infer<typeof authChangePasswordInputSchema>;
@@ -851,4 +906,68 @@ export interface GameMarketSyncSummary {
   ordersNew: number;
   ordersUpdated: number;
   errors: string[];
+}
+
+export interface WebhookServerSettingsView {
+  backendUrl: string;
+  hasToken: boolean;
+  tokenMasked: string | null;
+  connectionStatus: WebhookServerConnectionStatus;
+  pollingEnabled: boolean;
+  pollingIntervalSeconds: number;
+  lastCheckedAt: string | null;
+  lastSyncAt: string | null;
+  lastEventReceivedAt: string | null;
+  lastError: string | null;
+}
+
+export interface WebhookServerConnectionTestResult {
+  ok: boolean;
+  status: WebhookServerConnectionStatus;
+  checkedAt: string;
+  endpoint: string | null;
+  safeMessage: string;
+}
+
+export interface WebhookServerEventItem {
+  id: string;
+  externalEventId: string | null;
+  eventType: string;
+  source: string;
+  severity: EventSeverity;
+  title: string;
+  message: string;
+  payloadHash: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  ackedAt: string | null;
+  createdAt: string;
+  receivedAt: string;
+  hasRawPayload: boolean;
+}
+
+export interface WebhookServerEventDetail extends WebhookServerEventItem {
+  rawPayloadMasked: unknown;
+  headersMasked: Record<string, unknown>;
+}
+
+export interface WebhookServerSyncSummary {
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  status: "synced" | "partial" | "failed";
+  eventsFound: number;
+  eventsImported: number;
+  eventsAcked: number;
+  duplicatesSkipped: number;
+  notificationsTriggered: number;
+  errors: string[];
+}
+
+export interface WebhookServerTestEventResult {
+  ok: boolean;
+  id: string;
+  eventType: string;
+  severity: EventSeverity;
+  message: string;
 }

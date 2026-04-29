@@ -49,6 +49,7 @@ As migrations runtime estão em `apps/desktop/src/main/database/migrations.ts`:
 - `0002_phase3_orders_events`: recria pedidos e eventos com snapshots financeiros, vínculos com estoque/produto, timeline e índices de consulta.
 - `0003_phase35_auth_users_audit`: adiciona `users`, colunas de auditoria por usuário e o evento `security.secret_revealed`.
 - `0004_phase4_gamemarket_api`: adiciona metadados externos em produtos/pedidos e amplia eventos internos da integração GameMarket.
+- `0005_phase5_webhook_server`: amplia eventos internos para Webhook Server e cria `webhook_server_event_imports` para deduplicar importações remotas.
 
 A tabela `schema_migrations` registra o que já foi aplicado. O app executa migrations na inicialização do main process.
 
@@ -140,9 +141,21 @@ Eventos são auditoria local do app. Os tipos iniciais são controlados em `cont
 - `integration.gamemarket.order_updated`
 - `integration.gamemarket.product_imported`
 - `integration.gamemarket.product_updated`
+- `integration.webhook_server.settings_updated`
+- `integration.webhook_server.connection_tested`
+- `integration.webhook_server.connection_failed`
+- `integration.webhook_server.token_revealed`
+- `integration.webhook_server.sync_started`
+- `integration.webhook_server.sync_completed`
+- `integration.webhook_server.sync_failed`
+- `integration.webhook_server.test_event_sent`
+- `integration.webhook_server.event_imported`
+- `integration.webhook_server.review_received`
+- `integration.webhook_server.variant_sold_out`
+- `integration.webhook_server.unknown_event`
 - `system.notification_test`
 
-`gamemarket_api` identifica eventos criados pela integração local de leitura. `gamemarket_future` e `webhook_future` continuam reservados para normalização futura.
+`gamemarket_api` identifica eventos criados pela integração local de leitura. `webhook_server` identifica eventos importados do backend público. `gamemarket_future` e `webhook_future` continuam reservados para normalização futura.
 
 Payload bruto é opcional, limitado e passa por mascaramento de chaves sensíveis como senha, token, secret, key e login.
 
@@ -286,6 +299,16 @@ GameMarket API:
 - `gamemarket:syncNow`
 - `gamemarket:getLastSyncSummary`
 
+Webhook Server:
+
+- `webhookServer:getSettings`
+- `webhookServer:updateSettings`
+- `webhookServer:revealToken`
+- `webhookServer:testConnection`
+- `webhookServer:sendTestEvent`
+- `webhookServer:syncEventsNow`
+- `webhookServer:getLastSyncSummary`
+
 Autenticação e usuários:
 
 - `auth:getBootstrap`
@@ -380,33 +403,48 @@ Configuração:
 
 O SQLite fica em `app.getPath("userData")`, portanto o caminho continua válido no app empacotado. As migrations rodam no main process durante a inicialização, tanto em desenvolvimento quanto no build.
 
-## Arquitetura Final Proposta
+## Webhook Server da Fase 5
 
-Fases futuras adicionam backend público para webhooks e integração GameMarket real:
+O app desktop não é endpoint direto de webhook porque não tem URL pública estável, TLS público, disponibilidade contínua, retry externo nem isolamento apropriado para receber tráfego da internet. A Fase 5 usa um backend público pequeno para receber eventos e o desktop continua puxando dados de forma autenticada.
 
 ```mermaid
 flowchart LR
-  GM["GameMarket"] --> WH["Backend público de webhooks"]
-  WH --> BackendDB["Banco do backend"]
-  Desktop["App desktop"] --> WH
-  WH --> Desktop
+  GM["GameMarket UI Webhook"] --> WH["Railway webhook-server"]
+  WH --> PG["PostgreSQL Railway"]
+  Desktop["App desktop"] -->|"Bearer APP_SYNC_TOKEN"| WH
+  Desktop --> Events["Eventos locais"]
   Desktop --> LocalDB["SQLite local"]
   Desktop --> Notify["Notificação desktop"]
 ```
 
-O app local não será endpoint direto de webhook. O backend público fará recepção, normalização e sincronização controlada.
+Servidor:
 
-## Estratégia Futura para Webhooks
+- `POST /webhooks/gamemarket/:secret` valida `WEBHOOK_INGEST_SECRET` por comparação segura.
+- `GET /api/events`, `GET /api/events/:id`, `PATCH /api/events/:id/ack` exigem `Authorization: Bearer APP_SYNC_TOKEN`.
+- `POST /api/test-events` cria eventos de teste protegidos pelo mesmo token.
+- Payload bruto é salvo somente mascarado.
+- Headers são filtrados e `authorization`, `cookie`, `token`, `password`, `secret`, `login` e emails são mascarados.
+- Produção exige `DATABASE_URL`; o fallback local em arquivo JSON é apenas para desenvolvimento.
 
-Quando houver documentação oficial:
+Desktop:
 
-1. Receber webhooks em backend público.
-2. Validar assinatura/autenticidade conforme especificação oficial.
-3. Normalizar payload real para eventos internos já existentes ou novos tipos versionados.
-4. Sincronizar com o desktop sem expor segredos locais.
-5. Preservar o payload bruto somente quando necessário e sempre mascarado.
+- Salva Backend URL e App Sync Token em **Configurações → Webhook Server / Tempo Real**.
+- Token fica criptografado via `safeStorage` ou fallback AES-GCM local.
+- Sync importa eventos remotos para `events`.
+- `webhook_server_event_imports` evita duplicar eventos já importados.
+- Eventos prioritários geram notificação local/fallback conforme as regras já existentes.
 
-Nenhum endpoint da GameMarket foi inventado na Fase 4.
+## Normalização de Webhooks
+
+A documentação local da GameMarket não contém payload formal de webhook. A UI mostra eventos selecionáveis, então a estratégia é progressiva:
+
+1. Receber e persistir qualquer JSON aceito.
+2. Mapear apenas quando campos claros indicarem evento (`event`, `type`, `event_type`, `action`, `category`, `resource`, `status`, `data`, `payload`).
+3. Salvar `gamemarket.unknown` quando a estrutura for inesperada.
+4. Analisar payloads reais depois sem expor token, cookie, senha, login ou email.
+5. Ajustar o normalizador sem automatizar entrega.
+
+Nenhum endpoint novo da GameMarket foi inventado na Fase 5.
 
 ## Estratégia Futura para WhatsApp
 

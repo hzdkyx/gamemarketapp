@@ -4,7 +4,7 @@ Aplicativo desktop para Windows, em Electron + React + TypeScript, para organiza
 
 ## Status
 
-Fase 4 implementada com base segura para integração oficial de leitura da GameMarket.
+Fase 5 implementada com backend público para captura segura de webhooks GameMarket e sync para o desktop.
 
 - CRUD local de produtos usando SQLite.
 - CRUD local de itens de estoque vinculados a produtos.
@@ -30,8 +30,17 @@ Fase 4 implementada com base segura para integração oficial de leitura da Game
 - Client HTTP isolado no main process, com timeout, Zod e erros seguros.
 - Teste de conexão por endpoint documentado de leitura.
 - Sync manual de produtos e pedidos por endpoints documentados, sem escrita na API.
+- Backend `apps/webhook-server` em Node.js + TypeScript + Fastify.
+- Recepção de `POST /webhooks/gamemarket/:secret` com segredo forte na URL.
+- Persistência de eventos do webhook-server em PostgreSQL na produção e arquivo local apenas em desenvolvimento.
+- Normalização defensiva de eventos GameMarket sem assumir payload não documentado.
+- Payload bruto mascarado, headers filtrados, hash SHA-256 e ack/read status.
+- Configurações → Webhook Server / Tempo Real no app desktop.
+- App Sync Token protegido localmente e mascarado por padrão.
+- Sync backend → desktop por `GET /api/events`, importando eventos locais e notificações.
+- Railway documentado em `docs/railway-webhook-deploy.md`.
 
-A integração não faz scraping, não cria endpoint não documentado, não implementa webhooks e não usa a chave para escrita.
+A integração não faz scraping, não cria endpoint inventado da GameMarket, não automatiza entrega e não usa a chave para escrita.
 
 ## Como Rodar
 
@@ -55,6 +64,41 @@ npm run lint
 npm run test
 npm run build
 ```
+
+## Webhook Server Local
+
+O backend público da Fase 5 fica em `apps/webhook-server`.
+
+1. Copie `apps/webhook-server/.env.example` para `apps/webhook-server/.env`.
+2. Defina valores longos para `WEBHOOK_INGEST_SECRET` e `APP_SYNC_TOKEN`.
+3. Rode:
+
+```bash
+npm run dev --workspace @hzdk/webhook-server
+```
+
+Healthcheck:
+
+```bash
+curl http://localhost:3001/health
+```
+
+Webhook fake:
+
+```bash
+curl -X POST "http://localhost:3001/webhooks/gamemarket/SEU_WEBHOOK_INGEST_SECRET" \
+  -H "Content-Type: application/json" \
+  -d "{\"event\":\"Venda Confirmada\",\"event_id\":\"teste-1\",\"order_id\":\"pedido-externo-1\"}"
+```
+
+Listar eventos pelo token do app:
+
+```bash
+curl "http://localhost:3001/api/events?unreadOnly=true&limit=20" \
+  -H "Authorization: Bearer SEU_APP_SYNC_TOKEN"
+```
+
+Em produção, `NODE_ENV=production` exige `DATABASE_URL`, `WEBHOOK_INGEST_SECRET` e `APP_SYNC_TOKEN` fortes. Sem `DATABASE_URL`, o servidor falha de propósito para evitar storage em filesystem efêmero da Railway.
 
 ## Primeiro Acesso e Login
 
@@ -214,9 +258,56 @@ Limitações da Fase 4:
 
 - Não cria, edita ou exclui produtos via API.
 - Não implementa automação de entrega.
-- Não implementa WhatsApp, Telegram, Railway ou backend online.
-- Não implementa webhooks porque a documentação local lida não contém seção de webhooks.
+- Não implementa WhatsApp, Telegram, Discord ou entrega automática.
 - Pedidos importados mantêm o status externo em metadados; não há mapeamento automático de status operacional sem tabela oficial.
+
+## Webhook Server / Tempo Real
+
+A Fase 5 adiciona uma ponte segura para eventos que a GameMarket mostra na UI de webhooks, mesmo sem payload formal documentado localmente.
+
+Fluxo:
+
+1. GameMarket envia evento para `https://URL-RAILWAY/webhooks/gamemarket/WEBHOOK_INGEST_SECRET`.
+2. O backend valida o segredo, mascara payload/headers, calcula hash e salva o evento.
+3. O desktop busca eventos com `Authorization: Bearer APP_SYNC_TOKEN`.
+4. Eventos são importados para a tela **Eventos**.
+5. Eventos prioritários disparam notificação desktop/fallback visual conforme configuração local.
+6. O desktop marca o evento remoto como `ack` após importar ou detectar duplicidade.
+
+Como configurar no desktop:
+
+1. Abra **Configurações → Webhook Server / Tempo Real** com usuário admin.
+2. Preencha **Backend URL** com a URL local ou Railway.
+3. Cole o **App Sync Token**.
+4. Salve.
+5. Use **Testar backend** para validar `/health`.
+6. Use **Enviar evento de teste** para criar um evento remoto.
+7. Use **Buscar eventos agora** para importar eventos para o SQLite local.
+8. Ative polling somente depois de validar manualmente.
+
+Eventos priorizados para o painel GameMarket:
+
+- Venda Confirmada
+- Mediação Aberta
+- Reembolso Iniciado
+- Avaliação Recebida
+- Sem Estoque
+- Variante Esgotada
+
+Depois de estabilizar o volume, adicionar:
+
+- Pedido Criado
+- Pedido Entregue
+- Pedido Concluído
+- Pedido Cancelado
+- Fundos Liberados
+
+Limitações da Fase 5:
+
+- O payload oficial de webhook ainda não está documentado localmente.
+- O normalizador só mapeia campos claros (`event`, `type`, `event_type`, `action`, `category`, `resource`, `status`, `data`, `payload`).
+- Payload desconhecido vira `gamemarket.unknown` sem quebrar.
+- Não há WhatsApp, Telegram, Discord, scraping ou entrega automática.
 
 ## Notificações Locais
 
@@ -296,14 +387,14 @@ Não faça commit de:
 - `apps/desktop/src/main/ipc`: canais IPC validados por Zod.
 - `apps/desktop/src/shared`: contratos Zod e utilitários compartilhados do app desktop.
 - `packages/shared`: fórmulas financeiras e formatação reutilizável.
-- `apps/webhook-server`: reservado para backend público de webhooks em fases futuras.
+- `apps/webhook-server`: backend público Fastify para webhooks GameMarket e sync protegido para o desktop.
 - `docs/gamemarket-api`: local para documentação oficial da GameMarket.
 
 ## Limitações Atuais
 
 - A API GameMarket está limitada a leitura documentada e sync manual.
-- Não há webhooks reais.
-- Não há WhatsApp, backend online ou sincronização remota.
+- Webhooks dependem de cadastrar manualmente a URL pública no painel da GameMarket.
+- Não há WhatsApp, Telegram, Discord ou entrega automática.
 - Não há integração com fornecedor nem automação de entrega.
 - Pedidos locais continuam operacionais/manual review; eventos são internos do app.
 - Não há automação de entrega real nem scraping.
@@ -311,7 +402,6 @@ Não faça commit de:
 
 ## Próximas Fases
 
-1. Fase 5: backend público para webhooks, preferencialmente na Railway.
-2. Fase 6: notificações em tempo real e canais externos.
+1. Fase 6: notificações avançadas e canais externos como WhatsApp/Telegram.
 3. Fase 7: automação de entrega somente após contratos oficiais e revisão de segurança.
 4. Fase 8: build final `.exe` e rotina de atualização.

@@ -1,5 +1,5 @@
 import type { HzdKyxDesktopApi } from "../../../preload";
-import type { GameMarketSettingsView } from "../../../shared/contracts";
+import type { GameMarketSettingsView, WebhookServerSettingsView } from "../../../shared/contracts";
 
 const unavailable = async (): Promise<never> => {
   throw new Error("Electron preload indisponível no preview web.");
@@ -207,6 +207,49 @@ const fallbackApi: HzdKyxDesktopApi = {
       productsUpdated: 0,
       ordersNew: 0,
       ordersUpdated: 0,
+      errors: ["Sync exige execução no Electron."]
+    }),
+    getLastSyncSummary: async () => null
+  },
+  webhookServer: {
+    getSettings: async (): Promise<WebhookServerSettingsView> => ({
+      backendUrl: "http://localhost:3001",
+      hasToken: false,
+      tokenMasked: null,
+      connectionStatus: "not_configured",
+      pollingEnabled: false,
+      pollingIntervalSeconds: 60,
+      lastCheckedAt: null,
+      lastSyncAt: null,
+      lastEventReceivedAt: null,
+      lastError: "Electron preload indisponível no preview web."
+    }),
+    updateSettings: unavailable,
+    revealToken: unavailable,
+    testConnection: async () => ({
+      ok: false,
+      status: "unavailable",
+      checkedAt: new Date().toISOString(),
+      endpoint: null,
+      safeMessage: "Teste exige execução no Electron."
+    }),
+    sendTestEvent: async () => ({
+      ok: false,
+      id: "",
+      eventType: "gamemarket.unknown",
+      severity: "warning",
+      message: "Teste exige execução no Electron."
+    }),
+    syncEventsNow: async () => ({
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 0,
+      status: "failed",
+      eventsFound: 0,
+      eventsImported: 0,
+      eventsAcked: 0,
+      duplicatesSkipped: 0,
+      notificationsTriggered: 0,
       errors: ["Sync exige execução no Electron."]
     }),
     getLastSyncSummary: async () => null

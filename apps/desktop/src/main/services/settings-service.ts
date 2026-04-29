@@ -9,9 +9,13 @@ const defaultEnabledEventTypes = Object.fromEntries(
     [
       "order.payment_confirmed",
       "order.mediation",
+      "order.refunded",
       "order.problem",
       "product.low_stock",
       "product.out_of_stock",
+      "integration.webhook_server.review_received",
+      "integration.webhook_server.variant_sold_out",
+      "integration.webhook_server.unknown_event",
       "system.notification_test"
     ].includes(type)
   ])

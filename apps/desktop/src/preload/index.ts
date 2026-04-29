@@ -40,7 +40,13 @@ import type {
   UserCreateInput,
   UserRecord,
   UserResetPasswordInput,
-  UserUpdateInput
+  UserUpdateInput,
+  WebhookServerConnectionTestResult,
+  WebhookServerRevealTokenInput,
+  WebhookServerSettingsUpdateInput,
+  WebhookServerSettingsView,
+  WebhookServerSyncSummary,
+  WebhookServerTestEventResult
 } from "../shared/contracts";
 
 const api = {
@@ -181,6 +187,25 @@ const api = {
     syncNow: () => ipcRenderer.invoke("gamemarket:syncNow", {}) as Promise<GameMarketSyncSummary>,
     getLastSyncSummary: () =>
       ipcRenderer.invoke("gamemarket:getLastSyncSummary", {}) as Promise<GameMarketSyncSummary | null>
+  },
+  webhookServer: {
+    getSettings: () =>
+      ipcRenderer.invoke("webhookServer:getSettings") as Promise<WebhookServerSettingsView>,
+    updateSettings: (payload: WebhookServerSettingsUpdateInput) =>
+      ipcRenderer.invoke("webhookServer:updateSettings", payload) as Promise<WebhookServerSettingsView>,
+    revealToken: (payload: WebhookServerRevealTokenInput) =>
+      ipcRenderer.invoke("webhookServer:revealToken", payload) as Promise<{
+        token: string;
+        tokenMasked: string | null;
+      }>,
+    testConnection: () =>
+      ipcRenderer.invoke("webhookServer:testConnection", {}) as Promise<WebhookServerConnectionTestResult>,
+    sendTestEvent: () =>
+      ipcRenderer.invoke("webhookServer:sendTestEvent", {}) as Promise<WebhookServerTestEventResult>,
+    syncEventsNow: () =>
+      ipcRenderer.invoke("webhookServer:syncEventsNow", {}) as Promise<WebhookServerSyncSummary>,
+    getLastSyncSummary: () =>
+      ipcRenderer.invoke("webhookServer:getLastSyncSummary", {}) as Promise<WebhookServerSyncSummary | null>
   }
 };
 

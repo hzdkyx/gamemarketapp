@@ -10,7 +10,9 @@ import {
   orderCreateInputSchema,
   productCreateInputSchema,
   productListInputSchema,
-  userCreateInputSchema
+  userCreateInputSchema,
+  webhookServerRevealTokenInputSchema,
+  webhookServerSettingsUpdateInputSchema
 } from "./contracts";
 
 describe("product contracts", () => {
@@ -146,6 +148,31 @@ describe("GameMarket contracts", () => {
   it("requires explicit confirmation to reveal token", () => {
     expect(gamemarketRevealTokenInputSchema.parse({ confirm: true }).confirm).toBe(true);
     expect(() => gamemarketRevealTokenInputSchema.parse({ confirm: false })).toThrow();
+  });
+});
+
+describe("Webhook Server contracts", () => {
+  it("validates backend settings and polling bounds", () => {
+    const parsed = webhookServerSettingsUpdateInputSchema.parse({
+      backendUrl: "http://localhost:3001",
+      appSyncToken: "test-sync-token",
+      pollingEnabled: true,
+      pollingIntervalSeconds: 30
+    });
+
+    expect(parsed.backendUrl).toBe("http://localhost:3001");
+    expect(parsed.pollingEnabled).toBe(true);
+  });
+
+  it("rejects unsafe polling intervals and requires explicit token reveal", () => {
+    expect(() =>
+      webhookServerSettingsUpdateInputSchema.parse({
+        backendUrl: "http://localhost:3001",
+        pollingIntervalSeconds: 5
+      })
+    ).toThrow();
+    expect(webhookServerRevealTokenInputSchema.parse({ confirm: true }).confirm).toBe(true);
+    expect(() => webhookServerRevealTokenInputSchema.parse({ confirm: false })).toThrow();
   });
 });
 
