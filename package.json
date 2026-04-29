@@ -1,0 +1,27 @@
+{
+  "name": "hzdk-gamemarket-manager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop operations manager for GameMarket sales, stock and financial analytics.",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "postinstall": "npm run rebuild:native --workspace @hzdk/gamemarket-desktop",
+    "dev": "npm run dev --workspace @hzdk/gamemarket-desktop",
+    "build": "npm run build --workspaces --if-present",
+    "dist": "npm run dist --workspace @hzdk/gamemarket-desktop",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "format": "npm run format --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "devDependencies": {
+    "electron": "^39.2.7"
+  }
+}

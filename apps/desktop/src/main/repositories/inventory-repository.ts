@@ -1,0 +1,434 @@
+import { getSqliteDatabase } from "../database/database";
+import type {
+  InventoryListInput,
+  InventoryRecord,
+  InventoryStatus
+} from "../../shared/contracts";
+
+interface InventoryJoinedRow {
+  id: string;
+  inventory_code: string;
+  product_id: string | null;
+  product_name: string | null;
+  product_internal_code: string | null;
+  category: string | null;
+  game: string | null;
+  product_net_value_cents: number | null;
+  supplier_id: string | null;
+  purchase_cost_cents: number;
+  status: InventoryStatus;
+  account_login_encrypted: string | null;
+  account_password_encrypted: string | null;
+  account_email_encrypted: string | null;
+  account_email_password_encrypted: string | null;
+  access_notes_encrypted: string | null;
+  public_notes: string | null;
+  bought_at: string | null;
+  sold_at: string | null;
+  delivered_at: string | null;
+  order_id: string | null;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InventoryEncryptedRow {
+  id: string;
+  inventory_code: string;
+  product_id: string | null;
+  supplier_id: string | null;
+  purchase_cost_cents: number;
+  status: InventoryStatus;
+  account_login_encrypted: string | null;
+  account_password_encrypted: string | null;
+  account_email_encrypted: string | null;
+  account_email_password_encrypted: string | null;
+  access_notes_encrypted: string | null;
+  public_notes: string | null;
+  bought_at: string | null;
+  sold_at: string | null;
+  delivered_at: string | null;
+  order_id: string | null;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InventoryWriteRecord {
+  id: string;
+  inventoryCode: string;
+  productId: string | null;
+  supplierId: string | null;
+  purchaseCostCents: number;
+  status: InventoryStatus;
+  accountLoginEncrypted: string | null;
+  accountPasswordEncrypted: string | null;
+  accountEmailEncrypted: string | null;
+  accountEmailPasswordEncrypted: string | null;
+  accessNotesEncrypted: string | null;
+  publicNotes: string | null;
+  boughtAt: string | null;
+  soldAt: string | null;
+  deliveredAt: string | null;
+  orderId: string | null;
+  createdByUserId: string | null;
+  updatedByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InventorySummaryRow {
+  available: number;
+  sold: number;
+  problem: number;
+  total_cost_cents: number | null;
+  potential_profit_cents: number | null;
+}
+
+const centsToMoney = (value: number): number => Math.round(value) / 100;
+
+const mapInventoryRow = (row: InventoryJoinedRow): InventoryRecord => ({
+  id: row.id,
+  inventoryCode: row.inventory_code,
+  productId: row.product_id,
+  productName: row.product_name,
+  productInternalCode: row.product_internal_code,
+  category: row.category,
+  game: row.game,
+  supplierId: row.supplier_id,
+  purchaseCost: centsToMoney(row.purchase_cost_cents),
+  status: row.status,
+  hasAccountLogin: Boolean(row.account_login_encrypted),
+  hasAccountPassword: Boolean(row.account_password_encrypted),
+  hasAccountEmail: Boolean(row.account_email_encrypted),
+  hasAccountEmailPassword: Boolean(row.account_email_password_encrypted),
+  hasAccessNotes: Boolean(row.access_notes_encrypted),
+  publicNotes: row.public_notes,
+  boughtAt: row.bought_at,
+  soldAt: row.sold_at,
+  deliveredAt: row.delivered_at,
+  orderId: row.order_id,
+  potentialProfit: centsToMoney((row.product_net_value_cents ?? 0) - row.purchase_cost_cents),
+  createdByUserId: row.created_by_user_id,
+  updatedByUserId: row.updated_by_user_id,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at
+});
+
+const inventorySelect = `
+  SELECT
+    inventory_items.id,
+    inventory_items.inventory_code,
+    inventory_items.product_id,
+    products.name AS product_name,
+    products.internal_code AS product_internal_code,
+    products.category,
+    products.game,
+    products.net_value_cents AS product_net_value_cents,
+    inventory_items.supplier_id,
+    inventory_items.purchase_cost_cents,
+    inventory_items.status,
+    inventory_items.account_login_encrypted,
+    inventory_items.account_password_encrypted,
+    inventory_items.account_email_encrypted,
+    inventory_items.account_email_password_encrypted,
+    inventory_items.access_notes_encrypted,
+    inventory_items.public_notes,
+    inventory_items.bought_at,
+    inventory_items.sold_at,
+    inventory_items.delivered_at,
+    inventory_items.order_id,
+    inventory_items.created_by_user_id,
+    inventory_items.updated_by_user_id,
+    inventory_items.created_at,
+    inventory_items.updated_at
+  FROM inventory_items
+  LEFT JOIN products ON products.id = inventory_items.product_id
+`;
+
+const encryptedSelect = `
+  SELECT
+    id,
+    inventory_code,
+    product_id,
+    supplier_id,
+    purchase_cost_cents,
+    status,
+    account_login_encrypted,
+    account_password_encrypted,
+    account_email_encrypted,
+    account_email_password_encrypted,
+    access_notes_encrypted,
+    public_notes,
+    bought_at,
+    sold_at,
+    delivered_at,
+    order_id,
+    created_by_user_id,
+    updated_by_user_id,
+    created_at,
+    updated_at
+  FROM inventory_items
+`;
+
+const buildInventoryWhere = (filters: InventoryListInput): { sql: string; params: Record<string, unknown> } => {
+  const where: string[] = [];
+  const params: Record<string, unknown> = {};
+
+  if (filters.search) {
+    where.push(`(
+      LOWER(inventory_items.inventory_code) LIKE @search OR
+      LOWER(COALESCE(products.name, '')) LIKE @search OR
+      LOWER(COALESCE(products.internal_code, '')) LIKE @search OR
+      LOWER(COALESCE(inventory_items.supplier_id, '')) LIKE @search OR
+      LOWER(inventory_items.status) LIKE @search OR
+      LOWER(COALESCE(inventory_items.public_notes, '')) LIKE @search
+    )`);
+    params.search = `%${filters.search.toLowerCase()}%`;
+  }
+
+  if (filters.productId) {
+    where.push("inventory_items.product_id = @productId");
+    params.productId = filters.productId;
+  }
+
+  if (filters.category) {
+    where.push("(products.category = @category OR products.game = @category)");
+    params.category = filters.category;
+  }
+
+  if (filters.status !== "all") {
+    where.push("inventory_items.status = @status");
+    params.status = filters.status;
+  }
+
+  if (filters.supplierId) {
+    where.push("inventory_items.supplier_id = @supplierId");
+    params.supplierId = filters.supplierId;
+  }
+
+  return {
+    sql: where.length > 0 ? `WHERE ${where.join(" AND ")}` : "",
+    params
+  };
+};
+
+export const inventoryRepository = {
+  list(filters: InventoryListInput): InventoryRecord[] {
+    const db = getSqliteDatabase();
+    const where = buildInventoryWhere(filters);
+    const direction = filters.sortDirection === "desc" ? "DESC" : "ASC";
+    const rows = db
+      .prepare(`${inventorySelect} ${where.sql} ORDER BY LOWER(inventory_items.inventory_code) ${direction}`)
+      .all(where.params) as InventoryJoinedRow[];
+
+    return rows.map(mapInventoryRow);
+  },
+
+  getById(id: string): InventoryRecord | null {
+    const db = getSqliteDatabase();
+    const row = db
+      .prepare(`${inventorySelect} WHERE inventory_items.id = ?`)
+      .get(id) as InventoryJoinedRow | undefined;
+
+    return row ? mapInventoryRow(row) : null;
+  },
+
+  getEncryptedById(id: string): InventoryEncryptedRow | null {
+    const db = getSqliteDatabase();
+    const row = db
+      .prepare(`${encryptedSelect} WHERE id = ?`)
+      .get(id) as InventoryEncryptedRow | undefined;
+
+    return row ?? null;
+  },
+
+  insert(item: InventoryWriteRecord): InventoryRecord {
+    const db = getSqliteDatabase();
+    db.prepare(
+      `
+        INSERT INTO inventory_items (
+          id,
+          inventory_code,
+          product_id,
+          supplier_id,
+          purchase_cost_cents,
+          status,
+          account_login_encrypted,
+          account_password_encrypted,
+          account_email_encrypted,
+          account_email_password_encrypted,
+          access_notes_encrypted,
+          public_notes,
+          bought_at,
+          sold_at,
+          delivered_at,
+          order_id,
+          created_by_user_id,
+          updated_by_user_id,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          @id,
+          @inventoryCode,
+          @productId,
+          @supplierId,
+          @purchaseCostCents,
+          @status,
+          @accountLoginEncrypted,
+          @accountPasswordEncrypted,
+          @accountEmailEncrypted,
+          @accountEmailPasswordEncrypted,
+          @accessNotesEncrypted,
+          @publicNotes,
+          @boughtAt,
+          @soldAt,
+          @deliveredAt,
+          @orderId,
+          @createdByUserId,
+          @updatedByUserId,
+          @createdAt,
+          @updatedAt
+        )
+      `
+    ).run(item);
+
+    const created = this.getById(item.id);
+    if (!created) {
+      throw new Error("Inventory item was not created.");
+    }
+
+    return created;
+  },
+
+  update(item: InventoryWriteRecord): InventoryRecord {
+    const db = getSqliteDatabase();
+    db.prepare(
+      `
+        UPDATE inventory_items
+        SET
+          inventory_code = @inventoryCode,
+          product_id = @productId,
+          supplier_id = @supplierId,
+          purchase_cost_cents = @purchaseCostCents,
+          status = @status,
+          account_login_encrypted = @accountLoginEncrypted,
+          account_password_encrypted = @accountPasswordEncrypted,
+          account_email_encrypted = @accountEmailEncrypted,
+          account_email_password_encrypted = @accountEmailPasswordEncrypted,
+          access_notes_encrypted = @accessNotesEncrypted,
+          public_notes = @publicNotes,
+          bought_at = @boughtAt,
+          sold_at = @soldAt,
+          delivered_at = @deliveredAt,
+          order_id = @orderId,
+          created_by_user_id = @createdByUserId,
+          updated_by_user_id = @updatedByUserId,
+          updated_at = @updatedAt
+        WHERE id = @id
+      `
+    ).run(item);
+
+    const updated = this.getById(item.id);
+    if (!updated) {
+      throw new Error("Inventory item was not updated.");
+    }
+
+    return updated;
+  },
+
+  delete(id: string): boolean {
+    const db = getSqliteDatabase();
+    const result = db.prepare("DELETE FROM inventory_items WHERE id = ?").run(id);
+    return result.changes > 0;
+  },
+
+  getSummary(): InventorySummaryRow {
+    const db = getSqliteDatabase();
+    return db
+      .prepare(
+        `
+          SELECT
+            SUM(CASE WHEN inventory_items.status = 'available' THEN 1 ELSE 0 END) AS available,
+            SUM(CASE WHEN inventory_items.status IN ('sold', 'delivered') THEN 1 ELSE 0 END) AS sold,
+            SUM(CASE WHEN inventory_items.status = 'problem' THEN 1 ELSE 0 END) AS problem,
+            SUM(CASE WHEN inventory_items.status = 'available' THEN inventory_items.purchase_cost_cents ELSE 0 END) AS total_cost_cents,
+            SUM(
+              CASE
+                WHEN inventory_items.status = 'available'
+                  THEN COALESCE(products.net_value_cents, 0) - inventory_items.purchase_cost_cents
+                ELSE 0
+              END
+            ) AS potential_profit_cents
+          FROM inventory_items
+          LEFT JOIN products ON products.id = inventory_items.product_id
+        `
+      )
+      .get() as InventorySummaryRow;
+  },
+
+  listSuppliers(): string[] {
+    const db = getSqliteDatabase();
+    const rows = db
+      .prepare(
+        "SELECT DISTINCT supplier_id AS value FROM inventory_items WHERE supplier_id IS NOT NULL AND supplier_id != '' ORDER BY LOWER(supplier_id)"
+      )
+      .all() as Array<{ value: string }>;
+
+    return rows.map((row) => row.value);
+  },
+
+  listForOrderSelect(): Array<Pick<InventoryRecord, "id" | "inventoryCode" | "productId" | "productName" | "status">> {
+    const db = getSqliteDatabase();
+    const rows = db
+      .prepare(
+        `
+          SELECT
+            inventory_items.id,
+            inventory_items.inventory_code,
+            inventory_items.product_id,
+            products.name AS product_name,
+            inventory_items.status
+          FROM inventory_items
+          LEFT JOIN products ON products.id = inventory_items.product_id
+          WHERE inventory_items.status != 'archived'
+          ORDER BY
+            CASE inventory_items.status
+              WHEN 'available' THEN 0
+              WHEN 'reserved' THEN 1
+              ELSE 2
+            END,
+            LOWER(inventory_items.inventory_code) ASC
+        `
+      )
+      .all() as Array<{
+      id: string;
+      inventory_code: string;
+      product_id: string | null;
+      product_name: string | null;
+      status: InventoryStatus;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      inventoryCode: row.inventory_code,
+      productId: row.product_id,
+      productName: row.product_name,
+      status: row.status
+    }));
+  },
+
+  countAvailableByProduct(productId: string): number {
+    const db = getSqliteDatabase();
+    const row = db
+      .prepare(
+        "SELECT COUNT(*) AS total FROM inventory_items WHERE product_id = ? AND status = 'available'"
+      )
+      .get(productId) as { total: number } | undefined;
+
+    return row?.total ?? 0;
+  }
+};

@@ -1,0 +1,168 @@
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import type {
+  CsvExportResult,
+  AuthBootstrap,
+  AuthChangePasswordInput,
+  AuthLoginInput,
+  AuthSession,
+  AuthSetupAdminInput,
+  DashboardSummary,
+  EventCreateManualInput,
+  EventListInput,
+  EventListResult,
+  EventRecord,
+  InventoryCreateInput,
+  InventoryListInput,
+  InventoryListResult,
+  InventoryRecord,
+  InventoryRevealSecretInput,
+  InventoryUpdateInput,
+  NotificationSettings,
+  NotificationSettingsUpdateInput,
+  OrderChangeStatusInput,
+  OrderCreateInput,
+  OrderDetailResult,
+  OrderLinkInventoryItemInput,
+  OrderListInput,
+  OrderListResult,
+  OrderRecord,
+  OrderUpdateInput,
+  ProductCreateInput,
+  ProductListInput,
+  ProductListResult,
+  ProductRecord,
+  ProductUpdateInput,
+  UserCreateInput,
+  UserRecord,
+  UserResetPasswordInput,
+  UserUpdateInput
+} from "../shared/contracts";
+
+const api = {
+  getAppMeta: () =>
+    ipcRenderer.invoke("app:get-meta") as Promise<{
+      name: string;
+      version: string;
+      platform: NodeJS.Platform;
+    }>,
+  getDatabaseStatus: () =>
+    ipcRenderer.invoke("database:get-status") as Promise<{
+      path: string;
+      connected: boolean;
+      appliedMigrations: string[];
+    }>,
+  showNotification: (payload: { title: string; body: string }) =>
+    ipcRenderer.invoke("notifications:show", payload) as Promise<{
+      shown: boolean;
+      reason?: string;
+    }>,
+  notifications: {
+    onFallback: (
+      handler: (payload: { title: string; body: string; severity?: EventRecord["severity"] }) => void
+    ) => {
+      const listener = (
+        _event: IpcRendererEvent,
+        payload: { title: string; body: string; severity?: EventRecord["severity"] }
+      ): void => handler(payload);
+      ipcRenderer.on("notifications:fallback", listener);
+      return () => {
+        ipcRenderer.removeListener("notifications:fallback", listener);
+      };
+    }
+  },
+  auth: {
+    getBootstrap: () => ipcRenderer.invoke("auth:getBootstrap") as Promise<AuthBootstrap>,
+    setupAdmin: (payload: AuthSetupAdminInput) =>
+      ipcRenderer.invoke("auth:setupAdmin", payload) as Promise<UserRecord>,
+    login: (payload: AuthLoginInput) =>
+      ipcRenderer.invoke("auth:login", payload) as Promise<AuthSession>,
+    logout: () => ipcRenderer.invoke("auth:logout") as Promise<{ loggedOut: boolean }>,
+    getSession: () => ipcRenderer.invoke("auth:getSession") as Promise<AuthSession | null>,
+    changeOwnPassword: (payload: AuthChangePasswordInput) =>
+      ipcRenderer.invoke("auth:changeOwnPassword", payload) as Promise<AuthSession>
+  },
+  users: {
+    list: () => ipcRenderer.invoke("users:list") as Promise<UserRecord[]>,
+    create: (payload: UserCreateInput) =>
+      ipcRenderer.invoke("users:create", payload) as Promise<UserRecord>,
+    update: (payload: UserUpdateInput) =>
+      ipcRenderer.invoke("users:update", payload) as Promise<UserRecord>,
+    resetPassword: (payload: UserResetPasswordInput) =>
+      ipcRenderer.invoke("users:resetPassword", payload) as Promise<UserRecord>
+  },
+  products: {
+    list: (payload?: ProductListInput) =>
+      ipcRenderer.invoke("products:list", payload) as Promise<ProductListResult>,
+    get: (id: string) => ipcRenderer.invoke("products:get", { id }) as Promise<ProductRecord>,
+    create: (payload: ProductCreateInput) =>
+      ipcRenderer.invoke("products:create", payload) as Promise<ProductRecord>,
+    update: (payload: ProductUpdateInput) =>
+      ipcRenderer.invoke("products:update", payload) as Promise<ProductRecord>,
+    delete: (id: string) =>
+      ipcRenderer.invoke("products:delete", { id }) as Promise<{ deleted: boolean }>,
+    exportCsv: (payload?: ProductListInput) =>
+      ipcRenderer.invoke("products:exportCsv", payload) as Promise<CsvExportResult>
+  },
+  inventory: {
+    list: (payload?: InventoryListInput) =>
+      ipcRenderer.invoke("inventory:list", payload) as Promise<InventoryListResult>,
+    get: (id: string) => ipcRenderer.invoke("inventory:get", { id }) as Promise<InventoryRecord>,
+    create: (payload: InventoryCreateInput) =>
+      ipcRenderer.invoke("inventory:create", payload) as Promise<InventoryRecord>,
+    update: (payload: InventoryUpdateInput) =>
+      ipcRenderer.invoke("inventory:update", payload) as Promise<InventoryRecord>,
+    delete: (id: string) =>
+      ipcRenderer.invoke("inventory:delete", { id }) as Promise<{ deleted: boolean }>,
+    revealSecret: (payload: InventoryRevealSecretInput) =>
+      ipcRenderer.invoke("inventory:revealSecret", payload) as Promise<{
+        field: InventoryRevealSecretInput["field"];
+        value: string;
+      }>,
+    exportCsv: (payload?: InventoryListInput) =>
+      ipcRenderer.invoke("inventory:exportCsv", payload) as Promise<CsvExportResult>
+  },
+  orders: {
+    list: (payload?: OrderListInput) =>
+      ipcRenderer.invoke("orders:list", payload) as Promise<OrderListResult>,
+    get: (id: string) => ipcRenderer.invoke("orders:get", { id }) as Promise<OrderDetailResult>,
+    create: (payload: OrderCreateInput) =>
+      ipcRenderer.invoke("orders:create", payload) as Promise<OrderRecord>,
+    update: (payload: OrderUpdateInput) =>
+      ipcRenderer.invoke("orders:update", payload) as Promise<OrderRecord>,
+    delete: (id: string) =>
+      ipcRenderer.invoke("orders:delete", { id }) as Promise<{ deleted: boolean }>,
+    archive: (id: string) => ipcRenderer.invoke("orders:archive", { id }) as Promise<OrderRecord>,
+    changeStatus: (payload: OrderChangeStatusInput) =>
+      ipcRenderer.invoke("orders:changeStatus", payload) as Promise<OrderRecord>,
+    linkInventoryItem: (payload: OrderLinkInventoryItemInput) =>
+      ipcRenderer.invoke("orders:linkInventoryItem", payload) as Promise<OrderRecord>,
+    unlinkInventoryItem: (orderId: string) =>
+      ipcRenderer.invoke("orders:unlinkInventoryItem", { orderId }) as Promise<OrderRecord>,
+    exportCsv: (payload?: OrderListInput) =>
+      ipcRenderer.invoke("orders:exportCsv", payload) as Promise<CsvExportResult>
+  },
+  events: {
+    list: (payload?: EventListInput) =>
+      ipcRenderer.invoke("events:list", payload) as Promise<EventListResult>,
+    get: (id: string) => ipcRenderer.invoke("events:get", { id }) as Promise<EventRecord>,
+    markRead: (id: string) => ipcRenderer.invoke("events:markRead", { id }) as Promise<EventRecord>,
+    markAllRead: () => ipcRenderer.invoke("events:markAllRead") as Promise<{ updated: number }>,
+    createManual: (payload: EventCreateManualInput) =>
+      ipcRenderer.invoke("events:createManual", payload) as Promise<EventRecord>,
+    exportCsv: (payload?: EventListInput) =>
+      ipcRenderer.invoke("events:exportCsv", payload) as Promise<CsvExportResult>
+  },
+  dashboard: {
+    getSummary: () => ipcRenderer.invoke("dashboard:getSummary") as Promise<DashboardSummary>
+  },
+  settings: {
+    getNotificationSettings: () =>
+      ipcRenderer.invoke("settings:getNotificationSettings") as Promise<NotificationSettings>,
+    updateNotificationSettings: (payload: NotificationSettingsUpdateInput) =>
+      ipcRenderer.invoke("settings:updateNotificationSettings", payload) as Promise<NotificationSettings>
+  }
+};
+
+contextBridge.exposeInMainWorld("hzdk", api);
+
+export type HzdKyxDesktopApi = typeof api;

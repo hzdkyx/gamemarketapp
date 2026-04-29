@@ -1,0 +1,36 @@
+node_modules/
+dist/
+out/
+release/
+.vite/
+.turbo/
+coverage/
+*.log
+logs/
+*.db
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+.env
+.env.*
+!.env.example
+
+# Local Electron user data and generated installers
+hzdk-gamemarket-manager.sqlite*
+**/hzdk-local-secret-fallback.key
+
+# Electron builder output
+apps/desktop/dist/
+apps/desktop/out/
+apps/desktop/release/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

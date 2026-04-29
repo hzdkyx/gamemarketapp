@@ -1,0 +1,244 @@
+import { relations } from "drizzle-orm";
+import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+
+export const products = sqliteTable("products", {
+  id: text("id").primaryKey(),
+  internalCode: text("internal_code").notNull().unique(),
+  externalId: text("external_id"),
+  name: text("name").notNull(),
+  category: text("category").notNull(),
+  game: text("game"),
+  platform: text("platform"),
+  listingUrl: text("listing_url"),
+  salePriceCents: integer("sale_price_cents").notNull(),
+  unitCostCents: integer("unit_cost_cents").notNull(),
+  feePercent: real("fee_percent").notNull().default(13),
+  netValueCents: integer("net_value_cents").notNull().default(0),
+  estimatedProfitCents: integer("estimated_profit_cents").notNull().default(0),
+  marginPercent: real("margin_percent").notNull().default(0),
+  stockCurrent: integer("stock_current").notNull().default(0),
+  stockMin: integer("stock_min").notNull().default(1),
+  status: text("status", {
+    enum: ["active", "paused", "out_of_stock", "on_demand", "archived"]
+  }).notNull(),
+  deliveryType: text("delivery_type", {
+    enum: ["manual", "automatic", "on_demand", "service"]
+  })
+    .notNull()
+    .default("manual"),
+  supplierId: text("supplier_id"),
+  notes: text("notes"),
+  createdByUserId: text("created_by_user_id").references(() => users.id),
+  updatedByUserId: text("updated_by_user_id").references(() => users.id),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull()
+});
+
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  role: text("role", {
+    enum: ["admin", "operator", "viewer"]
+  }).notNull(),
+  status: text("status", {
+    enum: ["active", "disabled"]
+  }).notNull(),
+  lastLoginAt: text("last_login_at"),
+  failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
+  lockedUntil: text("locked_until"),
+  mustChangePassword: integer("must_change_password", { mode: "boolean" }).notNull().default(false),
+  allowRevealSecrets: integer("allow_reveal_secrets", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull()
+});
+
+export const suppliers = sqliteTable("suppliers", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  contact: text("contact"),
+  notes: text("notes"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull()
+});
+
+export const inventoryItems = sqliteTable("inventory_items", {
+  id: text("id").primaryKey(),
+  inventoryCode: text("inventory_code").notNull().unique(),
+  productId: text("product_id").references(() => products.id),
+  supplierId: text("supplier_id"),
+  purchaseCostCents: integer("purchase_cost_cents").notNull(),
+  status: text("status", {
+    enum: ["available", "reserved", "sold", "delivered", "problem", "refunded", "archived"]
+  }).notNull(),
+  accountLoginEncrypted: text("account_login_encrypted"),
+  accountPasswordEncrypted: text("account_password_encrypted"),
+  accountEmailEncrypted: text("account_email_encrypted"),
+  accountEmailPasswordEncrypted: text("account_email_password_encrypted"),
+  accessNotesEncrypted: text("access_notes_encrypted"),
+  publicNotes: text("public_notes"),
+  boughtAt: text("bought_at"),
+  soldAt: text("sold_at"),
+  deliveredAt: text("delivered_at"),
+  orderId: text("order_id"),
+  createdByUserId: text("created_by_user_id").references(() => users.id),
+  updatedByUserId: text("updated_by_user_id").references(() => users.id),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull()
+});
+
+export const orders = sqliteTable("orders", {
+  id: text("id").primaryKey(),
+  orderCode: text("order_code").notNull().unique(),
+  externalOrderId: text("external_order_id"),
+  marketplace: text("marketplace", {
+    enum: ["gamemarket"]
+  })
+    .notNull()
+    .default("gamemarket"),
+  productId: text("product_id").references(() => products.id),
+  inventoryItemId: text("inventory_item_id").references(() => inventoryItems.id),
+  buyerName: text("buyer_name"),
+  buyerContact: text("buyer_contact"),
+  productNameSnapshot: text("product_name_snapshot").notNull(),
+  categorySnapshot: text("category_snapshot").notNull(),
+  salePriceCents: integer("sale_price_cents").notNull().default(0),
+  unitCostCents: integer("unit_cost_cents").notNull().default(0),
+  feePercent: real("fee_percent").notNull().default(13),
+  netValueCents: integer("net_value_cents").notNull().default(0),
+  profitCents: integer("profit_cents").notNull().default(0),
+  marginPercent: real("margin_percent").notNull().default(0),
+  status: text("status", {
+    enum: [
+      "draft",
+      "pending_payment",
+      "payment_confirmed",
+      "awaiting_delivery",
+      "delivered",
+      "completed",
+      "cancelled",
+      "refunded",
+      "mediation",
+      "problem",
+      "archived"
+    ]
+  }).notNull(),
+  actionRequired: integer("action_required", { mode: "boolean" }).notNull().default(false),
+  marketplaceUrl: text("marketplace_url"),
+  notes: text("notes"),
+  createdByUserId: text("created_by_user_id").references(() => users.id),
+  updatedByUserId: text("updated_by_user_id").references(() => users.id),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  confirmedAt: text("confirmed_at"),
+  deliveredAt: text("delivered_at"),
+  completedAt: text("completed_at"),
+  cancelledAt: text("cancelled_at"),
+  refundedAt: text("refunded_at")
+});
+
+export const events = sqliteTable("events", {
+  id: text("id").primaryKey(),
+  eventCode: text("event_code").notNull().unique(),
+  source: text("source", {
+    enum: ["manual", "system", "gamemarket_future", "webhook_future"]
+  }).notNull(),
+  type: text("type", {
+    enum: [
+      "order.created",
+      "order.payment_confirmed",
+      "order.awaiting_delivery",
+      "order.delivered",
+      "order.completed",
+      "order.cancelled",
+      "order.refunded",
+      "order.mediation",
+      "order.problem",
+      "inventory.reserved",
+      "inventory.released",
+      "inventory.sold",
+      "inventory.delivered",
+      "inventory.problem",
+      "product.low_stock",
+      "product.out_of_stock",
+      "security.secret_revealed",
+      "system.notification_test"
+    ]
+  }).notNull(),
+  severity: text("severity", {
+    enum: ["info", "success", "warning", "critical"]
+  }).notNull().default("info"),
+  title: text("title").notNull(),
+  message: text("message"),
+  orderId: text("order_id").references(() => orders.id),
+  productId: text("product_id").references(() => products.id),
+  inventoryItemId: text("inventory_item_id").references(() => inventoryItems.id),
+  actorUserId: text("actor_user_id").references(() => users.id),
+  readAt: text("read_at"),
+  rawPayload: text("raw_payload"),
+  createdAt: text("created_at").notNull()
+});
+
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  valueJson: text("value_json").notNull(),
+  isSecret: integer("is_secret", { mode: "boolean" }).notNull().default(false),
+  updatedAt: text("updated_at").notNull()
+});
+
+export const notificationRules = sqliteTable("notification_rules", {
+  id: text("id").primaryKey(),
+  eventType: text("event_type").notNull(),
+  channel: text("channel", {
+    enum: ["desktop", "sound", "email", "telegram", "whatsapp", "discord"]
+  }).notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  playSound: integer("play_sound", { mode: "boolean" }).notNull().default(false),
+  highlight: integer("highlight", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull()
+});
+
+export const productRelations = relations(products, ({ many }) => ({
+  inventoryItems: many(inventoryItems),
+  orders: many(orders)
+}));
+
+export const inventoryRelations = relations(inventoryItems, ({ one }) => ({
+  product: one(products, {
+    fields: [inventoryItems.productId],
+    references: [products.id]
+  }),
+  supplier: one(suppliers, {
+    fields: [inventoryItems.supplierId],
+    references: [suppliers.id]
+  })
+}));
+
+export const orderRelations = relations(orders, ({ one, many }) => ({
+  product: one(products, {
+    fields: [orders.productId],
+    references: [products.id]
+  }),
+  inventoryItem: one(inventoryItems, {
+    fields: [orders.inventoryItemId],
+    references: [inventoryItems.id]
+  }),
+  events: many(events)
+}));
+
+export const eventRelations = relations(events, ({ one }) => ({
+  order: one(orders, {
+    fields: [events.orderId],
+    references: [orders.id]
+  }),
+  product: one(products, {
+    fields: [events.productId],
+    references: [products.id]
+  }),
+  inventoryItem: one(inventoryItems, {
+    fields: [events.inventoryItemId],
+    references: [inventoryItems.id]
+  })
+}));
