@@ -12,6 +12,7 @@
     "dist": "npm run build && electron-builder --win",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3",
     "seed:product-variants": "electron scripts/seed-product-variants.mjs",
+    "repair:product-variants": "electron scripts/repair-product-variants.mjs",
     "lint": "eslint .",
     "test": "vitest run",
     "format": "prettier --write ."
