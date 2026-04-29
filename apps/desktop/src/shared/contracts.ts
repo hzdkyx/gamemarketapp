@@ -48,6 +48,7 @@ export const orderActionFilterValues = ["all", "pending", "clear"] as const;
 export const eventSourceValues = [
   "manual",
   "system",
+  "gamemarket_api",
   "gamemarket_future",
   "webhook_future"
 ] as const;
@@ -70,9 +71,33 @@ export const eventTypeValues = [
   "product.low_stock",
   "product.out_of_stock",
   "security.secret_revealed",
+  "integration.gamemarket.settings_updated",
+  "integration.gamemarket.connection_tested",
+  "integration.gamemarket.connection_failed",
+  "integration.gamemarket.token_revealed",
+  "integration.gamemarket.sync_started",
+  "integration.gamemarket.sync_completed",
+  "integration.gamemarket.sync_failed",
+  "integration.gamemarket.order_imported",
+  "integration.gamemarket.order_updated",
+  "integration.gamemarket.product_imported",
+  "integration.gamemarket.product_updated",
   "system.notification_test"
 ] as const;
 export const eventReadFilterValues = ["all", "read", "unread"] as const;
+export const gamemarketEnvironmentValues = ["production", "sandbox", "custom"] as const;
+export const gamemarketConnectionStatusValues = [
+  "not_configured",
+  "configured",
+  "docs_missing",
+  "connecting",
+  "connected",
+  "error",
+  "syncing",
+  "synced",
+  "partial",
+  "unavailable"
+] as const;
 export const inventorySecretFieldValues = [
   "accountLogin",
   "accountPassword",
@@ -125,6 +150,8 @@ export const eventSeveritySchema = z.enum(eventSeverityValues);
 export const eventTypeSchema = z.enum(eventTypeValues);
 export const userRoleSchema = z.enum(userRoleValues);
 export const userStatusSchema = z.enum(userStatusValues);
+export const gamemarketEnvironmentSchema = z.enum(gamemarketEnvironmentValues);
+export const gamemarketConnectionStatusSchema = z.enum(gamemarketConnectionStatusValues);
 
 export const productCreateInputSchema = z
   .object({
@@ -381,6 +408,33 @@ export const notificationSettingsSchema = z
 
 export const notificationSettingsUpdateInputSchema = notificationSettingsSchema.partial().strict();
 
+export const gamemarketSettingsUpdateInputSchema = z
+  .object({
+    apiBaseUrl: z
+      .string()
+      .trim()
+      .url("Informe uma URL válida.")
+      .max(500)
+      .optional(),
+    token: z.string().trim().min(8, "Token muito curto.").max(500).optional(),
+    clearToken: z.boolean().optional(),
+    integrationName: z.string().trim().min(1, "Campo obrigatório.").max(120).optional(),
+    environment: gamemarketEnvironmentSchema.optional()
+  })
+  .strict()
+  .refine((input) => !(input.token && input.clearToken), {
+    path: ["clearToken"],
+    message: "Não é possível salvar e remover o token na mesma operação."
+  });
+
+export const gamemarketRevealTokenInputSchema = z
+  .object({
+    confirm: z.literal(true)
+  })
+  .strict();
+
+export const gamemarketEmptyInputSchema = z.object({}).strict();
+
 export const authLoginInputSchema = z
   .object({
     username: usernameSchema,
@@ -479,6 +533,8 @@ export type EventSource = (typeof eventSourceValues)[number];
 export type EventSeverity = (typeof eventSeverityValues)[number];
 export type EventType = (typeof eventTypeValues)[number];
 export type EventReadFilter = (typeof eventReadFilterValues)[number];
+export type GameMarketEnvironment = (typeof gamemarketEnvironmentValues)[number];
+export type GameMarketConnectionStatus = (typeof gamemarketConnectionStatusValues)[number];
 
 export type ProductCreateInput = z.infer<typeof productCreateInputSchema>;
 export type ProductUpdateData = z.infer<typeof productUpdateDataSchema>;
@@ -500,6 +556,8 @@ export type EventCreateManualInput = z.infer<typeof eventCreateManualInputSchema
 export type EventListInput = z.infer<typeof eventListInputSchema>;
 export type NotificationSettings = z.infer<typeof notificationSettingsSchema>;
 export type NotificationSettingsUpdateInput = z.infer<typeof notificationSettingsUpdateInputSchema>;
+export type GameMarketSettingsUpdateInput = z.infer<typeof gamemarketSettingsUpdateInputSchema>;
+export type GameMarketRevealTokenInput = z.infer<typeof gamemarketRevealTokenInputSchema>;
 export type AuthLoginInput = z.infer<typeof authLoginInputSchema>;
 export type AuthSetupAdminInput = z.infer<typeof authSetupAdminInputSchema>;
 export type AuthChangePasswordInput = z.infer<typeof authChangePasswordInputSchema>;
@@ -552,6 +610,11 @@ export interface ProductRecord {
   deliveryType: DeliveryType;
   supplierId: string | null;
   notes: string | null;
+  externalMarketplace?: Marketplace | null;
+  externalProductId?: string | null;
+  externalStatus?: string | null;
+  externalPayloadHash?: string | null;
+  lastSyncedAt?: string | null;
   createdByUserId: string | null;
   updatedByUserId: string | null;
   createdAt: string;
@@ -626,6 +689,10 @@ export interface OrderRecord {
   orderCode: string;
   externalOrderId: string | null;
   marketplace: Marketplace;
+  externalMarketplace?: Marketplace | null;
+  externalStatus?: string | null;
+  externalPayloadHash?: string | null;
+  lastSyncedAt?: string | null;
   productId: string;
   inventoryItemId: string | null;
   inventoryCode: string | null;
@@ -735,4 +802,53 @@ export interface DashboardSummary {
     status: OrderStatus;
     count: number;
   }>;
+}
+
+export interface GameMarketDocumentationStatus {
+  status: "available" | "missing" | "incomplete";
+  files: string[];
+  missing: string[];
+  message: string;
+}
+
+export interface GameMarketSettingsView {
+  apiBaseUrl: string;
+  integrationName: string;
+  environment: GameMarketEnvironment;
+  hasToken: boolean;
+  tokenMasked: string | null;
+  tokenSource: "saved" | "env" | "none";
+  connectionStatus: GameMarketConnectionStatus;
+  lastConnectionAt: string | null;
+  lastSyncAt: string | null;
+  lastError: string | null;
+  documentation: GameMarketDocumentationStatus;
+  permissions: {
+    read: boolean;
+    write: boolean;
+    delete: boolean;
+    source: "documentation";
+  };
+}
+
+export interface GameMarketConnectionTestResult {
+  ok: boolean;
+  status: GameMarketConnectionStatus;
+  checkedAt: string;
+  endpoint: string | null;
+  safeMessage: string;
+}
+
+export interface GameMarketSyncSummary {
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  status: "synced" | "partial" | "failed";
+  productsFound: number;
+  ordersFound: number;
+  productsNew: number;
+  productsUpdated: number;
+  ordersNew: number;
+  ordersUpdated: number;
+  errors: string[];
 }

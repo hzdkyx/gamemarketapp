@@ -11,6 +11,11 @@ import type {
   EventListInput,
   EventListResult,
   EventRecord,
+  GameMarketConnectionTestResult,
+  GameMarketRevealTokenInput,
+  GameMarketSettingsUpdateInput,
+  GameMarketSettingsView,
+  GameMarketSyncSummary,
   InventoryCreateInput,
   InventoryListInput,
   InventoryListResult,
@@ -160,6 +165,22 @@ const api = {
       ipcRenderer.invoke("settings:getNotificationSettings") as Promise<NotificationSettings>,
     updateNotificationSettings: (payload: NotificationSettingsUpdateInput) =>
       ipcRenderer.invoke("settings:updateNotificationSettings", payload) as Promise<NotificationSettings>
+  },
+  gamemarket: {
+    getSettings: () =>
+      ipcRenderer.invoke("gamemarket:getSettings") as Promise<GameMarketSettingsView>,
+    updateSettings: (payload: GameMarketSettingsUpdateInput) =>
+      ipcRenderer.invoke("gamemarket:updateSettings", payload) as Promise<GameMarketSettingsView>,
+    revealToken: (payload: GameMarketRevealTokenInput) =>
+      ipcRenderer.invoke("gamemarket:revealToken", payload) as Promise<{
+        token: string;
+        tokenMasked: string | null;
+      }>,
+    testConnection: () =>
+      ipcRenderer.invoke("gamemarket:testConnection", {}) as Promise<GameMarketConnectionTestResult>,
+    syncNow: () => ipcRenderer.invoke("gamemarket:syncNow", {}) as Promise<GameMarketSyncSummary>,
+    getLastSyncSummary: () =>
+      ipcRenderer.invoke("gamemarket:getLastSyncSummary", {}) as Promise<GameMarketSyncSummary | null>
   }
 };
 

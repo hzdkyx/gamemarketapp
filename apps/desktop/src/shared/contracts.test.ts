@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   eventCreateManualInputSchema,
   authSetupAdminInputSchema,
+  gamemarketRevealTokenInputSchema,
+  gamemarketSettingsUpdateInputSchema,
   inventoryCreateInputSchema,
   inventoryRevealSecretInputSchema,
   orderChangeStatusInputSchema,
@@ -126,6 +128,24 @@ describe("event contracts", () => {
         title: "Evento"
       })
     ).toThrow();
+  });
+});
+
+describe("GameMarket contracts", () => {
+  it("validates settings updates and keeps token optional", () => {
+    const parsed = gamemarketSettingsUpdateInputSchema.parse({
+      apiBaseUrl: "https://gamemarket.com.br",
+      integrationName: "HzdKyx Desktop",
+      environment: "production"
+    });
+
+    expect(parsed.apiBaseUrl).toBe("https://gamemarket.com.br");
+    expect(parsed.token).toBeUndefined();
+  });
+
+  it("requires explicit confirmation to reveal token", () => {
+    expect(gamemarketRevealTokenInputSchema.parse({ confirm: true }).confirm).toBe(true);
+    expect(() => gamemarketRevealTokenInputSchema.parse({ confirm: false })).toThrow();
   });
 });
 

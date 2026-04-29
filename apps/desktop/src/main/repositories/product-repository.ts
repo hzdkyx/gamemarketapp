@@ -1,6 +1,7 @@
 import { getSqliteDatabase } from "../database/database";
 import type {
   DeliveryType,
+  Marketplace,
   ProductListInput,
   ProductRecord,
   ProductStatus
@@ -26,6 +27,11 @@ interface ProductRow {
   delivery_type: DeliveryType;
   supplier_id: string | null;
   notes: string | null;
+  external_marketplace: Marketplace | null;
+  external_product_id: string | null;
+  external_status: string | null;
+  external_payload_hash: string | null;
+  last_synced_at: string | null;
   created_by_user_id: string | null;
   updated_by_user_id: string | null;
   created_at: string;
@@ -52,6 +58,11 @@ export interface ProductWriteRecord {
   deliveryType: DeliveryType;
   supplierId: string | null;
   notes: string | null;
+  externalMarketplace: Marketplace | null;
+  externalProductId: string | null;
+  externalStatus: string | null;
+  externalPayloadHash: string | null;
+  lastSyncedAt: string | null;
   createdByUserId: string | null;
   updatedByUserId: string | null;
   createdAt: string;
@@ -88,6 +99,11 @@ const mapProductRow = (row: ProductRow): ProductRecord => ({
   deliveryType: row.delivery_type,
   supplierId: row.supplier_id,
   notes: row.notes,
+  externalMarketplace: row.external_marketplace,
+  externalProductId: row.external_product_id,
+  externalStatus: row.external_status,
+  externalPayloadHash: row.external_payload_hash,
+  lastSyncedAt: row.last_synced_at,
   createdByUserId: row.created_by_user_id,
   updatedByUserId: row.updated_by_user_id,
   createdAt: row.created_at,
@@ -115,6 +131,11 @@ const productSelect = `
     delivery_type,
     supplier_id,
     notes,
+    external_marketplace,
+    external_product_id,
+    external_status,
+    external_payload_hash,
+    last_synced_at,
     created_by_user_id,
     updated_by_user_id,
     created_at,
@@ -245,6 +266,11 @@ export const productRepository = {
           delivery_type,
           supplier_id,
           notes,
+          external_marketplace,
+          external_product_id,
+          external_status,
+          external_payload_hash,
+          last_synced_at,
           created_by_user_id,
           updated_by_user_id,
           created_at,
@@ -270,6 +296,11 @@ export const productRepository = {
           @deliveryType,
           @supplierId,
           @notes,
+          @externalMarketplace,
+          @externalProductId,
+          @externalStatus,
+          @externalPayloadHash,
+          @lastSyncedAt,
           @createdByUserId,
           @updatedByUserId,
           @createdAt,
@@ -310,6 +341,11 @@ export const productRepository = {
           delivery_type = @deliveryType,
           supplier_id = @supplierId,
           notes = @notes,
+          external_marketplace = @externalMarketplace,
+          external_product_id = @externalProductId,
+          external_status = @externalStatus,
+          external_payload_hash = @externalPayloadHash,
+          last_synced_at = @lastSyncedAt,
           created_by_user_id = @createdByUserId,
           updated_by_user_id = @updatedByUserId,
           updated_at = @updatedAt

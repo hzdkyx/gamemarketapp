@@ -48,6 +48,11 @@ const makeWriteRecord = (
     deliveryType: ProductRecord["deliveryType"];
     supplierId: string | null;
     notes: string | null;
+    externalMarketplace?: ProductRecord["externalMarketplace"];
+    externalProductId?: string | null;
+    externalStatus?: string | null;
+    externalPayloadHash?: string | null;
+    lastSyncedAt?: string | null;
     createdByUserId: string | null;
     updatedByUserId: string | null;
     createdAt: string;
@@ -80,6 +85,11 @@ const makeWriteRecord = (
     deliveryType: input.deliveryType,
     supplierId: input.supplierId,
     notes: input.notes,
+    externalMarketplace: input.externalMarketplace ?? null,
+    externalProductId: input.externalProductId ?? null,
+    externalStatus: input.externalStatus ?? null,
+    externalPayloadHash: input.externalPayloadHash ?? null,
+    lastSyncedAt: input.lastSyncedAt ?? null,
     createdByUserId: input.createdByUserId,
     updatedByUserId: input.updatedByUserId,
     createdAt: input.createdAt,
@@ -140,6 +150,11 @@ export const productService = {
         deliveryType: input.deliveryType,
         supplierId: input.supplierId ?? null,
         notes: input.notes ?? null,
+        externalMarketplace: null,
+        externalProductId: null,
+        externalStatus: null,
+        externalPayloadHash: null,
+        lastSyncedAt: null,
         createdByUserId: actorUserId,
         updatedByUserId: actorUserId,
         createdAt: timestamp,
@@ -178,6 +193,11 @@ export const productService = {
         deliveryType: data.deliveryType ?? current.deliveryType,
         supplierId: Object.hasOwn(data, "supplierId") ? data.supplierId ?? null : current.supplierId,
         notes: Object.hasOwn(data, "notes") ? data.notes ?? null : current.notes,
+        externalMarketplace: current.externalMarketplace ?? null,
+        externalProductId: current.externalProductId ?? null,
+        externalStatus: current.externalStatus ?? null,
+        externalPayloadHash: current.externalPayloadHash ?? null,
+        lastSyncedAt: current.lastSyncedAt ?? null,
         createdByUserId: current.createdByUserId,
         updatedByUserId: actorUserId ?? current.updatedByUserId,
         createdAt: current.createdAt,

@@ -4,7 +4,7 @@ Aplicativo desktop para Windows, em Electron + React + TypeScript, para organiza
 
 ## Status
 
-Fase 3.5 implementada para segurança local, usuários, auditoria e empacotamento Windows.
+Fase 4 implementada com base segura para integração oficial de leitura da GameMarket.
 
 - CRUD local de produtos usando SQLite.
 - CRUD local de itens de estoque vinculados a produtos.
@@ -25,8 +25,13 @@ Fase 3.5 implementada para segurança local, usuários, auditoria e empacotament
 - Cálculo automático da taxa GameMarket, valor líquido, lucro e margem.
 - Exportação CSV de produtos, estoque, pedidos e eventos.
 - Proteção de dados sensíveis de estoque no main process.
+- Configurações → GameMarket API para base URL, token, ambiente, status e sync manual.
+- Token GameMarket criptografado com a mesma camada de segredos local.
+- Client HTTP isolado no main process, com timeout, Zod e erros seguros.
+- Teste de conexão por endpoint documentado de leitura.
+- Sync manual de produtos e pedidos por endpoints documentados, sem escrita na API.
 
-A integração real com a GameMarket ainda não foi implementada. A documentação pública em `https://gamemarket.com.br/api-docs` retornou `403 Forbidden` neste ambiente. Antes da fase de integração, salve ou cole a documentação oficial em `docs/gamemarket-api/`.
+A integração não faz scraping, não cria endpoint não documentado, não implementa webhooks e não usa a chave para escrita.
 
 ## Como Rodar
 
@@ -181,6 +186,38 @@ O Dashboard usa dados reais locais:
 
 Quando não há dados, a UI mostra empty states em vez de quebrar gráficos ou listas.
 
+## GameMarket API
+
+A documentação oficial usada pela integração deve ficar em `docs/gamemarket-api/`. Nesta fase foi lido `docs/gamemarket-api/README.md`, com autenticação por header `x-api-key`, base URL `https://gamemarket.com.br`, endpoints read de produtos, pedidos, saldo, estatísticas e jogos, e rate limits.
+
+Como configurar:
+
+1. Salve a documentação real em `docs/gamemarket-api/`.
+2. Abra **Configurações → GameMarket API** com usuário admin.
+3. Confira ou altere a **API Base URL**.
+4. Cole a **API Key / Token** de leitura.
+5. Escolha o ambiente: `production`, `sandbox` ou `custom`.
+6. Clique em **Salvar configuração**.
+7. Use **Testar conexão** para validar `GET /api/v1/games`.
+8. Use **Sincronizar agora** para buscar `GET /api/v1/products` e `GET /api/v1/orders`.
+
+Cuidados:
+
+- Nunca commite `.env.local`.
+- Nunca coloque a chave no código.
+- O token fica mascarado na UI por padrão.
+- O token só retorna ao renderer em **Revelar token**, com confirmação e apenas para admin.
+- Eventos e logs não recebem o token puro.
+- A chave criada para esta fase deve ter somente permissão de leitura.
+
+Limitações da Fase 4:
+
+- Não cria, edita ou exclui produtos via API.
+- Não implementa automação de entrega.
+- Não implementa WhatsApp, Telegram, Railway ou backend online.
+- Não implementa webhooks porque a documentação local lida não contém seção de webhooks.
+- Pedidos importados mantêm o status externo em metadados; não há mapeamento automático de status operacional sem tabela oficial.
+
 ## Notificações Locais
 
 Em **Configurações → Notificações**:
@@ -264,17 +301,17 @@ Não faça commit de:
 
 ## Limitações Atuais
 
-- Não há API real da GameMarket.
+- A API GameMarket está limitada a leitura documentada e sync manual.
 - Não há webhooks reais.
 - Não há WhatsApp, backend online ou sincronização remota.
 - Não há integração com fornecedor nem automação de entrega.
-- Pedidos são manuais e eventos são internos do app.
+- Pedidos locais continuam operacionais/manual review; eventos são internos do app.
 - Não há automação de entrega real nem scraping.
 - O fallback de criptografia existe para ambientes sem `safeStorage`, mas deve ser tratado como proteção local básica.
 
 ## Próximas Fases
 
-1. Fase 4: integração GameMarket somente com documentação oficial disponível.
-2. Fase 5: backend público para webhooks.
-3. Fase 6: notificações em tempo real e canais externos.
-4. Fase 7: build final `.exe` com `electron-builder`.
+1. Fase 5: backend público para webhooks, preferencialmente na Railway.
+2. Fase 6: notificações em tempo real e canais externos.
+3. Fase 7: automação de entrega somente após contratos oficiais e revisão de segurança.
+4. Fase 8: build final `.exe` e rotina de atualização.

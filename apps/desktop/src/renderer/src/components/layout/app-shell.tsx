@@ -102,7 +102,7 @@ export const AppShell = (): JSX.Element => {
               Base local ativa
             </div>
             <div className="mt-2 text-xs leading-5 text-slate-400">
-              API real bloqueada até a documentação oficial estar disponível.
+              Integração oficial configurável em Configurações.
             </div>
           </div>
         </div>

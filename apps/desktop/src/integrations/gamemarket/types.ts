@@ -7,7 +7,7 @@ export interface GameMarketIntegrationStatus {
 }
 
 export const gameMarketIntegrationStatus: GameMarketIntegrationStatus = {
-  configured: false,
-  documentationLoaded: false,
-  reason: "Official GameMarket API documentation is required before implementation."
+  configured: true,
+  documentationLoaded: true,
+  reason: "Runtime integration lives in apps/desktop/src/main/integrations/gamemarket."
 };

@@ -1,4 +1,5 @@
 import type { HzdKyxDesktopApi } from "../../../preload";
+import type { GameMarketSettingsView } from "../../../shared/contracts";
 
 const unavailable = async (): Promise<never> => {
   throw new Error("Electron preload indisponível no preview web.");
@@ -160,6 +161,55 @@ const fallbackApi: HzdKyxDesktopApi = {
       soundEnabled: payload.soundEnabled ?? false,
       enabledEventTypes: payload.enabledEventTypes ?? {}
     })
+  },
+  gamemarket: {
+    getSettings: async (): Promise<GameMarketSettingsView> => ({
+      apiBaseUrl: "https://gamemarket.com.br",
+      integrationName: "HzdKyx Desktop",
+      environment: "production",
+      hasToken: false,
+      tokenMasked: null,
+      tokenSource: "none",
+      connectionStatus: "docs_missing",
+      lastConnectionAt: null,
+      lastSyncAt: null,
+      lastError: null,
+      documentation: {
+        status: "missing",
+        files: [],
+        missing: ["docs/gamemarket-api/"],
+        message: "Electron preload indisponível no preview web."
+      },
+      permissions: {
+        read: true,
+        write: false,
+        delete: false,
+        source: "documentation"
+      }
+    }),
+    updateSettings: unavailable,
+    revealToken: unavailable,
+    testConnection: async () => ({
+      ok: false,
+      status: "unavailable",
+      checkedAt: new Date().toISOString(),
+      endpoint: null,
+      safeMessage: "Teste exige execução no Electron."
+    }),
+    syncNow: async () => ({
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 0,
+      status: "failed",
+      productsFound: 0,
+      ordersFound: 0,
+      productsNew: 0,
+      productsUpdated: 0,
+      ordersNew: 0,
+      ordersUpdated: 0,
+      errors: ["Sync exige execução no Electron."]
+    }),
+    getLastSyncSummary: async () => null
   }
 };
 

@@ -1,14 +1,7 @@
 # GameMarket Integration Module
 
-Este módulo está reservado para a Fase 4.
+O módulo runtime da Fase 4 fica em:
 
-Regras:
+`apps/desktop/src/main/integrations/gamemarket/`
 
-- não criar endpoints sem documentação oficial;
-- não inventar autenticação;
-- não inventar nomes de eventos;
-- validar todos os payloads com Zod quando a documentação estiver disponível;
-- concentrar client HTTP, retries, rate limit, logs e parser de eventos neste diretório;
-- nunca expor API key no renderer.
-
-Documentação necessária: `docs/gamemarket-api/`.
+Este diretório foi mantido apenas como marcador compartilhado. O renderer não chama a API diretamente; toda operação passa por IPC seguro `gamemarket:*` e pelo módulo de main process.

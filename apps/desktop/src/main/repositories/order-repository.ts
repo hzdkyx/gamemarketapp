@@ -13,6 +13,10 @@ interface OrderRow {
   order_code: string;
   external_order_id: string | null;
   marketplace: Marketplace;
+  external_marketplace: Marketplace | null;
+  external_status: string | null;
+  external_payload_hash: string | null;
+  last_synced_at: string | null;
   product_id: string;
   inventory_item_id: string | null;
   inventory_code: string | null;
@@ -46,6 +50,10 @@ export interface OrderWriteRecord {
   orderCode: string;
   externalOrderId: string | null;
   marketplace: Marketplace;
+  externalMarketplace: Marketplace | null;
+  externalStatus: string | null;
+  externalPayloadHash: string | null;
+  lastSyncedAt: string | null;
   productId: string;
   inventoryItemId: string | null;
   buyerName: string | null;
@@ -78,6 +86,10 @@ const mapOrderRow = (row: OrderRow): OrderRecord => ({
   orderCode: row.order_code,
   externalOrderId: row.external_order_id,
   marketplace: row.marketplace,
+  externalMarketplace: row.external_marketplace,
+  externalStatus: row.external_status,
+  externalPayloadHash: row.external_payload_hash,
+  lastSyncedAt: row.last_synced_at,
   productId: row.product_id,
   inventoryItemId: row.inventory_item_id,
   inventoryCode: row.inventory_code,
@@ -112,6 +124,10 @@ const orderSelect = `
     orders.order_code,
     orders.external_order_id,
     orders.marketplace,
+    orders.external_marketplace,
+    orders.external_status,
+    orders.external_payload_hash,
+    orders.last_synced_at,
     orders.product_id,
     orders.inventory_item_id,
     inventory_items.inventory_code,
@@ -245,6 +261,10 @@ export const orderRepository = {
           order_code,
           external_order_id,
           marketplace,
+          external_marketplace,
+          external_status,
+          external_payload_hash,
+          last_synced_at,
           product_id,
           inventory_item_id,
           buyer_name,
@@ -276,6 +296,10 @@ export const orderRepository = {
           @orderCode,
           @externalOrderId,
           @marketplace,
+          @externalMarketplace,
+          @externalStatus,
+          @externalPayloadHash,
+          @lastSyncedAt,
           @productId,
           @inventoryItemId,
           @buyerName,
@@ -322,6 +346,10 @@ export const orderRepository = {
           order_code = @orderCode,
           external_order_id = @externalOrderId,
           marketplace = @marketplace,
+          external_marketplace = @externalMarketplace,
+          external_status = @externalStatus,
+          external_payload_hash = @externalPayloadHash,
+          last_synced_at = @lastSyncedAt,
           product_id = @productId,
           inventory_item_id = @inventoryItemId,
           buyer_name = @buyerName,

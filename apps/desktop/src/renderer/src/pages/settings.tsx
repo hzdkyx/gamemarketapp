@@ -3,9 +3,13 @@ import {
   BellRing,
   Database,
   Edit3,
+  Eye,
   FileText,
   KeyRound,
+  Link2,
   LockKeyhole,
+  RefreshCw,
+  Save,
   Server,
   ShieldCheck,
   UserPlus,
@@ -17,6 +21,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/u
 import { getDesktopApi } from "@renderer/lib/desktop-api";
 import type {
   EventType,
+  GameMarketEnvironment,
+  GameMarketSettingsView,
+  GameMarketSyncSummary,
   NotificationSettings,
   UserRecord,
   UserRole,
@@ -54,8 +61,25 @@ const eventLabels: Record<EventType, string> = {
   "product.low_stock": "Estoque baixo",
   "product.out_of_stock": "Produto sem estoque",
   "security.secret_revealed": "Segredo revelado",
+  "integration.gamemarket.settings_updated": "Configuração GameMarket atualizada",
+  "integration.gamemarket.connection_tested": "Conexão GameMarket testada",
+  "integration.gamemarket.connection_failed": "Conexão GameMarket falhou",
+  "integration.gamemarket.token_revealed": "Token GameMarket revelado",
+  "integration.gamemarket.sync_started": "Sync GameMarket iniciada",
+  "integration.gamemarket.sync_completed": "Sync GameMarket concluída",
+  "integration.gamemarket.sync_failed": "Sync GameMarket falhou",
+  "integration.gamemarket.order_imported": "Pedido GameMarket importado",
+  "integration.gamemarket.order_updated": "Pedido GameMarket atualizado",
+  "integration.gamemarket.product_imported": "Produto GameMarket importado",
+  "integration.gamemarket.product_updated": "Produto GameMarket atualizado",
   "system.notification_test": "Teste de notificação"
 };
+
+interface GameMarketFormState {
+  apiBaseUrl: string;
+  integrationName: string;
+  environment: GameMarketEnvironment;
+}
 
 interface UserFormState {
   id: string | null;
@@ -107,11 +131,58 @@ const userToForm = (user: UserRecord): UserFormState => ({
 const isUserLocked = (user: UserRecord): boolean =>
   Boolean(user.lockedUntil && new Date(user.lockedUntil).getTime() > Date.now());
 
+const formatDateTime = (value: string | null | undefined): string =>
+  value ? new Date(value).toLocaleString("pt-BR") : "-";
+
+const gameMarketStatusLabel: Record<GameMarketSettingsView["connectionStatus"], string> = {
+  not_configured: "Não configurado",
+  configured: "Configurado",
+  docs_missing: "Documentação ausente",
+  connecting: "Conectando",
+  connected: "Conectado",
+  error: "Erro",
+  syncing: "Sincronizando",
+  synced: "Sincronizado",
+  partial: "Sync parcial",
+  unavailable: "API indisponível"
+};
+
+const gameMarketStatusTone = (status: GameMarketSettingsView["connectionStatus"]): "success" | "warning" | "danger" | "cyan" | "neutral" => {
+  if (status === "connected" || status === "synced") {
+    return "success";
+  }
+
+  if (status === "error" || status === "unavailable") {
+    return "danger";
+  }
+
+  if (status === "configured" || status === "connecting" || status === "syncing") {
+    return "cyan";
+  }
+
+  if (status === "not_configured") {
+    return "neutral";
+  }
+
+  return "warning";
+};
+
 export const SettingsPage = (): JSX.Element => {
   const api = useMemo(() => getDesktopApi(), []);
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus | null>(null);
   const [appMeta, setAppMeta] = useState<AppMeta | null>(null);
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
+  const [gameMarketSettings, setGameMarketSettings] = useState<GameMarketSettingsView | null>(null);
+  const [gameMarketForm, setGameMarketForm] = useState<GameMarketFormState>({
+    apiBaseUrl: "https://gamemarket.com.br",
+    integrationName: "HzdKyx Desktop",
+    environment: "production"
+  });
+  const [gameMarketToken, setGameMarketToken] = useState("");
+  const [gameMarketBusy, setGameMarketBusy] = useState<"saving" | "testing" | "syncing" | "revealing" | null>(null);
+  const [gameMarketResult, setGameMarketResult] = useState("");
+  const [revealedGameMarketToken, setRevealedGameMarketToken] = useState<string | null>(null);
+  const [lastSyncSummary, setLastSyncSummary] = useState<GameMarketSyncSummary | null>(null);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [userForm, setUserForm] = useState<UserFormState | null>(null);
   const [resetPasswordUser, setResetPasswordUser] = useState<UserRecord | null>(null);
@@ -130,10 +201,21 @@ export const SettingsPage = (): JSX.Element => {
         api.settings.getNotificationSettings(),
         api.users.list()
       ]);
+      const [loadedGameMarketSettings, syncSummary] = await Promise.all([
+        api.gamemarket.getSettings(),
+        api.gamemarket.getLastSyncSummary()
+      ]);
       setDatabaseStatus(dbStatus);
       setAppMeta(meta);
       setSettings(notificationSettings);
       setUsers(userList);
+      setGameMarketSettings(loadedGameMarketSettings);
+      setGameMarketForm({
+        apiBaseUrl: loadedGameMarketSettings.apiBaseUrl,
+        integrationName: loadedGameMarketSettings.integrationName,
+        environment: loadedGameMarketSettings.environment
+      });
+      setLastSyncSummary(syncSummary);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Falha ao carregar configurações.");
     }
@@ -178,6 +260,96 @@ export const SettingsPage = (): JSX.Element => {
       setNotificationResult(`Evento ${event.eventCode} criado`);
     } catch (testError) {
       setNotificationResult(testError instanceof Error ? testError.message : "Falha ao enviar teste.");
+    }
+  };
+
+  const refreshGameMarketSettings = async (): Promise<void> => {
+    const [loadedGameMarketSettings, syncSummary] = await Promise.all([
+      api.gamemarket.getSettings(),
+      api.gamemarket.getLastSyncSummary()
+    ]);
+    setGameMarketSettings(loadedGameMarketSettings);
+    setLastSyncSummary(syncSummary);
+  };
+
+  const saveGameMarketSettings = async (): Promise<void> => {
+    setGameMarketBusy("saving");
+    setGameMarketResult("");
+    setError(null);
+
+    try {
+      const updated = await api.gamemarket.updateSettings({
+        apiBaseUrl: gameMarketForm.apiBaseUrl,
+        integrationName: gameMarketForm.integrationName,
+        environment: gameMarketForm.environment,
+        ...(gameMarketToken.trim() ? { token: gameMarketToken.trim() } : {})
+      });
+      setGameMarketSettings(updated);
+      setGameMarketToken("");
+      setRevealedGameMarketToken(null);
+      setGameMarketResult("Configuração salva.");
+    } catch (saveError) {
+      setGameMarketResult(saveError instanceof Error ? saveError.message : "Falha ao salvar integração.");
+    } finally {
+      setGameMarketBusy(null);
+    }
+  };
+
+  const testGameMarketConnection = async (): Promise<void> => {
+    setGameMarketBusy("testing");
+    setGameMarketResult("Testando conexão...");
+    setError(null);
+
+    try {
+      const result = await api.gamemarket.testConnection();
+      setGameMarketResult(result.safeMessage);
+      await refreshGameMarketSettings();
+    } catch (testError) {
+      setGameMarketResult(testError instanceof Error ? testError.message : "Falha ao testar conexão.");
+    } finally {
+      setGameMarketBusy(null);
+    }
+  };
+
+  const syncGameMarketNow = async (): Promise<void> => {
+    setGameMarketBusy("syncing");
+    setGameMarketResult("Sincronizando...");
+    setError(null);
+
+    try {
+      const summary = await api.gamemarket.syncNow();
+      setLastSyncSummary(summary);
+      setGameMarketResult(
+        summary.status === "failed"
+          ? summary.errors[0] ?? "Sync falhou."
+          : `${summary.productsFound} produto(s) e ${summary.ordersFound} pedido(s) lidos.`
+      );
+      await refreshGameMarketSettings();
+    } catch (syncError) {
+      setGameMarketResult(syncError instanceof Error ? syncError.message : "Falha ao sincronizar.");
+    } finally {
+      setGameMarketBusy(null);
+    }
+  };
+
+  const revealGameMarketToken = async (): Promise<void> => {
+    const confirmed = window.confirm("Revelar o token da GameMarket nesta tela?");
+    if (!confirmed) {
+      return;
+    }
+
+    setGameMarketBusy("revealing");
+    setGameMarketResult("");
+
+    try {
+      const result = await api.gamemarket.revealToken({ confirm: true });
+      setRevealedGameMarketToken(result.token);
+      setGameMarketResult("Token revelado nesta sessão.");
+      await refreshGameMarketSettings();
+    } catch (revealError) {
+      setGameMarketResult(revealError instanceof Error ? revealError.message : "Falha ao revelar token.");
+    } finally {
+      setGameMarketBusy(null);
     }
   };
 
@@ -271,6 +443,15 @@ export const SettingsPage = (): JSX.Element => {
       setSavingUser(false);
     }
   };
+
+  const gameMarketCanCallApi =
+    gameMarketSettings?.documentation.status === "available" && Boolean(gameMarketSettings.hasToken);
+  const gameMarketStatus =
+    gameMarketBusy === "testing"
+      ? "connecting"
+      : gameMarketBusy === "syncing"
+        ? "syncing"
+        : gameMarketSettings?.connectionStatus ?? "not_configured";
 
   return (
     <div className="grid gap-6 xl:grid-cols-2">
@@ -404,38 +585,190 @@ export const SettingsPage = (): JSX.Element => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Integração GameMarket</CardTitle>
-          <Badge tone="warning">Fase futura</Badge>
+          <CardTitle>GameMarket API</CardTitle>
+          <Badge tone={gameMarketStatusTone(gameMarketStatus)}>
+            {gameMarketStatusLabel[gameMarketStatus]}
+          </Badge>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="rounded-lg border border-line bg-panelSoft p-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white">
-              <FileText size={16} className="text-amber-300" />
-              Documentação oficial
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                <Link2 size={16} className="text-cyan" />
+                Status da conexão
+              </div>
+              <div className="mt-2 text-sm text-slate-400">{gameMarketStatusLabel[gameMarketStatus]}</div>
+              <div className="mt-2 font-mono text-xs text-slate-500">
+                {gameMarketSettings?.tokenMasked ?? "token não salvo"}
+              </div>
             </div>
-            <div className="mt-2 text-sm leading-6 text-slate-400">
-              Arquivos oficiais permanecem em <span className="font-mono text-slate-200">docs/gamemarket-api/</span>.
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                <FileText size={16} className="text-amber-300" />
+                Documentação
+              </div>
+              <div className="mt-2 text-sm text-slate-400">
+                {gameMarketSettings?.documentation.message ?? "Carregando documentação."}
+              </div>
+              <div className="mt-2 text-xs text-slate-500">
+                {(gameMarketSettings?.documentation.files.length ?? 0) > 0
+                  ? `${gameMarketSettings?.documentation.files.length} arquivo(s) encontrado(s)`
+                  : "Nenhum arquivo carregado"}
+              </div>
+            </div>
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="text-sm font-semibold text-white">Última conexão</div>
+              <div className="mt-2 text-sm text-slate-400">
+                {formatDateTime(gameMarketSettings?.lastConnectionAt)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="text-sm font-semibold text-white">Última sincronização</div>
+              <div className="mt-2 text-sm text-slate-400">
+                {formatDateTime(gameMarketSettings?.lastSyncAt)}
+              </div>
             </div>
           </div>
 
           <div className="rounded-lg border border-line bg-panelSoft p-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white">
-              <Server size={16} className="text-purple" />
-              Backend público
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-white">Configuração local</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  Autenticação documentada por header x-api-key. Permissões da chave atual: leitura.
+                </div>
+              </div>
+              <Badge tone={gameMarketSettings?.permissions.read ? "success" : "warning"}>
+                {gameMarketSettings?.permissions.read ? "read" : "sem leitura"}
+              </Badge>
             </div>
-            <div className="mt-2 text-sm leading-6 text-slate-400">
-              <span className="font-mono text-slate-200">apps/webhook-server/</span> segue preparado, sem webhooks reais nesta fase.
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">API Base URL</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={gameMarketForm.apiBaseUrl}
+                  onChange={(event) =>
+                    setGameMarketForm({ ...gameMarketForm, apiBaseUrl: event.target.value })
+                  }
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Nome da integração</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={gameMarketForm.integrationName}
+                  onChange={(event) =>
+                    setGameMarketForm({ ...gameMarketForm, integrationName: event.target.value })
+                  }
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Ambiente</span>
+                <select
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={gameMarketForm.environment}
+                  onChange={(event) =>
+                    setGameMarketForm({
+                      ...gameMarketForm,
+                      environment: event.target.value as GameMarketEnvironment
+                    })
+                  }
+                >
+                  <option value="production">production</option>
+                  <option value="sandbox">sandbox</option>
+                  <option value="custom">custom</option>
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">API Key / Token</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  type="password"
+                  value={gameMarketToken}
+                  placeholder={gameMarketSettings?.tokenMasked ?? "Cole a chave para salvar"}
+                  autoComplete="off"
+                  onChange={(event) => setGameMarketToken(event.target.value)}
+                />
+              </label>
             </div>
+
+            {revealedGameMarketToken && (
+              <div className="mt-4 rounded-md border border-amber-500/25 bg-amber-500/10 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">
+                  Token revelado
+                </div>
+                <input
+                  className="mt-2 w-full rounded-md border border-amber-500/25 bg-black/30 px-3 py-2 font-mono text-xs text-amber-100"
+                  readOnly
+                  value={revealedGameMarketToken}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              disabled={gameMarketBusy !== null}
+              onClick={() => void saveGameMarketSettings()}
+            >
+              <Save size={16} />
+              {gameMarketBusy === "saving" ? "Salvando..." : "Salvar configuração"}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={gameMarketBusy !== null || !gameMarketCanCallApi}
+              onClick={() => void testGameMarketConnection()}
+            >
+              <Server size={16} />
+              {gameMarketBusy === "testing" ? "Testando..." : "Testar conexão"}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={gameMarketBusy !== null || !gameMarketCanCallApi}
+              onClick={() => void syncGameMarketNow()}
+            >
+              <RefreshCw size={16} />
+              {gameMarketBusy === "syncing" ? "Sincronizando..." : "Sincronizar agora"}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={gameMarketBusy !== null || !gameMarketSettings?.hasToken}
+              onClick={() => void revealGameMarketToken()}
+            >
+              <Eye size={16} />
+              Revelar token
+            </Button>
           </div>
 
           <div className="rounded-lg border border-line bg-panelSoft p-4">
             <div className="flex items-center gap-2 text-sm font-semibold text-white">
               <LockKeyhole size={16} className="text-cyan" />
-              Secrets locais
+              Último erro seguro
             </div>
             <div className="mt-2 text-sm leading-6 text-slate-400">
-              Pedidos e eventos não exportam senhas nem payloads com chaves sem mascaramento.
+              {gameMarketResult || gameMarketSettings?.lastError || "Sem erro registrado."}
             </div>
+          </div>
+
+          <div className="rounded-lg border border-line bg-panelSoft p-4">
+            <div className="text-sm font-semibold text-white">Resumo da última sync</div>
+            {lastSyncSummary ? (
+              <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-2">
+                <div>Produtos encontrados: {lastSyncSummary.productsFound}</div>
+                <div>Pedidos encontrados: {lastSyncSummary.ordersFound}</div>
+                <div>Produtos novos: {lastSyncSummary.productsNew}</div>
+                <div>Produtos atualizados: {lastSyncSummary.productsUpdated}</div>
+                <div>Pedidos novos: {lastSyncSummary.ordersNew}</div>
+                <div>Pedidos atualizados: {lastSyncSummary.ordersUpdated}</div>
+                <div>Duração: {lastSyncSummary.durationMs} ms</div>
+                <div>Status: {lastSyncSummary.status}</div>
+              </div>
+            ) : (
+              <div className="mt-2 text-sm text-slate-400">Nenhuma sincronização registrada.</div>
+            )}
           </div>
         </CardContent>
       </Card>

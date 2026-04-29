@@ -4,6 +4,7 @@ import { initializeDatabase, getDatabaseStatus } from "./database/database";
 import { registerAuthIpc } from "./ipc/auth-ipc";
 import { registerDashboardIpc } from "./ipc/dashboard-ipc";
 import { registerEventsIpc } from "./ipc/events-ipc";
+import { registerGameMarketIpc } from "./ipc/gamemarket-ipc";
 import { registerInventoryIpc } from "./ipc/inventory-ipc";
 import { registerOrdersIpc } from "./ipc/orders-ipc";
 import { registerProductsIpc } from "./ipc/products-ipc";
@@ -55,6 +56,7 @@ const registerIpcHandlers = (): void => {
   registerEventsIpc(ipcMain);
   registerDashboardIpc(ipcMain);
   registerSettingsIpc(ipcMain);
+  registerGameMarketIpc(ipcMain);
 
   ipcMain.handle("app:get-meta", () => ({
     name: app.getName(),

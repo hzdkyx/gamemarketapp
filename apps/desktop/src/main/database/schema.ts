@@ -28,6 +28,13 @@ export const products = sqliteTable("products", {
     .default("manual"),
   supplierId: text("supplier_id"),
   notes: text("notes"),
+  externalMarketplace: text("external_marketplace", {
+    enum: ["gamemarket"]
+  }),
+  externalProductId: text("external_product_id"),
+  externalStatus: text("external_status"),
+  externalPayloadHash: text("external_payload_hash"),
+  lastSyncedAt: text("last_synced_at"),
   createdByUserId: text("created_by_user_id").references(() => users.id),
   updatedByUserId: text("updated_by_user_id").references(() => users.id),
   createdAt: text("created_at").notNull(),
@@ -97,6 +104,12 @@ export const orders = sqliteTable("orders", {
   })
     .notNull()
     .default("gamemarket"),
+  externalMarketplace: text("external_marketplace", {
+    enum: ["gamemarket"]
+  }),
+  externalStatus: text("external_status"),
+  externalPayloadHash: text("external_payload_hash"),
+  lastSyncedAt: text("last_synced_at"),
   productId: text("product_id").references(() => products.id),
   inventoryItemId: text("inventory_item_id").references(() => inventoryItems.id),
   buyerName: text("buyer_name"),
@@ -142,7 +155,7 @@ export const events = sqliteTable("events", {
   id: text("id").primaryKey(),
   eventCode: text("event_code").notNull().unique(),
   source: text("source", {
-    enum: ["manual", "system", "gamemarket_future", "webhook_future"]
+    enum: ["manual", "system", "gamemarket_api", "gamemarket_future", "webhook_future"]
   }).notNull(),
   type: text("type", {
     enum: [
@@ -163,6 +176,17 @@ export const events = sqliteTable("events", {
       "product.low_stock",
       "product.out_of_stock",
       "security.secret_revealed",
+      "integration.gamemarket.settings_updated",
+      "integration.gamemarket.connection_tested",
+      "integration.gamemarket.connection_failed",
+      "integration.gamemarket.token_revealed",
+      "integration.gamemarket.sync_started",
+      "integration.gamemarket.sync_completed",
+      "integration.gamemarket.sync_failed",
+      "integration.gamemarket.order_imported",
+      "integration.gamemarket.order_updated",
+      "integration.gamemarket.product_imported",
+      "integration.gamemarket.product_updated",
       "system.notification_test"
     ]
   }).notNull(),

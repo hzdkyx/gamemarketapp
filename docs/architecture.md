@@ -48,6 +48,7 @@ As migrations runtime estão em `apps/desktop/src/main/database/migrations.ts`:
 - `0001_phase2_products_inventory`: amplia produtos e estoque, recria tabelas quando necessário para corrigir enums/check constraints e preservar dados existentes.
 - `0002_phase3_orders_events`: recria pedidos e eventos com snapshots financeiros, vínculos com estoque/produto, timeline e índices de consulta.
 - `0003_phase35_auth_users_audit`: adiciona `users`, colunas de auditoria por usuário e o evento `security.secret_revealed`.
+- `0004_phase4_gamemarket_api`: adiciona metadados externos em produtos/pedidos e amplia eventos internos da integração GameMarket.
 
 A tabela `schema_migrations` registra o que já foi aplicado. O app executa migrations na inicialização do main process.
 
@@ -61,6 +62,7 @@ Campos persistidos:
 - `net_value_cents`, `estimated_profit_cents`, `margin_percent`
 - `stock_current`, `stock_min`
 - `status`, `delivery_type`, `supplier_id`, `notes`
+- metadados GameMarket: `external_marketplace`, `external_product_id`, `external_status`, `external_payload_hash`, `last_synced_at`
 - auditoria: `created_by_user_id`, `updated_by_user_id`
 
 O cálculo financeiro é feito no service usando `packages/shared/src/financial.ts`, nunca duplicado na UI.
@@ -86,6 +88,7 @@ Listagens e exportações retornam apenas metadados e flags sobre segredos. O se
 Campos persistidos:
 
 - `order_code`, `external_order_id`, `marketplace`
+- metadados GameMarket: `external_marketplace`, `external_status`, `external_payload_hash`, `last_synced_at`
 - `product_id`, `inventory_item_id`
 - `buyer_name`, `buyer_contact`
 - snapshots: `product_name_snapshot`, `category_snapshot`
@@ -126,9 +129,20 @@ Eventos são auditoria local do app. Os tipos iniciais são controlados em `cont
 - `product.low_stock`
 - `product.out_of_stock`
 - `security.secret_revealed`
+- `integration.gamemarket.settings_updated`
+- `integration.gamemarket.connection_tested`
+- `integration.gamemarket.connection_failed`
+- `integration.gamemarket.token_revealed`
+- `integration.gamemarket.sync_started`
+- `integration.gamemarket.sync_completed`
+- `integration.gamemarket.sync_failed`
+- `integration.gamemarket.order_imported`
+- `integration.gamemarket.order_updated`
+- `integration.gamemarket.product_imported`
+- `integration.gamemarket.product_updated`
 - `system.notification_test`
 
-`gamemarket_future` e `webhook_future` existem apenas como fontes reservadas para normalização futura. Eles não significam que já exista integração real.
+`gamemarket_api` identifica eventos criados pela integração local de leitura. `gamemarket_future` e `webhook_future` continuam reservados para normalização futura.
 
 Payload bruto é opcional, limitado e passa por mascaramento de chaves sensíveis como senha, token, secret, key e login.
 
@@ -263,6 +277,15 @@ Configurações:
 - `settings:getNotificationSettings`
 - `settings:updateNotificationSettings`
 
+GameMarket API:
+
+- `gamemarket:getSettings`
+- `gamemarket:updateSettings`
+- `gamemarket:revealToken`
+- `gamemarket:testConnection`
+- `gamemarket:syncNow`
+- `gamemarket:getLastSyncSummary`
+
 Autenticação e usuários:
 
 - `auth:getBootstrap`
@@ -279,6 +302,41 @@ Autenticação e usuários:
 Todos os payloads são validados por schemas Zod em `apps/desktop/src/shared/contracts.ts` antes de tocar em repositories ou banco.
 
 Os canais internos são protegidos por sessão. Ações de escrita e exportação exigem permissões específicas.
+
+## Integração GameMarket API
+
+O módulo oficial da Fase 4 fica em `apps/desktop/src/main/integrations/gamemarket/`.
+
+```mermaid
+flowchart LR
+  UI["Configurações GameMarket API"] --> IPCGM["IPC gamemarket:*"]
+  IPCGM --> Settings["Settings service"]
+  IPCGM --> GMService["GameMarket service"]
+  GMService --> Client["GameMarket client HTTP"]
+  GMService --> Sync["Sync service"]
+  Client --> API["GameMarket API"]
+  Sync --> DB["SQLite local"]
+  Sync --> Events["Eventos internos"]
+```
+
+Regras da Fase 4:
+
+- autenticação por `x-api-key`, conforme documentação local;
+- token criptografado em `settings.gamemarket_api_token_encrypted`;
+- token mascarado por padrão no renderer;
+- logs/eventos recebem apenas metadados seguros;
+- teste de conexão usa `GET /api/v1/games`;
+- sync manual usa `GET /api/v1/products` e `GET /api/v1/orders`;
+- produtos e pedidos usam `externalPayloadHash` para evitar duplicatas;
+- dados locais existentes não são sobrescritos por payload externo sem critério;
+- pedidos importados ficam para revisão manual quando não há mapeamento oficial completo de status.
+
+Diferença entre sync manual e webhook futuro:
+
+- sync manual é uma ação admin local que puxa dados da API documentada de leitura;
+- webhook futuro exige backend público, porque o app desktop local não tem URL pública estável, TLS público, fila de retries nem disponibilidade garantida.
+
+Na Fase 5, o backend público poderá rodar na Railway, receber webhooks da GameMarket, validar assinatura/token oficial, normalizar eventos e entregar mudanças ao desktop por um fluxo próprio.
 
 ## Segurança
 
@@ -348,7 +406,7 @@ Quando houver documentação oficial:
 4. Sincronizar com o desktop sem expor segredos locais.
 5. Preservar o payload bruto somente quando necessário e sempre mascarado.
 
-Nenhum endpoint da GameMarket foi inventado na Fase 3.
+Nenhum endpoint da GameMarket foi inventado na Fase 4.
 
 ## Estratégia Futura para WhatsApp
 
@@ -363,7 +421,7 @@ Na Fase 3, notificações são apenas desktop local/fallback visual.
 
 ## Riscos e Mitigações
 
-- Documentação GameMarket inacessível: integração bloqueada até documentação oficial existir em `docs/gamemarket-api/`.
+- Documentação GameMarket incompleta: chamadas reais ficam limitadas aos endpoints presentes em `docs/gamemarket-api/`.
 - Dados sensíveis: não logar, não exportar e não renderizar por padrão.
 - SQLite nativo no Electron: manter acesso isolado no main process e usar `electron-rebuild` quando necessário.
 - Evolução de schema: usar migrations incrementais registradas em `schema_migrations`.
