@@ -108,8 +108,8 @@ export const AppShell = (): JSX.Element => {
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-col">
-        <header className="flex h-20 items-center justify-between border-b border-line bg-background/95 px-8">
+      <div className="flex min-h-0 min-w-0 flex-col">
+        <header className="flex h-20 shrink-0 items-center justify-between border-b border-line bg-background/95 px-8">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan">
               {current.eyebrow}
@@ -142,8 +142,10 @@ export const AppShell = (): JSX.Element => {
           </div>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
-          <Outlet />
+        <main className="min-h-0 flex-1 overflow-hidden">
+          <div className="h-full min-h-0 overflow-y-auto px-8 py-6">
+            <Outlet />
+          </div>
         </main>
       </div>
 

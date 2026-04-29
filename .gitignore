@@ -34,3 +34,7 @@ apps/desktop/release/
 Thumbs.db
 .idea/
 .vscode/
+
+# Webhook server local dev storage
+apps/webhook-server/data/
+

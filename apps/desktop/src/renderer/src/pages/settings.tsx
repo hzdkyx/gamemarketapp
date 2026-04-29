@@ -645,7 +645,7 @@ export const SettingsPage = (): JSX.Element => {
         : webhookServerSettings?.connectionStatus ?? "not_configured";
 
   return (
-    <div className="grid gap-6 xl:grid-cols-2">
+    <div className="grid gap-6 pb-10 xl:grid-cols-2">
       {error && <div className="xl:col-span-2 rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">{error}</div>}
 
       <Card className="xl:col-span-2">
@@ -660,7 +660,7 @@ export const SettingsPage = (): JSX.Element => {
           </Button>
         </CardHeader>
         <CardContent>
-          <div className="overflow-hidden rounded-lg border border-line">
+          <div className="overflow-x-auto rounded-lg border border-line">
             <table className="w-full border-collapse text-left text-sm">
               <thead className="bg-panelSoft text-xs uppercase tracking-[0.12em] text-slate-500">
                 <tr>
