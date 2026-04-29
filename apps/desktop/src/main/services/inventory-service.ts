@@ -15,6 +15,7 @@ import {
   inventoryRepository,
   type InventoryWriteRecord
 } from "../repositories/inventory-repository";
+import { productVariantRepository } from "../repositories/product-variant-repository";
 import { productRepository } from "../repositories/product-repository";
 import { decryptLocalSecret, encryptLocalSecret } from "../security/secrets";
 import { eventService } from "./event-service";
@@ -52,6 +53,21 @@ const assertProductExists = (productId: string | null): void => {
   }
 };
 
+const assertVariantCompatible = (productId: string | null, productVariantId: string | null): void => {
+  if (!productVariantId) {
+    return;
+  }
+
+  const variant = productVariantRepository.getById(productVariantId);
+  if (!variant || variant.status === "archived") {
+    throw new Error("Variação vinculada não encontrada.");
+  }
+
+  if (!productId || variant.productId !== productId) {
+    throw new Error("Variação não pertence ao produto vinculado.");
+  }
+};
+
 const mapSummary = (summary: ReturnType<typeof inventoryRepository.getSummary>): InventorySummary => ({
   available: summary.available ?? 0,
   sold: summary.sold ?? 0,
@@ -81,6 +97,7 @@ export const inventoryService = {
       items: inventoryRepository.list(filters),
       summary: mapSummary(inventoryRepository.getSummary()),
       products: productRepository.listAllForSelect(),
+      productVariants: productVariantRepository.listAllForSelect(),
       suppliers: inventoryRepository.listSuppliers(),
       categories: productRepository.listCategories()
     };
@@ -98,12 +115,15 @@ export const inventoryService = {
   create(input: InventoryCreateInput, actorUserId: string | null = null): InventoryRecord {
     const timestamp = nowIso();
     const productId = input.productId ?? null;
+    const productVariantId = input.productVariantId ?? null;
     assertProductExists(productId);
+    assertVariantCompatible(productId, productVariantId);
 
     return inventoryRepository.insert({
       id: randomUUID(),
       inventoryCode: normalizeInventoryCode(input.inventoryCode),
       productId,
+      productVariantId,
       supplierId: input.supplierId ?? null,
       purchaseCostCents: moneyToCents(input.purchaseCost),
       status: input.status,
@@ -131,7 +151,11 @@ export const inventoryService = {
     }
 
     const productId = Object.hasOwn(data, "productId") ? data.productId ?? null : current.product_id;
+    const productVariantId = Object.hasOwn(data, "productVariantId")
+      ? data.productVariantId ?? null
+      : current.product_variant_id;
     assertProductExists(productId);
+    assertVariantCompatible(productId, productVariantId);
 
     const status = data.status ?? current.status;
     const soldAt =
@@ -149,6 +173,7 @@ export const inventoryService = {
         Object.hasOwn(data, "inventoryCode") ? data.inventoryCode : current.inventory_code
       ),
       productId,
+      productVariantId,
       supplierId: Object.hasOwn(data, "supplierId") ? data.supplierId ?? null : current.supplier_id,
       purchaseCostCents:
         data.purchaseCost === undefined ? current.purchase_cost_cents : moneyToCents(data.purchaseCost),
@@ -226,6 +251,8 @@ export const inventoryService = {
       { header: "ID", value: (row) => row.id },
       { header: "ID interno", value: (row) => row.inventoryCode },
       { header: "Produto ID", value: (row) => row.productId },
+      { header: "Variação ID", value: (row) => row.productVariantId },
+      { header: "Variação", value: (row) => row.productVariantName },
       { header: "Produto", value: (row) => row.productName },
       { header: "Produto interno", value: (row) => row.productInternalCode },
       { header: "Categoria", value: (row) => row.category },

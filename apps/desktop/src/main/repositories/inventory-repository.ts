@@ -9,11 +9,15 @@ interface InventoryJoinedRow {
   id: string;
   inventory_code: string;
   product_id: string | null;
+  product_variant_id: string | null;
+  product_variant_code: string | null;
+  product_variant_name: string | null;
   product_name: string | null;
   product_internal_code: string | null;
   category: string | null;
   game: string | null;
   product_net_value_cents: number | null;
+  variant_net_value_cents: number | null;
   supplier_id: string | null;
   purchase_cost_cents: number;
   status: InventoryStatus;
@@ -37,6 +41,7 @@ export interface InventoryEncryptedRow {
   id: string;
   inventory_code: string;
   product_id: string | null;
+  product_variant_id: string | null;
   supplier_id: string | null;
   purchase_cost_cents: number;
   status: InventoryStatus;
@@ -60,6 +65,7 @@ export interface InventoryWriteRecord {
   id: string;
   inventoryCode: string;
   productId: string | null;
+  productVariantId: string | null;
   supplierId: string | null;
   purchaseCostCents: number;
   status: InventoryStatus;
@@ -93,6 +99,9 @@ const mapInventoryRow = (row: InventoryJoinedRow): InventoryRecord => ({
   id: row.id,
   inventoryCode: row.inventory_code,
   productId: row.product_id,
+  productVariantId: row.product_variant_id,
+  productVariantCode: row.product_variant_code,
+  productVariantName: row.product_variant_name,
   productName: row.product_name,
   productInternalCode: row.product_internal_code,
   category: row.category,
@@ -110,7 +119,9 @@ const mapInventoryRow = (row: InventoryJoinedRow): InventoryRecord => ({
   soldAt: row.sold_at,
   deliveredAt: row.delivered_at,
   orderId: row.order_id,
-  potentialProfit: centsToMoney((row.product_net_value_cents ?? 0) - row.purchase_cost_cents),
+  potentialProfit: centsToMoney(
+    (row.variant_net_value_cents ?? row.product_net_value_cents ?? 0) - row.purchase_cost_cents
+  ),
   createdByUserId: row.created_by_user_id,
   updatedByUserId: row.updated_by_user_id,
   createdAt: row.created_at,
@@ -122,11 +133,15 @@ const inventorySelect = `
     inventory_items.id,
     inventory_items.inventory_code,
     inventory_items.product_id,
+    inventory_items.product_variant_id,
+    product_variants.variant_code AS product_variant_code,
+    product_variants.name AS product_variant_name,
     products.name AS product_name,
     products.internal_code AS product_internal_code,
     products.category,
     products.game,
     products.net_value_cents AS product_net_value_cents,
+    product_variants.net_value_cents AS variant_net_value_cents,
     inventory_items.supplier_id,
     inventory_items.purchase_cost_cents,
     inventory_items.status,
@@ -146,6 +161,7 @@ const inventorySelect = `
     inventory_items.updated_at
   FROM inventory_items
   LEFT JOIN products ON products.id = inventory_items.product_id
+  LEFT JOIN product_variants ON product_variants.id = inventory_items.product_variant_id
 `;
 
 const encryptedSelect = `
@@ -153,6 +169,7 @@ const encryptedSelect = `
     id,
     inventory_code,
     product_id,
+    product_variant_id,
     supplier_id,
     purchase_cost_cents,
     status,
@@ -181,6 +198,8 @@ const buildInventoryWhere = (filters: InventoryListInput): { sql: string; params
     where.push(`(
       LOWER(inventory_items.inventory_code) LIKE @search OR
       LOWER(COALESCE(products.name, '')) LIKE @search OR
+      LOWER(COALESCE(product_variants.name, '')) LIKE @search OR
+      LOWER(COALESCE(product_variants.variant_code, '')) LIKE @search OR
       LOWER(COALESCE(products.internal_code, '')) LIKE @search OR
       LOWER(COALESCE(inventory_items.supplier_id, '')) LIKE @search OR
       LOWER(inventory_items.status) LIKE @search OR
@@ -253,6 +272,7 @@ export const inventoryRepository = {
           id,
           inventory_code,
           product_id,
+          product_variant_id,
           supplier_id,
           purchase_cost_cents,
           status,
@@ -275,6 +295,7 @@ export const inventoryRepository = {
           @id,
           @inventoryCode,
           @productId,
+          @productVariantId,
           @supplierId,
           @purchaseCostCents,
           @status,
@@ -312,6 +333,7 @@ export const inventoryRepository = {
         SET
           inventory_code = @inventoryCode,
           product_id = @productId,
+          product_variant_id = @productVariantId,
           supplier_id = @supplierId,
           purchase_cost_cents = @purchaseCostCents,
           status = @status,
@@ -359,12 +381,13 @@ export const inventoryRepository = {
             SUM(
               CASE
                 WHEN inventory_items.status = 'available'
-                  THEN COALESCE(products.net_value_cents, 0) - inventory_items.purchase_cost_cents
+                  THEN COALESCE(product_variants.net_value_cents, products.net_value_cents, 0) - inventory_items.purchase_cost_cents
                 ELSE 0
               END
             ) AS potential_profit_cents
           FROM inventory_items
           LEFT JOIN products ON products.id = inventory_items.product_id
+          LEFT JOIN product_variants ON product_variants.id = inventory_items.product_variant_id
         `
       )
       .get() as InventorySummaryRow;
@@ -381,7 +404,18 @@ export const inventoryRepository = {
     return rows.map((row) => row.value);
   },
 
-  listForOrderSelect(): Array<Pick<InventoryRecord, "id" | "inventoryCode" | "productId" | "productName" | "status">> {
+  listForOrderSelect(): Array<
+    Pick<
+      InventoryRecord,
+      | "id"
+      | "inventoryCode"
+      | "productId"
+      | "productVariantId"
+      | "productName"
+      | "productVariantName"
+      | "status"
+    >
+  > {
     const db = getSqliteDatabase();
     const rows = db
       .prepare(
@@ -390,10 +424,13 @@ export const inventoryRepository = {
             inventory_items.id,
             inventory_items.inventory_code,
             inventory_items.product_id,
+            inventory_items.product_variant_id,
             products.name AS product_name,
+            product_variants.name AS product_variant_name,
             inventory_items.status
           FROM inventory_items
           LEFT JOIN products ON products.id = inventory_items.product_id
+          LEFT JOIN product_variants ON product_variants.id = inventory_items.product_variant_id
           WHERE inventory_items.status != 'archived'
           ORDER BY
             CASE inventory_items.status
@@ -408,7 +445,9 @@ export const inventoryRepository = {
       id: string;
       inventory_code: string;
       product_id: string | null;
+      product_variant_id: string | null;
       product_name: string | null;
+      product_variant_name: string | null;
       status: InventoryStatus;
     }>;
 
@@ -416,7 +455,9 @@ export const inventoryRepository = {
       id: row.id,
       inventoryCode: row.inventory_code,
       productId: row.product_id,
+      productVariantId: row.product_variant_id,
       productName: row.product_name,
+      productVariantName: row.product_variant_name,
       status: row.status
     }));
   },
@@ -428,6 +469,17 @@ export const inventoryRepository = {
         "SELECT COUNT(*) AS total FROM inventory_items WHERE product_id = ? AND status = 'available'"
       )
       .get(productId) as { total: number } | undefined;
+
+    return row?.total ?? 0;
+  },
+
+  countAvailableByProductVariant(productVariantId: string): number {
+    const db = getSqliteDatabase();
+    const row = db
+      .prepare(
+        "SELECT COUNT(*) AS total FROM inventory_items WHERE product_variant_id = ? AND status = 'available'"
+      )
+      .get(productVariantId) as { total: number } | undefined;
 
     return row?.total ?? 0;
   }

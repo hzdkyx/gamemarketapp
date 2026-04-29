@@ -5,6 +5,7 @@ import {
   Download,
   Edit3,
   ExternalLink,
+  Layers3,
   PackageX,
   Plus,
   Search,
@@ -16,6 +17,7 @@ import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card";
 import { Table, Td, Th } from "@renderer/components/ui/table";
+import { ProductVariantsPanel } from "@renderer/components/products/product-variants-panel";
 import { useAuth } from "@renderer/lib/auth-context";
 import { downloadCsv } from "@renderer/lib/csv";
 import { getDesktopApi } from "@renderer/lib/desktop-api";
@@ -479,6 +481,7 @@ export const ProductsPage = (): JSX.Element => {
   const [form, setForm] = useState<ProductFormState | null>(null);
   const [formMode, setFormMode] = useState<"create" | "edit" | "duplicate">("create");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [variantsProduct, setVariantsProduct] = useState<ProductRecord | null>(null);
   const [saving, setSaving] = useState(false);
 
   const loadProducts = useCallback(async (): Promise<void> => {
@@ -724,6 +727,14 @@ export const ProductsPage = (): JSX.Element => {
                         <Button size="icon" variant="ghost" title="Editar" disabled={!canEditProducts} onClick={() => openEdit(product)}>
                           <Edit3 size={15} />
                         </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Variações"
+                          onClick={() => setVariantsProduct(product)}
+                        >
+                          <Layers3 size={15} />
+                        </Button>
                         <Button size="icon" variant="ghost" title="Duplicar" disabled={!canEditProducts} onClick={() => openDuplicate(product)}>
                           <Copy size={15} />
                         </Button>
@@ -769,6 +780,15 @@ export const ProductsPage = (): JSX.Element => {
           onSubmit={() => void saveProduct()}
           saving={saving}
           error={error}
+        />
+      )}
+
+      {variantsProduct && (
+        <ProductVariantsPanel
+          product={variantsProduct}
+          canEditProducts={canEditProducts}
+          canExportCsv={canExportCsv}
+          onClose={() => setVariantsProduct(null)}
         />
       )}
     </div>

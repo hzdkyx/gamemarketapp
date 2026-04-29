@@ -15,24 +15,29 @@ flowchart LR
   Repos --> DB["SQLite local"]
 ```
 
-## Fluxo Produto → Estoque → Pedido → Evento
+## Fluxo Produto → Variação → Estoque → Pedido → Evento
 
 ```mermaid
 flowchart LR
   Product["Produto"] --> Inventory["Itens de estoque"]
+  Product --> Variant["Variações do anúncio"]
+  Variant --> Inventory
+  Variant --> Order
   Product --> Order["Pedido manual"]
   Inventory --> Order
   Order --> Event["Evento interno"]
   Inventory --> Event
   Product --> Event
+  Variant --> Event
 ```
 
-Na Fase 3:
+Na operação atual:
 
-- Produto define catálogo, preço, custo, taxa, estoque operacional e status.
-- Estoque registra itens concretos vinculados a produtos.
-- Pedido manual guarda snapshots de produto, categoria/jogo, preço, custo, taxa, líquido, lucro e margem.
-- Pedido pode vincular um item de estoque compatível com o produto.
+- Produto representa o anúncio importado da GameMarket ou cadastrado manualmente.
+- Variação representa a opção operacional vendida dentro do anúncio.
+- Estoque registra itens concretos vinculados a produtos e, opcionalmente, a uma variação.
+- Pedido manual guarda snapshots de produto, variação, categoria/jogo, preço, custo, taxa, líquido, lucro e margem.
+- Pedido pode vincular um item de estoque compatível com o produto e com a variação.
 - Mudanças de status de pedido geram eventos internos e atualizam o status do item de estoque quando aplicável.
 - Eventos formam a timeline/auditoria local do pedido.
 
@@ -50,6 +55,7 @@ As migrations runtime estão em `apps/desktop/src/main/database/migrations.ts`:
 - `0003_phase35_auth_users_audit`: adiciona `users`, colunas de auditoria por usuário e o evento `security.secret_revealed`.
 - `0004_phase4_gamemarket_api`: adiciona metadados externos em produtos/pedidos e amplia eventos internos da integração GameMarket.
 - `0005_phase5_webhook_server`: amplia eventos internos para Webhook Server e cria `webhook_server_event_imports` para deduplicar importações remotas.
+- `0006_product_variants`: adiciona `product_variants`, vínculos opcionais `product_variant_id` em estoque e pedidos, e índices de consulta por produto, código, status e revisão.
 
 A tabela `schema_migrations` registra o que já foi aplicado. O app executa migrations na inicialização do main process.
 
@@ -68,12 +74,48 @@ Campos persistidos:
 
 O cálculo financeiro é feito no service usando `packages/shared/src/financial.ts`, nunca duplicado na UI.
 
+## Variações de Produto
+
+Tabela `product_variants`:
+
+- `id`
+- `product_id`
+- `variant_code`
+- `name`
+- `description`
+- `sale_price_cents`
+- `unit_cost_cents`
+- `fee_percent`
+- `net_value_cents`
+- `estimated_profit_cents`
+- `margin_percent`
+- `stock_current`
+- `stock_min`
+- `supplier_name`
+- `supplier_url`
+- `delivery_type`: `manual`, `automatic`, `on_demand`, `service`
+- `status`: `active`, `paused`, `out_of_stock`, `archived`
+- `notes`
+- `source`: `manual`, `seeded_from_conversation`, `gamemarket_sync`, `imported`
+- `needs_review`
+- `manually_edited_at`
+- `created_at`, `updated_at`
+
+Regras:
+
+- `needs_review` é persistido como inteiro `0/1`.
+- Valores financeiros são salvos em centavos.
+- `net_value_cents`, `estimated_profit_cents`, `margin_percent` e preço mínimo são calculados no service com as fórmulas compartilhadas.
+- `manual` e `automatic` exigem estoque real.
+- `on_demand` e `service` não entram em métricas de sem estoque ou estoque baixo.
+- Sync da GameMarket não apaga variações e não sobrescreve custo, fornecedor, tipo de entrega, estoque ou notas locais.
+
 ## Estoque
 
 Campos persistidos:
 
 - `inventory_code`
-- `product_id`, `supplier_id`
+- `product_id`, `product_variant_id`, `supplier_id`
 - `purchase_cost_cents`
 - `status`
 - colunas criptografadas para login, senha, email, senha do email e notas de acesso
@@ -90,7 +132,7 @@ Campos persistidos:
 
 - `order_code`, `external_order_id`, `marketplace`
 - metadados GameMarket: `external_marketplace`, `external_status`, `external_payload_hash`, `last_synced_at`
-- `product_id`, `inventory_item_id`
+- `product_id`, `product_variant_id`, `inventory_item_id`
 - `buyer_name`, `buyer_contact`
 - snapshots: `product_name_snapshot`, `category_snapshot`
 - financeiros: `sale_price_cents`, `unit_cost_cents`, `fee_percent`, `net_value_cents`, `profit_cents`, `margin_percent`
@@ -99,6 +141,8 @@ Campos persistidos:
 - usuário: `created_by_user_id`, `updated_by_user_id`
 
 O cálculo financeiro usa `calculateProductFinancials` de `packages/shared`. A UI pode sugerir valores vindos do produto, mas o cálculo final acontece no main process.
+
+Quando `product_variant_id` existe, o pedido usa o custo, preço e taxa da variação como base do snapshot. Sem variação, usa o produto pai. Pedidos importados da GameMarket que apontam para produto com variações, mas sem variação detectada, ficam com `variantPending` para revisão manual.
 
 Regras de estoque vinculadas ao status do pedido:
 
@@ -247,6 +291,18 @@ Produtos:
 - `products:delete`
 - `products:exportCsv`
 
+Variações de produto:
+
+- `productVariants:list`
+- `productVariants:get`
+- `productVariants:create`
+- `productVariants:update`
+- `productVariants:duplicate`
+- `productVariants:archive`
+- `productVariants:markNeedsReview`
+- `productVariants:delete`
+- `productVariants:exportCsv`
+
 Estoque:
 
 - `inventory:list`
@@ -352,6 +408,8 @@ Regras da Fase 4:
 - sync manual usa `GET /api/v1/products` e `GET /api/v1/orders`;
 - produtos e pedidos usam `externalPayloadHash` para evitar duplicatas;
 - dados locais existentes não são sobrescritos por payload externo sem critério;
+- variações locais não são apagadas nem sobrescritas pelo sync;
+- custo unitário, fornecedor, tipo de entrega, estoque e notas locais permanecem sob controle do usuário;
 - pedidos importados ficam para revisão manual quando não há mapeamento oficial completo de status.
 
 Diferença entre sync manual e webhook futuro:

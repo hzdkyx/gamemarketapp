@@ -18,6 +18,7 @@ import type {
 import { getSqliteDatabase } from "../database/database";
 import { inventoryRepository } from "../repositories/inventory-repository";
 import { orderRepository, type OrderWriteRecord } from "../repositories/order-repository";
+import { productVariantRepository } from "../repositories/product-variant-repository";
 import { productRepository } from "../repositories/product-repository";
 import { eventService } from "./event-service";
 import { inventoryService } from "./inventory-service";
@@ -112,6 +113,23 @@ const makeFinancials = (input: { salePrice: number; unitCost: number; feePercent
   };
 };
 
+const getCompatibleVariant = (productId: string, productVariantId: string | null) => {
+  if (!productVariantId) {
+    return null;
+  }
+
+  const variant = productVariantRepository.getById(productVariantId);
+  if (!variant || variant.status === "archived") {
+    throw new Error("Variação vinculada não encontrada.");
+  }
+
+  if (variant.productId !== productId) {
+    throw new Error("Variação não pertence ao produto do pedido.");
+  }
+
+  return variant;
+};
+
 const recordToWrite = (order: OrderRecord): OrderWriteRecord => ({
   id: order.id,
   orderCode: order.orderCode,
@@ -122,6 +140,7 @@ const recordToWrite = (order: OrderRecord): OrderWriteRecord => ({
   externalPayloadHash: order.externalPayloadHash ?? null,
   lastSyncedAt: order.lastSyncedAt ?? null,
   productId: order.productId,
+  productVariantId: order.productVariantId,
   inventoryItemId: order.inventoryItemId,
   buyerName: order.buyerName,
   buyerContact: order.buyerContact,
@@ -166,6 +185,14 @@ const assertInventoryCompatible = (order: OrderRecord, item: InventoryRecord): v
     throw new Error("Item de estoque não pertence ao produto do pedido.");
   }
 
+  if (order.productVariantId && item.productVariantId !== order.productVariantId) {
+    throw new Error("Item de estoque não pertence à variação do pedido.");
+  }
+
+  if (!order.productVariantId && item.productVariantId) {
+    throw new Error("Item de estoque pertence a uma variação específica. Vincule a variação ao pedido.");
+  }
+
   if (item.status === "reserved" && item.orderId && item.orderId !== order.id) {
     throw new Error("Item de estoque já está reservado para outro pedido.");
   }
@@ -196,17 +223,52 @@ const updateInventory = (
     actorUserId
   });
 
-  emitStockLevelEvents(updated.productId);
+  emitStockLevelEvents(updated.productId, updated.productVariantId);
   return updated;
 };
 
-function emitStockLevelEvents(productId: string | null): void {
+function emitStockLevelEvents(productId: string | null, productVariantId: string | null = null): void {
+  if (productVariantId) {
+    const variant = productVariantRepository.getById(productVariantId);
+    if (!variant || !["manual", "automatic"].includes(variant.deliveryType)) {
+      return;
+    }
+
+    const available = inventoryRepository.countAvailableByProductVariant(productVariantId);
+
+    if (available === 0) {
+      eventService.createInternal({
+        type: "product.out_of_stock",
+        severity: "warning",
+        title: "Variação sem estoque disponível",
+        message: `${variant.name} não possui itens de estoque disponíveis.`,
+        productId
+      });
+      return;
+    }
+
+    if (available <= variant.stockMin) {
+      eventService.createInternal({
+        type: "product.low_stock",
+        severity: "warning",
+        title: "Variação com estoque baixo",
+        message: `${variant.name} possui ${available} item(ns) disponível(is).`,
+        productId
+      });
+    }
+    return;
+  }
+
   if (!productId) {
     return;
   }
 
   const product = productRepository.getById(productId);
   if (!product) {
+    return;
+  }
+
+  if (!["manual", "automatic"].includes(product.deliveryType)) {
     return;
   }
 
@@ -419,6 +481,7 @@ export const orderService = {
       items,
       summary: summarizeOrders(items),
       products: productRepository.listAllForSelect(),
+      productVariants: productVariantRepository.listAllForSelect(),
       inventoryItems: inventoryRepository.listForOrderSelect(),
       categories: productRepository.listCategories()
     };
@@ -443,6 +506,7 @@ export const orderService = {
       if (!product) {
         throw new Error("Produto vinculado não encontrado.");
       }
+      const variant = getCompatibleVariant(product.id, input.productVariantId ?? null);
 
       const orderCode = normalizeOrderCode(input.orderCode);
       if (orderRepository.getByOrderCode(orderCode)) {
@@ -451,8 +515,8 @@ export const orderService = {
 
       const timestamp = nowIso();
       const status = input.status;
-      const salePrice = input.salePrice ?? product.salePrice;
-      const unitCost = input.unitCost ?? product.unitCost;
+      const salePrice = input.salePrice ?? variant?.salePrice ?? product.salePrice;
+      const unitCost = input.unitCost ?? variant?.unitCost ?? product.unitCost;
       const feePercent = input.feePercent ?? GAMEMARKET_FEE_PERCENT;
       const financials = makeFinancials({ salePrice, unitCost, feePercent });
 
@@ -466,6 +530,7 @@ export const orderService = {
         externalPayloadHash: null,
         lastSyncedAt: null,
         productId: product.id,
+        productVariantId: variant?.id ?? null,
         inventoryItemId: input.inventoryItemId ?? null,
         buyerName: input.buyerName ?? null,
         buyerContact: input.buyerContact ?? null,
@@ -532,12 +597,23 @@ export const orderService = {
       }
 
       const productChanged = productId !== current.productId;
-      if (productChanged && current.inventoryItemId) {
+      const productVariantId = productChanged
+        ? Object.hasOwn(data, "productVariantId")
+          ? data.productVariantId ?? null
+          : null
+        : Object.hasOwn(data, "productVariantId")
+          ? data.productVariantId ?? null
+          : current.productVariantId;
+      const variant = getCompatibleVariant(productId, productVariantId);
+      const variantChanged = productVariantId !== current.productVariantId;
+      if ((productChanged || variantChanged) && current.inventoryItemId) {
         releaseInventoryForOrder(current, actorUserId);
       }
 
-      const salePrice = data.salePrice ?? current.salePrice;
-      const unitCost = data.unitCost ?? current.unitCost;
+      const salePrice =
+        data.salePrice ?? (productChanged || variantChanged ? variant?.salePrice ?? product.salePrice : current.salePrice);
+      const unitCost =
+        data.unitCost ?? (productChanged || variantChanged ? variant?.unitCost ?? product.unitCost : current.unitCost);
       const feePercent = data.feePercent ?? current.feePercent;
       const financials = makeFinancials({ salePrice, unitCost, feePercent });
 
@@ -549,7 +625,8 @@ export const orderService = {
           : current.externalOrderId,
         marketplace: data.marketplace ?? current.marketplace,
         productId,
-        inventoryItemId: productChanged ? null : current.inventoryItemId,
+        productVariantId,
+        inventoryItemId: productChanged || variantChanged ? null : current.inventoryItemId,
         buyerName: Object.hasOwn(data, "buyerName") ? data.buyerName ?? null : current.buyerName,
         buyerContact: Object.hasOwn(data, "buyerContact") ? data.buyerContact ?? null : current.buyerContact,
         productNameSnapshot: productChanged ? product.name : current.productNameSnapshot,

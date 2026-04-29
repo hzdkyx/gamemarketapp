@@ -10,6 +10,8 @@ import {
   orderCreateInputSchema,
   productCreateInputSchema,
   productListInputSchema,
+  productVariantCreateInputSchema,
+  productVariantUpdateInputSchema,
   userCreateInputSchema,
   webhookServerRevealTokenInputSchema,
   webhookServerSettingsUpdateInputSchema
@@ -55,6 +57,7 @@ describe("inventory contracts", () => {
     const parsed = inventoryCreateInputSchema.parse({
       inventoryCode: " inv-cs2-1 ",
       productId: null,
+      productVariantId: null,
       purchaseCost: 50,
       accountLogin: "login",
       accountPassword: "secret"
@@ -75,10 +78,50 @@ describe("inventory contracts", () => {
   });
 });
 
+describe("product variant contracts", () => {
+  it("applies safe defaults for operational variants", () => {
+    const parsed = productVariantCreateInputSchema.parse({
+      productId: "product-1",
+      variantCode: " lol-br-base ",
+      name: " [BR] Conta base ",
+      salePrice: 15,
+      unitCost: 7.5
+    });
+
+    expect(parsed.variantCode).toBe("lol-br-base");
+    expect(parsed.name).toBe("[BR] Conta base");
+    expect(parsed.feePercent).toBe(13);
+    expect(parsed.deliveryType).toBe("manual");
+    expect(parsed.status).toBe("active");
+    expect(parsed.source).toBe("manual");
+    expect(parsed.needsReview).toBe(false);
+  });
+
+  it("accepts quick-edit fields for variants", () => {
+    const parsed = productVariantUpdateInputSchema.parse({
+      id: "variant-1",
+      data: {
+        salePrice: 24.9,
+        unitCost: 9,
+        stockCurrent: 3,
+        stockMin: 1,
+        deliveryType: "manual",
+        supplierName: "Fornecedor / a definir",
+        supplierUrl: null,
+        notes: "Atualizado manualmente"
+      }
+    });
+
+    expect(parsed.data.unitCost).toBe(9);
+    expect(parsed.data.stockCurrent).toBe(3);
+  });
+});
+
 describe("order contracts", () => {
   it("defaults manual orders to gamemarket draft with 13 percent fee", () => {
     const parsed = orderCreateInputSchema.parse({
       productId: "product-1",
+      productVariantId: "variant-1",
       buyerName: " comprador "
     });
 
@@ -86,6 +129,7 @@ describe("order contracts", () => {
     expect(parsed.status).toBe("draft");
     expect(parsed.feePercent).toBe(13);
     expect(parsed.buyerName).toBe("comprador");
+    expect(parsed.productVariantId).toBe("variant-1");
   });
 
   it("rejects unsupported initial manual statuses", () => {

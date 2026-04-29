@@ -178,11 +178,49 @@ const buildProductWhere = (filters: ProductListInput): { sql: string; params: Re
   }
 
   if (filters.stock === "low") {
-    where.push("stock_current > 0 AND stock_current <= stock_min");
+    where.push(`(
+      EXISTS (
+        SELECT 1
+        FROM product_variants
+        WHERE product_variants.product_id = products.id
+          AND product_variants.status != 'archived'
+          AND product_variants.delivery_type IN ('manual', 'automatic')
+          AND product_variants.stock_current > 0
+          AND product_variants.stock_current <= product_variants.stock_min
+      )
+      OR (
+        NOT EXISTS (
+          SELECT 1 FROM product_variants
+          WHERE product_variants.product_id = products.id
+            AND product_variants.status != 'archived'
+        )
+        AND products.delivery_type IN ('manual', 'automatic')
+        AND products.stock_current > 0
+        AND products.stock_current <= products.stock_min
+      )
+    )`);
   }
 
   if (filters.stock === "out") {
-    where.push("stock_current <= 0");
+    where.push(`(
+      EXISTS (
+        SELECT 1
+        FROM product_variants
+        WHERE product_variants.product_id = products.id
+          AND product_variants.status != 'archived'
+          AND product_variants.delivery_type IN ('manual', 'automatic')
+          AND product_variants.stock_current <= 0
+      )
+      OR (
+        NOT EXISTS (
+          SELECT 1 FROM product_variants
+          WHERE product_variants.product_id = products.id
+            AND product_variants.status != 'archived'
+        )
+        AND products.delivery_type IN ('manual', 'automatic')
+        AND products.stock_current <= 0
+      )
+    )`);
   }
 
   return {
@@ -372,13 +410,48 @@ export const productRepository = {
     return db
       .prepare(
         `
+          WITH operational_units AS (
+            SELECT
+              product_variants.delivery_type AS delivery_type,
+              product_variants.stock_current AS stock_current,
+              product_variants.stock_min AS stock_min,
+              product_variants.estimated_profit_cents AS estimated_profit_cents
+            FROM product_variants
+            WHERE product_variants.status != 'archived'
+
+            UNION ALL
+
+            SELECT
+              products.delivery_type AS delivery_type,
+              products.stock_current AS stock_current,
+              products.stock_min AS stock_min,
+              products.estimated_profit_cents AS estimated_profit_cents
+            FROM products
+            WHERE products.status != 'archived'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM product_variants
+                WHERE product_variants.product_id = products.id
+                  AND product_variants.status != 'archived'
+              )
+          )
           SELECT
-            COUNT(*) AS total,
-            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
-            SUM(CASE WHEN stock_current <= 0 THEN 1 ELSE 0 END) AS out_of_stock,
-            SUM(CASE WHEN stock_current > 0 AND stock_current <= stock_min THEN 1 ELSE 0 END) AS low_stock,
+            (SELECT COUNT(*) FROM products) AS total,
+            (SELECT SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) FROM products) AS active,
+            SUM(
+              CASE
+                WHEN delivery_type IN ('manual', 'automatic') AND stock_current <= 0 THEN 1
+                ELSE 0
+              END
+            ) AS out_of_stock,
+            SUM(
+              CASE
+                WHEN delivery_type IN ('manual', 'automatic') AND stock_current > 0 AND stock_current <= stock_min THEN 1
+                ELSE 0
+              END
+            ) AS low_stock,
             AVG(estimated_profit_cents) AS average_estimated_profit_cents
-          FROM products
+          FROM operational_units
         `
       )
       .get() as ProductSummaryRow;

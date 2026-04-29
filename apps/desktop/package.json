@@ -11,6 +11,7 @@
     "build": "tsc --noEmit && electron-vite build",
     "dist": "npm run build && electron-builder --win",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3",
+    "seed:product-variants": "electron scripts/seed-product-variants.mjs",
     "lint": "eslint .",
     "test": "vitest run",
     "format": "prettier --write ."

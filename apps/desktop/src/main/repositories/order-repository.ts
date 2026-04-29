@@ -1,4 +1,5 @@
 import { getSqliteDatabase } from "../database/database";
+import { toSqliteBoolean } from "../database/sqlite-values";
 import type {
   Marketplace,
   OrderListInput,
@@ -18,6 +19,10 @@ interface OrderRow {
   external_payload_hash: string | null;
   last_synced_at: string | null;
   product_id: string;
+  product_variant_id: string | null;
+  product_variant_code: string | null;
+  product_variant_name: string | null;
+  variant_pending: number;
   inventory_item_id: string | null;
   inventory_code: string | null;
   buyer_name: string | null;
@@ -55,6 +60,7 @@ export interface OrderWriteRecord {
   externalPayloadHash: string | null;
   lastSyncedAt: string | null;
   productId: string;
+  productVariantId: string | null;
   inventoryItemId: string | null;
   buyerName: string | null;
   buyerContact: string | null;
@@ -91,6 +97,10 @@ const mapOrderRow = (row: OrderRow): OrderRecord => ({
   externalPayloadHash: row.external_payload_hash,
   lastSyncedAt: row.last_synced_at,
   productId: row.product_id,
+  productVariantId: row.product_variant_id,
+  productVariantCode: row.product_variant_code,
+  productVariantName: row.product_variant_name,
+  variantPending: Boolean(row.variant_pending),
   inventoryItemId: row.inventory_item_id,
   inventoryCode: row.inventory_code,
   buyerName: row.buyer_name,
@@ -129,6 +139,20 @@ const orderSelect = `
     orders.external_payload_hash,
     orders.last_synced_at,
     orders.product_id,
+    orders.product_variant_id,
+    product_variants.variant_code AS product_variant_code,
+    product_variants.name AS product_variant_name,
+    CASE
+      WHEN orders.product_variant_id IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM product_variants variants_for_order
+          WHERE variants_for_order.product_id = orders.product_id
+            AND variants_for_order.status != 'archived'
+        )
+        THEN 1
+      ELSE 0
+    END AS variant_pending,
     orders.inventory_item_id,
     inventory_items.inventory_code,
     orders.buyer_name,
@@ -156,6 +180,7 @@ const orderSelect = `
     orders.refunded_at
   FROM orders
   LEFT JOIN inventory_items ON inventory_items.id = orders.inventory_item_id
+  LEFT JOIN product_variants ON product_variants.id = orders.product_variant_id
 `;
 
 const orderBy: Record<OrderListInput["sortBy"], string> = {
@@ -178,6 +203,8 @@ const buildOrderWhere = (filters: OrderListInput): { sql: string; params: Record
       LOWER(COALESCE(orders.buyer_name, '')) LIKE @search OR
       LOWER(COALESCE(orders.buyer_contact, '')) LIKE @search OR
       LOWER(orders.product_name_snapshot) LIKE @search OR
+      LOWER(COALESCE(product_variants.name, '')) LIKE @search OR
+      LOWER(COALESCE(product_variants.variant_code, '')) LIKE @search OR
       LOWER(orders.category_snapshot) LIKE @search OR
       LOWER(orders.status) LIKE @search OR
       LOWER(COALESCE(orders.notes, '')) LIKE @search
@@ -266,6 +293,7 @@ export const orderRepository = {
           external_payload_hash,
           last_synced_at,
           product_id,
+          product_variant_id,
           inventory_item_id,
           buyer_name,
           buyer_contact,
@@ -301,6 +329,7 @@ export const orderRepository = {
           @externalPayloadHash,
           @lastSyncedAt,
           @productId,
+          @productVariantId,
           @inventoryItemId,
           @buyerName,
           @buyerContact,
@@ -327,7 +356,7 @@ export const orderRepository = {
           @refundedAt
         )
       `
-    ).run(order);
+    ).run({ ...order, actionRequired: toSqliteBoolean(order.actionRequired) });
 
     const created = this.getById(order.id);
     if (!created) {
@@ -351,6 +380,7 @@ export const orderRepository = {
           external_payload_hash = @externalPayloadHash,
           last_synced_at = @lastSyncedAt,
           product_id = @productId,
+          product_variant_id = @productVariantId,
           inventory_item_id = @inventoryItemId,
           buyer_name = @buyerName,
           buyer_contact = @buyerContact,
@@ -376,7 +406,7 @@ export const orderRepository = {
           refunded_at = @refundedAt
         WHERE id = @id
       `
-    ).run(order);
+    ).run({ ...order, actionRequired: toSqliteBoolean(order.actionRequired) });
 
     const updated = this.getById(order.id);
     if (!updated) {

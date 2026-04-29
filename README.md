@@ -23,6 +23,7 @@ Fase 5 implementada com backend público para captura segura de webhooks GameMar
 - Validação de payloads com Zod antes de acessar o banco.
 - IPC seguro e explícito entre renderer e main process.
 - Cálculo automático da taxa GameMarket, valor líquido, lucro e margem.
+- Variações operacionais por anúncio, com custo, preço, estoque, fornecedor, entrega e revisão próprios.
 - Exportação CSV de produtos, estoque, pedidos e eventos.
 - Proteção de dados sensíveis de estoque no main process.
 - Configurações → GameMarket API para base URL, token, ambiente, status e sync manual.
@@ -164,9 +165,31 @@ Na tela **Produtos**:
 4. O app calcula automaticamente valor líquido, lucro estimado, margem e preço mínimo.
 5. Use busca, filtros e ordenação para localizar produtos.
 6. Use as ações da linha para editar, duplicar, arquivar, excluir ou abrir o link do anúncio.
-7. Clique em **Exportar CSV** para exportar a visão filtrada.
+7. Use **Variações** para gerenciar opções operacionais do anúncio.
+8. Clique em **Exportar CSV** para exportar a visão filtrada.
 
 Quando `stockCurrent <= 0`, o formulário sugere o status `out_of_stock`, mas não altera automaticamente sem ação do usuário.
+
+### Produto x Variação
+
+Produto continua sendo o anúncio importado ou cadastrado no catálogo. Variação representa a opção realmente vendida dentro desse anúncio, como CV11/CV12 no Clash of Clans, pacote 32K/76K BP no Mobile Legends, serviço TFT por elo ou conta LoL específica.
+
+Cada variação tem preço de venda, custo unitário, valor líquido, lucro, margem, estoque, fornecedor, tipo de entrega, status, notas e flag de revisão. Quando o produto tem variações, o Dashboard e os pedidos preferem os dados das variações. Quando não tem, usam o produto pai.
+
+Regras operacionais:
+
+- `manual` e `automatic`: exigem estoque real; `stockCurrent <= 0` entra como sem estoque.
+- `on_demand`: não entra como sem estoque e aparece como sob demanda.
+- `service`: não entra como sem estoque; pode usar `stockCurrent = 99999` ou ser tratado como ilimitado na UI.
+- `unitCost = 0` em produto físico deixa o lucro inflado e deve ser tratado como custo pendente.
+
+Seed operacional seguro:
+
+```bash
+npm run seed:product-variants --workspace @hzdk/gamemarket-desktop
+```
+
+O seed cria apenas variações operacionais, não cria contas reais, senhas, logins ou automação de entrega. Ele é idempotente, não duplica códigos existentes e não sobrescreve custo ou dados locais editados manualmente.
 
 ## Estoque
 
@@ -174,12 +197,13 @@ Na tela **Estoque**:
 
 1. Clique em **Novo item**.
 2. Vincule o item a um produto existente.
-3. Informe fornecedor, custo de compra, status e datas operacionais.
-4. Cadastre login, senha, email, senha do email e notas protegidas somente quando necessário.
-5. Use as ações da linha para editar, marcar como vendido, entregue, problema, arquivar ou excluir.
-6. Use **Revelar** para abrir o painel de dados sensíveis com confirmação.
-7. Copie segredos apenas depois de revelá-los explicitamente.
-8. Clique em **Exportar CSV** para exportar a visão filtrada sem expor segredos em texto aberto.
+3. Se o produto tiver variações, escolha a variação correspondente. Produtos sem variações continuam aceitando estoque direto no produto.
+4. Informe fornecedor, custo de compra, status e datas operacionais.
+5. Cadastre login, senha, email, senha do email e notas protegidas somente quando necessário.
+6. Use as ações da linha para editar, marcar como vendido, entregue, problema, arquivar ou excluir.
+7. Use **Revelar** para abrir o painel de dados sensíveis com confirmação.
+8. Copie segredos apenas depois de revelá-los explicitamente.
+9. Clique em **Exportar CSV** para exportar a visão filtrada sem expor segredos em texto aberto.
 
 ## Pedidos
 
@@ -187,12 +211,13 @@ Na tela **Pedidos**:
 
 1. Clique em **Novo pedido**.
 2. Selecione um produto cadastrado. O app busca preço, custo e taxa atuais para criar snapshots no pedido.
-3. Opcionalmente vincule um item de estoque disponível ou reservado compatível com o produto.
-4. Informe comprador, contato, ID externo, link GameMarket e observações internas quando existirem.
-5. Escolha status inicial entre `draft`, `payment_confirmed` e `awaiting_delivery`.
-6. Use o painel lateral para marcar como entregue, concluído, mediação, problema ou cancelado.
-7. Alterações de status criam eventos internos e atualizam o estoque vinculado de forma controlada.
-8. Clique em **Exportar CSV** para exportar pedidos sem dados sensíveis de estoque.
+3. Selecione uma variação quando a venda corresponder a uma opção interna do anúncio. O app recalcula preço, custo, líquido, lucro e margem com base nela.
+4. Opcionalmente vincule um item de estoque disponível ou reservado compatível com o produto e com a variação escolhida.
+5. Informe comprador, contato, ID externo, link GameMarket e observações internas quando existirem.
+6. Escolha status inicial entre `draft`, `payment_confirmed` e `awaiting_delivery`.
+7. Use o painel lateral para marcar como entregue, concluído, mediação, problema ou cancelado.
+8. Alterações de status criam eventos internos e atualizam o estoque vinculado de forma controlada.
+9. Clique em **Exportar CSV** para exportar pedidos sem dados sensíveis de estoque.
 
 Regras principais:
 
@@ -203,6 +228,10 @@ Regras principais:
 - `cancelled` cria `order.cancelled`, limpa ação pendente e libera estoque reservado não entregue.
 - `refunded` cria `order.refunded`; por decisão da Fase 3, mantém ação pendente para revisão manual.
 - `mediation` e `problem` criam eventos destacados e exigem atenção operacional.
+- Se `productVariantId` estiver preenchido, o custo usado no pedido vem da variação.
+- Se não houver variação, o custo vem do produto pai.
+- Se não houver custo nem na variação nem no produto, a UI mostra custo pendente.
+- Pedidos importados da GameMarket para produtos com variações, mas sem variação detectada, aparecem com **Variação pendente**.
 
 ## Eventos
 
@@ -229,6 +258,8 @@ O Dashboard usa dados reais locais:
 - vendas por dia, lucro por categoria/jogo e distribuição de status.
 
 Quando não há dados, a UI mostra empty states em vez de quebrar gráficos ou listas.
+
+Para produtos com variações, as métricas de estoque e lucro preferem as variações. Produtos/variações `service` e `on_demand` não entram em **sem estoque** ou **estoque baixo**. Apenas `manual` e `automatic` contam como estoque real.
 
 ## GameMarket API
 
@@ -331,6 +362,13 @@ A taxa padrão da GameMarket é 13%.
 - `precoIdeal = (custoUnitario + lucroDesejado) / 0.87`
 
 As fórmulas ficam centralizadas em `packages/shared/src/financial.ts` e são reutilizadas no main process e na interface.
+
+As mesmas fórmulas são aplicadas em variações. Para cada variação:
+
+- `valorLiquido = precoVenda * 0.87`
+- `lucro = valorLiquido - custoUnitario`
+- `margemSobreVenda = lucro / precoVenda`
+- `precoMinimoParaNaoPerder = custoUnitario / 0.87`
 
 ## Segurança dos Dados Sensíveis
 

@@ -840,5 +840,48 @@ export const runtimeMigrations: RuntimeMigration[] = [
 
       PRAGMA foreign_keys = ON;
     `
+  },
+  {
+    id: "0006_product_variants",
+    sql: `
+      PRAGMA foreign_keys = OFF;
+
+      CREATE TABLE IF NOT EXISTS product_variants (
+        id TEXT PRIMARY KEY,
+        product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        variant_code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        description TEXT,
+        sale_price_cents INTEGER NOT NULL DEFAULT 0,
+        unit_cost_cents INTEGER NOT NULL DEFAULT 0,
+        fee_percent REAL NOT NULL DEFAULT 13,
+        net_value_cents INTEGER NOT NULL DEFAULT 0,
+        estimated_profit_cents INTEGER NOT NULL DEFAULT 0,
+        margin_percent REAL NOT NULL DEFAULT 0,
+        stock_current INTEGER NOT NULL DEFAULT 0,
+        stock_min INTEGER NOT NULL DEFAULT 0,
+        supplier_name TEXT,
+        supplier_url TEXT,
+        delivery_type TEXT NOT NULL DEFAULT 'manual' CHECK (delivery_type IN ('manual', 'automatic', 'on_demand', 'service')),
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'out_of_stock', 'archived')),
+        notes TEXT,
+        source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'seeded_from_conversation', 'gamemarket_sync', 'imported')),
+        needs_review INTEGER NOT NULL DEFAULT 0,
+        manually_edited_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      ALTER TABLE inventory_items ADD COLUMN product_variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL;
+      ALTER TABLE orders ADD COLUMN product_variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_product_variants_product ON product_variants(product_id);
+      CREATE INDEX IF NOT EXISTS idx_product_variants_status ON product_variants(status);
+      CREATE INDEX IF NOT EXISTS idx_product_variants_delivery_type ON product_variants(delivery_type);
+      CREATE INDEX IF NOT EXISTS idx_inventory_product_variant ON inventory_items(product_variant_id);
+      CREATE INDEX IF NOT EXISTS idx_orders_product_variant ON orders(product_variant_id);
+
+      PRAGMA foreign_keys = ON;
+    `
   }
 ];

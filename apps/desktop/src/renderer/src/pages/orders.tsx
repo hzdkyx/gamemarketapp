@@ -41,6 +41,7 @@ interface OrderFormState {
   orderCode: string;
   externalOrderId: string;
   productId: string;
+  productVariantId: string;
   inventoryItemId: string;
   buyerName: string;
   buyerContact: string;
@@ -96,6 +97,7 @@ const emptyForm: OrderFormState = {
   orderCode: "",
   externalOrderId: "",
   productId: "",
+  productVariantId: "",
   inventoryItemId: "",
   buyerName: "",
   buyerContact: "",
@@ -125,6 +127,7 @@ const orderToForm = (order: OrderRecord): OrderFormState => ({
   orderCode: order.orderCode,
   externalOrderId: order.externalOrderId ?? "",
   productId: order.productId,
+  productVariantId: order.productVariantId ?? "",
   inventoryItemId: order.inventoryItemId ?? "",
   buyerName: order.buyerName ?? "",
   buyerContact: order.buyerContact ?? "",
@@ -146,6 +149,7 @@ const formToCreatePayload = (form: OrderFormState): OrderCreateInput => {
     externalOrderId: toNullable(form.externalOrderId),
     marketplace: "gamemarket",
     productId: form.productId,
+    productVariantId: toNullable(form.productVariantId),
     inventoryItemId: toNullable(form.inventoryItemId),
     buyerName: toNullable(form.buyerName),
     buyerContact: toNullable(form.buyerContact),
@@ -207,6 +211,7 @@ const OrderForm = ({
   data,
   setForm,
   onProductSelect,
+  onVariantSelect,
   onClose,
   onSubmit,
   saving,
@@ -217,6 +222,7 @@ const OrderForm = ({
   data: OrderListResult;
   setForm: (form: OrderFormState) => void;
   onProductSelect: (productId: string) => void;
+  onVariantSelect: (variantId: string) => void;
   onClose: () => void;
   onSubmit: () => void;
   saving: boolean;
@@ -225,9 +231,13 @@ const OrderForm = ({
   const update = <K extends keyof OrderFormState>(key: K, value: OrderFormState[K]): void => {
     setForm({ ...form, [key]: value });
   };
+  const variantsForProduct = data.productVariants.filter(
+    (variant) => variant.productId === form.productId && variant.status !== "archived"
+  );
   const compatibleInventory = data.inventoryItems.filter(
     (item) =>
       item.productId === form.productId &&
+      (form.productVariantId ? item.productVariantId === form.productVariantId : !item.productVariantId) &&
       (item.status === "available" || item.status === "reserved" || item.id === form.inventoryItemId)
   );
 
@@ -298,7 +308,7 @@ const OrderForm = ({
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 value={form.productId}
                 onChange={(event) => {
-                  update("productId", event.target.value);
+                  setForm({ ...form, productId: event.target.value, productVariantId: "", inventoryItemId: "" });
                   onProductSelect(event.target.value);
                 }}
               >
@@ -306,6 +316,25 @@ const OrderForm = ({
                 {data.products.map((product) => (
                   <option key={product.id} value={product.id}>
                     {product.name} · {product.internalCode}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-2">
+              <span className="text-xs font-semibold text-slate-400">Variação opcional</span>
+              <select
+                className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                value={form.productVariantId}
+                onChange={(event) => {
+                  setForm({ ...form, productVariantId: event.target.value, inventoryItemId: "" });
+                  onVariantSelect(event.target.value);
+                }}
+                disabled={!form.productId || variantsForProduct.length === 0}
+              >
+                <option value="">Sem variação detectada</option>
+                {variantsForProduct.map((variant) => (
+                  <option key={variant.id} value={variant.id}>
+                    {variant.name} · {variant.variantCode}
                   </option>
                 ))}
               </select>
@@ -426,6 +455,7 @@ export const OrdersPage = (): JSX.Element => {
       estimatedProfit: 0
     },
     products: [],
+    productVariants: [],
     inventoryItems: [],
     categories: []
   });
@@ -503,6 +533,27 @@ export const OrdersPage = (): JSX.Element => {
     }
   };
 
+  const loadVariantSnapshot = (variantId: string): void => {
+    if (!variantId) {
+      return;
+    }
+
+    const variant = data.productVariants.find((item) => item.id === variantId);
+    if (!variant) {
+      return;
+    }
+
+    setForm((current) =>
+      current
+        ? {
+            ...current,
+            salePrice: String(variant.salePrice),
+            unitCost: String(variant.unitCost)
+          }
+        : current
+    );
+  };
+
   const saveOrder = async (): Promise<void> => {
     if (!form) {
       return;
@@ -519,6 +570,7 @@ export const OrdersPage = (): JSX.Element => {
           externalOrderId: payload.externalOrderId,
           marketplace: "gamemarket",
           productId: payload.productId,
+          productVariantId: payload.productVariantId,
           inventoryItemId: payload.inventoryItemId,
           buyerName: payload.buyerName,
           buyerContact: payload.buyerContact,
@@ -728,6 +780,8 @@ export const OrdersPage = (): JSX.Element => {
                     <Td>
                       <div className="font-semibold text-white">{order.productNameSnapshot}</div>
                       <div className="mt-1 text-xs text-slate-500">{order.categorySnapshot}</div>
+                      {order.productVariantName && <div className="mt-1 text-xs text-cyan">{order.productVariantName}</div>}
+                      {order.variantPending && <div className="mt-1"><Badge tone="warning">Variação pendente</Badge></div>}
                     </Td>
                     <Td className="max-w-[160px] truncate">{order.buyerName ?? "-"}</Td>
                     <Td>{formatCurrencyBRL(order.salePrice)}</Td>
@@ -788,6 +842,14 @@ export const OrdersPage = (): JSX.Element => {
                 <div className="rounded-lg border border-line bg-panelSoft p-4">
                   <div className="font-semibold text-white">{selected.order.orderCode}</div>
                   <div className="mt-1 text-sm text-slate-400">{selected.order.productNameSnapshot}</div>
+                  {selected.order.productVariantName && (
+                    <div className="mt-1 text-sm text-cyan">{selected.order.productVariantName}</div>
+                  )}
+                  {selected.order.variantPending && (
+                    <div className="mt-2">
+                      <Badge tone="warning">Variação pendente</Badge>
+                    </div>
+                  )}
                   <div className="mt-3 grid gap-2 text-sm">
                     <div className="flex justify-between gap-3">
                       <span className="text-slate-500">Líquido</span>
@@ -878,6 +940,7 @@ export const OrdersPage = (): JSX.Element => {
           data={data}
           setForm={setForm}
           onProductSelect={(productId) => void loadProductSnapshot(productId)}
+          onVariantSelect={loadVariantSnapshot}
           onClose={closeForm}
           onSubmit={() => void saveOrder()}
           saving={saving}

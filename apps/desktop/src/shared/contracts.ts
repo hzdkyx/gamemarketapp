@@ -11,6 +11,20 @@ export const productStatusValues = [
 
 export const deliveryTypeValues = ["manual", "automatic", "on_demand", "service"] as const;
 
+export const productVariantStatusValues = [
+  "active",
+  "paused",
+  "out_of_stock",
+  "archived"
+] as const;
+
+export const productVariantSourceValues = [
+  "manual",
+  "seeded_from_conversation",
+  "gamemarket_sync",
+  "imported"
+] as const;
+
 export const inventoryStatusValues = [
   "available",
   "reserved",
@@ -164,6 +178,8 @@ const passwordSchema = z.string().min(8, "Senha deve ter pelo menos 8 caracteres
 
 export const productStatusSchema = z.enum(productStatusValues);
 export const deliveryTypeSchema = z.enum(deliveryTypeValues);
+export const productVariantStatusSchema = z.enum(productVariantStatusValues);
+export const productVariantSourceSchema = z.enum(productVariantSourceValues);
 export const inventoryStatusSchema = z.enum(inventoryStatusValues);
 export const inventorySecretFieldSchema = z.enum(inventorySecretFieldValues);
 export const marketplaceSchema = z.enum(marketplaceValues);
@@ -233,6 +249,64 @@ export const productUpdateInputSchema = z
 export const productDeleteInputSchema = z.object({ id: idSchema }).strict();
 export const productGetInputSchema = z.object({ id: idSchema }).strict();
 
+export const productVariantCreateInputSchema = z
+  .object({
+    productId: idSchema,
+    variantCode: nullableTextSchema,
+    name: requiredTextSchema,
+    description: nullableTextSchema,
+    salePrice: nonNegativeMoneySchema.default(0),
+    unitCost: nonNegativeMoneySchema.default(0),
+    feePercent: z
+      .number()
+      .finite()
+      .min(0)
+      .lt(100)
+      .default(GAMEMARKET_FEE_PERCENT),
+    stockCurrent: nonNegativeIntegerSchema.default(0),
+    stockMin: nonNegativeIntegerSchema.default(0),
+    supplierName: nullableTextSchema,
+    supplierUrl: nullableTextSchema,
+    deliveryType: deliveryTypeSchema.default("manual"),
+    status: productVariantStatusSchema.default("active"),
+    notes: nullableTextSchema,
+    source: productVariantSourceSchema.default("manual"),
+    needsReview: z.boolean().default(false)
+  })
+  .strict();
+
+export const productVariantUpdateDataSchema = z
+  .object({
+    variantCode: nullableTextSchema,
+    name: requiredTextSchema.optional(),
+    description: nullableTextSchema,
+    salePrice: nonNegativeMoneySchema.optional(),
+    unitCost: nonNegativeMoneySchema.optional(),
+    feePercent: z.number().finite().min(0).lt(100).optional(),
+    stockCurrent: nonNegativeIntegerSchema.optional(),
+    stockMin: nonNegativeIntegerSchema.optional(),
+    supplierName: nullableTextSchema,
+    supplierUrl: nullableTextSchema,
+    deliveryType: deliveryTypeSchema.optional(),
+    status: productVariantStatusSchema.optional(),
+    notes: nullableTextSchema,
+    source: productVariantSourceSchema.optional(),
+    needsReview: z.boolean().optional()
+  })
+  .strict();
+
+export const productVariantUpdateInputSchema = z
+  .object({
+    id: idSchema,
+    data: productVariantUpdateDataSchema
+  })
+  .strict();
+
+export const productVariantDeleteInputSchema = z.object({ id: idSchema }).strict();
+export const productVariantGetInputSchema = z.object({ id: idSchema }).strict();
+export const productVariantListInputSchema = z.object({ productId: idSchema }).strict();
+export const productVariantDuplicateInputSchema = z.object({ id: idSchema }).strict();
+
 export const productListInputSchema = z
   .object({
     search: nullableTextSchema,
@@ -248,6 +322,7 @@ export const inventoryCreateInputSchema = z
   .object({
     inventoryCode: nullableTextSchema,
     productId: nullableTextSchema,
+    productVariantId: nullableTextSchema,
     supplierId: nullableTextSchema,
     purchaseCost: nonNegativeMoneySchema.default(0),
     status: inventoryStatusSchema.default("available"),
@@ -268,6 +343,7 @@ export const inventoryUpdateDataSchema = z
   .object({
     inventoryCode: nullableTextSchema,
     productId: nullableTextSchema,
+    productVariantId: nullableTextSchema,
     supplierId: nullableTextSchema,
     purchaseCost: nonNegativeMoneySchema.optional(),
     status: inventoryStatusSchema.optional(),
@@ -318,6 +394,7 @@ export const orderCreateInputSchema = z
     externalOrderId: nullableTextSchema,
     marketplace: marketplaceSchema.default("gamemarket"),
     productId: idSchema,
+    productVariantId: nullableTextSchema,
     inventoryItemId: nullableTextSchema,
     buyerName: nullableTextSchema,
     buyerContact: nullableTextSchema,
@@ -336,6 +413,7 @@ export const orderUpdateDataSchema = z
     externalOrderId: nullableTextSchema,
     marketplace: marketplaceSchema.optional(),
     productId: idSchema.optional(),
+    productVariantId: nullableTextSchema,
     inventoryItemId: nullableTextSchema,
     buyerName: nullableTextSchema,
     buyerContact: nullableTextSchema,
@@ -567,6 +645,8 @@ export const userResetPasswordInputSchema = z
 
 export type ProductStatus = (typeof productStatusValues)[number];
 export type DeliveryType = (typeof deliveryTypeValues)[number];
+export type ProductVariantStatus = (typeof productVariantStatusValues)[number];
+export type ProductVariantSource = (typeof productVariantSourceValues)[number];
 export type InventoryStatus = (typeof inventoryStatusValues)[number];
 export type ProductSort = (typeof productSortValues)[number];
 export type SortDirection = (typeof sortDirectionValues)[number];
@@ -593,6 +673,11 @@ export type ProductCreateInput = z.infer<typeof productCreateInputSchema>;
 export type ProductUpdateData = z.infer<typeof productUpdateDataSchema>;
 export type ProductUpdateInput = z.infer<typeof productUpdateInputSchema>;
 export type ProductListInput = z.infer<typeof productListInputSchema>;
+export type ProductVariantCreateInput = z.infer<typeof productVariantCreateInputSchema>;
+export type ProductVariantUpdateData = z.infer<typeof productVariantUpdateDataSchema>;
+export type ProductVariantUpdateInput = z.infer<typeof productVariantUpdateInputSchema>;
+export type ProductVariantListInput = z.infer<typeof productVariantListInputSchema>;
+export type ProductVariantDuplicateInput = z.infer<typeof productVariantDuplicateInputSchema>;
 export type InventoryCreateInput = z.infer<typeof inventoryCreateInputSchema>;
 export type InventoryUpdateData = z.infer<typeof inventoryUpdateDataSchema>;
 export type InventoryUpdateInput = z.infer<typeof inventoryUpdateInputSchema>;
@@ -676,6 +761,33 @@ export interface ProductRecord {
   updatedAt: string;
 }
 
+export interface ProductVariantRecord {
+  id: string;
+  productId: string;
+  variantCode: string;
+  name: string;
+  description: string | null;
+  salePrice: number;
+  unitCost: number;
+  feePercent: number;
+  netValue: number;
+  estimatedProfit: number;
+  marginPercent: number;
+  minimumPrice: number;
+  stockCurrent: number;
+  stockMin: number;
+  supplierName: string | null;
+  supplierUrl: string | null;
+  deliveryType: DeliveryType;
+  status: ProductVariantStatus;
+  notes: string | null;
+  source: ProductVariantSource;
+  needsReview: boolean;
+  manuallyEditedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProductSummary {
   total: number;
   active: number;
@@ -690,10 +802,17 @@ export interface ProductListResult {
   categories: string[];
 }
 
+export interface ProductVariantListResult {
+  items: ProductVariantRecord[];
+}
+
 export interface InventoryRecord {
   id: string;
   inventoryCode: string;
   productId: string | null;
+  productVariantId: string | null;
+  productVariantCode: string | null;
+  productVariantName: string | null;
   productName: string | null;
   productInternalCode: string | null;
   category: string | null;
@@ -730,6 +849,12 @@ export interface InventoryListResult {
   items: InventoryRecord[];
   summary: InventorySummary;
   products: Array<Pick<ProductRecord, "id" | "internalCode" | "name" | "category" | "game">>;
+  productVariants: Array<
+    Pick<
+      ProductVariantRecord,
+      "id" | "productId" | "variantCode" | "name" | "salePrice" | "unitCost" | "deliveryType" | "status"
+    >
+  >;
   suppliers: string[];
   categories: string[];
 }
@@ -749,6 +874,10 @@ export interface OrderRecord {
   externalPayloadHash?: string | null;
   lastSyncedAt?: string | null;
   productId: string;
+  productVariantId: string | null;
+  productVariantCode: string | null;
+  productVariantName: string | null;
+  variantPending: boolean;
   inventoryItemId: string | null;
   inventoryCode: string | null;
   buyerName: string | null;
@@ -817,7 +946,24 @@ export interface OrderListResult {
   items: OrderRecord[];
   summary: OrderSummary;
   products: Array<Pick<ProductRecord, "id" | "internalCode" | "name" | "category" | "game">>;
-  inventoryItems: Array<Pick<InventoryRecord, "id" | "inventoryCode" | "productId" | "productName" | "status">>;
+  productVariants: Array<
+    Pick<
+      ProductVariantRecord,
+      "id" | "productId" | "variantCode" | "name" | "salePrice" | "unitCost" | "deliveryType" | "status"
+    >
+  >;
+  inventoryItems: Array<
+    Pick<
+      InventoryRecord,
+      | "id"
+      | "inventoryCode"
+      | "productId"
+      | "productVariantId"
+      | "productName"
+      | "productVariantName"
+      | "status"
+    >
+  >;
   categories: string[];
 }
 

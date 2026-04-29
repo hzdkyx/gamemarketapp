@@ -37,6 +37,7 @@ type BadgeTone = "success" | "warning" | "danger" | "purple" | "neutral" | "cyan
 interface InventoryFormState {
   inventoryCode: string;
   productId: string;
+  productVariantId: string;
   supplierId: string;
   purchaseCost: string;
   status: InventoryStatus;
@@ -92,6 +93,7 @@ const defaultFilters: InventoryListInput = {
 const emptyForm: InventoryFormState = {
   inventoryCode: "",
   productId: "",
+  productVariantId: "",
   supplierId: "",
   purchaseCost: "0",
   status: "available",
@@ -120,6 +122,7 @@ const toNullable = (value: string): string | null => {
 const itemToForm = (item: InventoryRecord): InventoryFormState => ({
   inventoryCode: item.inventoryCode,
   productId: item.productId ?? "",
+  productVariantId: item.productVariantId ?? "",
   supplierId: item.supplierId ?? "",
   purchaseCost: String(item.purchaseCost),
   status: item.status,
@@ -138,6 +141,7 @@ const itemToForm = (item: InventoryRecord): InventoryFormState => ({
 const formToCreatePayload = (form: InventoryFormState): InventoryCreateInput => ({
   inventoryCode: toNullable(form.inventoryCode),
   productId: toNullable(form.productId),
+  productVariantId: toNullable(form.productVariantId),
   supplierId: toNullable(form.supplierId),
   purchaseCost: parseNumber(form.purchaseCost),
   status: form.status,
@@ -192,6 +196,7 @@ const InventoryForm = ({
   mode,
   form,
   products,
+  productVariants,
   setForm,
   onClose,
   onSubmit,
@@ -201,6 +206,7 @@ const InventoryForm = ({
   mode: "create" | "edit";
   form: InventoryFormState;
   products: InventoryListResult["products"];
+  productVariants: InventoryListResult["productVariants"];
   setForm: (form: InventoryFormState) => void;
   onClose: () => void;
   onSubmit: () => void;
@@ -210,6 +216,9 @@ const InventoryForm = ({
   const update = <K extends keyof InventoryFormState>(key: K, value: InventoryFormState[K]): void => {
     setForm({ ...form, [key]: value });
   };
+  const variantsForProduct = productVariants.filter(
+    (variant) => variant.productId === form.productId && variant.status !== "archived"
+  );
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/60">
@@ -249,12 +258,28 @@ const InventoryForm = ({
               <select
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 value={form.productId}
-                onChange={(event) => update("productId", event.target.value)}
+                onChange={(event) => setForm({ ...form, productId: event.target.value, productVariantId: "" })}
               >
                 <option value="">Sem produto vinculado</option>
                 {products.map((product) => (
                   <option key={product.id} value={product.id}>
                     {product.name} · {product.internalCode}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-2 lg:col-span-2">
+              <span className="text-xs font-semibold text-slate-400">Variação do anúncio</span>
+              <select
+                className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                value={form.productVariantId}
+                onChange={(event) => update("productVariantId", event.target.value)}
+                disabled={!form.productId || variantsForProduct.length === 0}
+              >
+                <option value="">Sem variação específica</option>
+                {variantsForProduct.map((variant) => (
+                  <option key={variant.id} value={variant.id}>
+                    {variant.name} · {variant.variantCode}
                   </option>
                 ))}
               </select>
@@ -493,6 +518,7 @@ export const InventoryPage = (): JSX.Element => {
       potentialProfit: 0
     },
     products: [],
+    productVariants: [],
     suppliers: [],
     categories: []
   });
@@ -558,6 +584,7 @@ export const InventoryPage = (): JSX.Element => {
         const updatePayload: InventoryUpdateData = {
           inventoryCode: payload.inventoryCode,
           productId: payload.productId,
+          productVariantId: payload.productVariantId,
           supplierId: payload.supplierId,
           purchaseCost: payload.purchaseCost,
           status: payload.status,
@@ -774,6 +801,9 @@ export const InventoryPage = (): JSX.Element => {
                     <Td>
                       <div className="font-semibold text-white">{item.productName ?? "Sem vínculo"}</div>
                       <div className="mt-1 font-mono text-xs text-slate-500">{item.productInternalCode ?? item.productId ?? "-"}</div>
+                      {item.productVariantName && (
+                        <div className="mt-1 text-xs text-cyan">{item.productVariantName}</div>
+                      )}
                     </Td>
                     <Td>{item.supplierId ?? "-"}</Td>
                     <Td>{formatCurrencyBRL(item.purchaseCost)}</Td>
@@ -842,6 +872,7 @@ export const InventoryPage = (): JSX.Element => {
           mode={formMode}
           form={form}
           products={data.products}
+          productVariants={data.productVariants}
           setForm={setForm}
           onClose={closeForm}
           onSubmit={() => void saveInventory()}

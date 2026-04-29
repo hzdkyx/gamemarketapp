@@ -36,6 +36,10 @@ import type {
   ProductListInput,
   ProductListResult,
   ProductRecord,
+  ProductVariantCreateInput,
+  ProductVariantListResult,
+  ProductVariantRecord,
+  ProductVariantUpdateInput,
   ProductUpdateInput,
   UserCreateInput,
   UserRecord,
@@ -113,6 +117,26 @@ const api = {
       ipcRenderer.invoke("products:delete", { id }) as Promise<{ deleted: boolean }>,
     exportCsv: (payload?: ProductListInput) =>
       ipcRenderer.invoke("products:exportCsv", payload) as Promise<CsvExportResult>
+  },
+  productVariants: {
+    listByProduct: (productId: string) =>
+      ipcRenderer.invoke("productVariants:listByProduct", { productId }) as Promise<ProductVariantListResult>,
+    get: (id: string) =>
+      ipcRenderer.invoke("productVariants:get", { id }) as Promise<ProductVariantRecord>,
+    create: (payload: ProductVariantCreateInput) =>
+      ipcRenderer.invoke("productVariants:create", payload) as Promise<ProductVariantRecord>,
+    update: (payload: ProductVariantUpdateInput) =>
+      ipcRenderer.invoke("productVariants:update", payload) as Promise<ProductVariantRecord>,
+    duplicate: (id: string) =>
+      ipcRenderer.invoke("productVariants:duplicate", { id }) as Promise<ProductVariantRecord>,
+    archive: (id: string) =>
+      ipcRenderer.invoke("productVariants:archive", { id }) as Promise<ProductVariantRecord>,
+    markNeedsReview: (id: string) =>
+      ipcRenderer.invoke("productVariants:markNeedsReview", { id }) as Promise<ProductVariantRecord>,
+    delete: (id: string) =>
+      ipcRenderer.invoke("productVariants:delete", { id }) as Promise<{ deleted: boolean }>,
+    exportCsv: (productId: string) =>
+      ipcRenderer.invoke("productVariants:exportCsv", { productId }) as Promise<CsvExportResult>
   },
   inventory: {
     list: (payload?: InventoryListInput) =>

@@ -52,11 +52,37 @@ export const dashboardService = {
     const stockRow = db
       .prepare(
         `
+          WITH operational_units AS (
+            SELECT delivery_type, stock_current, stock_min
+            FROM product_variants
+            WHERE status != 'archived'
+
+            UNION ALL
+
+            SELECT delivery_type, stock_current, stock_min
+            FROM products
+            WHERE status != 'archived'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM product_variants
+                WHERE product_variants.product_id = products.id
+                  AND product_variants.status != 'archived'
+              )
+          )
           SELECT
-            SUM(CASE WHEN stock_current > 0 AND stock_current <= stock_min THEN 1 ELSE 0 END) AS low_stock,
-            SUM(CASE WHEN stock_current <= 0 THEN 1 ELSE 0 END) AS out_of_stock
-          FROM products
-          WHERE status != 'archived'
+            SUM(
+              CASE
+                WHEN delivery_type IN ('manual', 'automatic') AND stock_current > 0 AND stock_current <= stock_min THEN 1
+                ELSE 0
+              END
+            ) AS low_stock,
+            SUM(
+              CASE
+                WHEN delivery_type IN ('manual', 'automatic') AND stock_current <= 0 THEN 1
+                ELSE 0
+              END
+            ) AS out_of_stock
+          FROM operational_units
         `
       )
       .get() as { low_stock: number | null; out_of_stock: number | null };

@@ -4,11 +4,13 @@ import type {
   InventoryRecord,
   OrderRecord,
   OrderStatus,
-  ProductRecord
+  ProductRecord,
+  ProductVariantRecord
 } from "../../shared/contracts";
 
 const state = vi.hoisted(() => ({
   products: new Map<string, ProductRecord>(),
+  productVariants: new Map<string, ProductVariantRecord>(),
   inventory: new Map<string, InventoryRecord>(),
   orders: new Map<string, OrderRecord>(),
   events: [] as EventRecord[]
@@ -22,7 +24,12 @@ const mapWriteOrder = (write: {
   orderCode: string;
   externalOrderId: string | null;
   marketplace: "gamemarket";
+  externalMarketplace?: "gamemarket" | null;
+  externalStatus?: string | null;
+  externalPayloadHash?: string | null;
+  lastSyncedAt?: string | null;
   productId: string;
+  productVariantId: string | null;
   inventoryItemId: string | null;
   buyerName: string | null;
   buyerContact: string | null;
@@ -52,7 +59,19 @@ const mapWriteOrder = (write: {
   orderCode: write.orderCode,
   externalOrderId: write.externalOrderId,
   marketplace: write.marketplace,
+  externalMarketplace: write.externalMarketplace ?? null,
+  externalStatus: write.externalStatus ?? null,
+  externalPayloadHash: write.externalPayloadHash ?? null,
+  lastSyncedAt: write.lastSyncedAt ?? null,
   productId: write.productId,
+  productVariantId: write.productVariantId,
+  productVariantCode: write.productVariantId ? state.productVariants.get(write.productVariantId)?.variantCode ?? null : null,
+  productVariantName: write.productVariantId ? state.productVariants.get(write.productVariantId)?.name ?? null : null,
+  variantPending:
+    !write.productVariantId &&
+    [...state.productVariants.values()].some(
+      (variant) => variant.productId === write.productId && variant.status !== "archived"
+    ),
   inventoryItemId: write.inventoryItemId,
   inventoryCode: write.inventoryItemId ? state.inventory.get(write.inventoryItemId)?.inventoryCode ?? null : null,
   buyerName: write.buyerName,
@@ -86,12 +105,21 @@ vi.mock("../database/database", () => ({
     prepare: (sql: string) => ({
       get: () => {
         if (sql.includes("low_stock")) {
-          const products = [...state.products.values()].filter((product) => product.status !== "archived");
+          const productsWithVariants = new Set(
+            [...state.productVariants.values()]
+              .filter((variant) => variant.status !== "archived")
+              .map((variant) => variant.productId)
+          );
+          const units = [
+            ...[...state.productVariants.values()].filter((variant) => variant.status !== "archived"),
+            ...[...state.products.values()].filter(
+              (product) => product.status !== "archived" && !productsWithVariants.has(product.id)
+            )
+          ];
+          const trackedUnits = units.filter((unit) => unit.deliveryType === "manual" || unit.deliveryType === "automatic");
           return {
-            low_stock: products.filter(
-              (product) => product.stockCurrent > 0 && product.stockCurrent <= product.stockMin
-            ).length,
-            out_of_stock: products.filter((product) => product.stockCurrent <= 0).length
+            low_stock: trackedUnits.filter((unit) => unit.stockCurrent > 0 && unit.stockCurrent <= unit.stockMin).length,
+            out_of_stock: trackedUnits.filter((unit) => unit.stockCurrent <= 0).length
           };
         }
 
@@ -164,11 +192,34 @@ vi.mock("../repositories/inventory-repository", () => ({
         id: item.id,
         inventoryCode: item.inventoryCode,
         productId: item.productId,
+        productVariantId: item.productVariantId,
         productName: item.productName,
+        productVariantName: item.productVariantName,
         status: item.status
       })),
     countAvailableByProduct: (productId: string) =>
-      [...state.inventory.values()].filter((item) => item.productId === productId && item.status === "available").length
+      [...state.inventory.values()].filter((item) => item.productId === productId && item.status === "available").length,
+    countAvailableByProductVariant: (productVariantId: string) =>
+      [...state.inventory.values()].filter(
+        (item) => item.productVariantId === productVariantId && item.status === "available"
+      ).length
+  }
+}));
+
+vi.mock("../repositories/product-variant-repository", () => ({
+  productVariantRepository: {
+    getById: (id: string) => state.productVariants.get(id) ?? null,
+    listAllForSelect: () =>
+      [...state.productVariants.values()].map((variant) => ({
+        id: variant.id,
+        productId: variant.productId,
+        variantCode: variant.variantCode,
+        name: variant.name,
+        salePrice: variant.salePrice,
+        unitCost: variant.unitCost,
+        deliveryType: variant.deliveryType,
+        status: variant.status
+      }))
   }
 }));
 
@@ -305,6 +356,9 @@ const inventoryFixture = (): InventoryRecord => ({
   id: "inventory-1",
   inventoryCode: "INV-LOL-1",
   productId: "product-1",
+  productVariantId: null,
+  productVariantCode: null,
+  productVariantName: null,
   productName: "Conta LoL Prata",
   productInternalCode: "PRD-LOL-1",
   category: "Contas",
@@ -329,6 +383,33 @@ const inventoryFixture = (): InventoryRecord => ({
   updatedAt: new Date().toISOString()
 });
 
+const productVariantFixture = (): ProductVariantRecord => ({
+  id: "variant-1",
+  productId: "product-1",
+  variantCode: "LOL-BR-SKIN",
+  name: "[BR] LoL com skin | Full Acesso",
+  description: null,
+  salePrice: 25,
+  unitCost: 7.5,
+  feePercent: 13,
+  netValue: 21.75,
+  estimatedProfit: 14.25,
+  marginPercent: 0.57,
+  minimumPrice: 8.62,
+  stockCurrent: 1,
+  stockMin: 1,
+  supplierName: "Fornecedor LoL / a definir",
+  supplierUrl: null,
+  deliveryType: "manual",
+  status: "active",
+  notes: null,
+  source: "manual",
+  needsReview: false,
+  manuallyEditedAt: null,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString()
+});
+
 const createConfirmedOrder = (): OrderRecord =>
   orderService.create({
     productId: "product-1",
@@ -346,6 +427,7 @@ const createConfirmedOrder = (): OrderRecord =>
 
 beforeEach(() => {
   state.products.clear();
+  state.productVariants.clear();
   state.inventory.clear();
   state.orders.clear();
   state.events.length = 0;
@@ -367,6 +449,43 @@ describe("order service", () => {
     expect(inventory?.orderId).toBe(order.id);
     expect(state.events.map((event) => event.type)).toContain("order.payment_confirmed");
     expect(state.events.map((event) => event.type)).toContain("inventory.reserved");
+  });
+
+  it("uses the selected product variant cost and sale price in order financials", () => {
+    const variant = productVariantFixture();
+    state.productVariants.set(variant.id, variant);
+    state.inventory.set("inventory-variant-1", {
+      ...inventoryFixture(),
+      id: "inventory-variant-1",
+      inventoryCode: "INV-LOL-SKIN-1",
+      productVariantId: variant.id,
+      productVariantCode: variant.variantCode,
+      productVariantName: variant.name,
+      purchaseCost: variant.unitCost,
+      potentialProfit: variant.estimatedProfit
+    });
+
+    const order = orderService.create({
+      productId: "product-1",
+      productVariantId: variant.id,
+      inventoryItemId: "inventory-variant-1",
+      buyerName: "Cliente",
+      feePercent: 13,
+      status: "payment_confirmed",
+      marketplace: "gamemarket",
+      orderCode: null,
+      externalOrderId: null,
+      buyerContact: null,
+      marketplaceUrl: null,
+      notes: null
+    });
+
+    expect(order.productVariantId).toBe(variant.id);
+    expect(order.salePrice).toBe(25);
+    expect(order.unitCost).toBe(7.5);
+    expect(order.netValue).toBe(21.75);
+    expect(order.profit).toBe(14.25);
+    expect(order.variantPending).toBe(false);
   });
 
   it("updates status to delivered and completed with inventory events", () => {
@@ -442,5 +561,48 @@ describe("dashboard service", () => {
     expect(summary.estimatedProfitMonth).toBe(47);
     expect(summary.latestEvents.length).toBeGreaterThan(0);
     expect(summary.statusBreakdown.some((row) => row.status === "completed")).toBe(true);
+  });
+
+  it("counts stock problems only for manual or automatic variants when products have variants", () => {
+    state.products.set("product-service", {
+      ...productFixture(),
+      id: "product-service",
+      internalCode: "SITE-1",
+      name: "Criação de site",
+      deliveryType: "service",
+      stockCurrent: 0,
+      stockMin: 0
+    });
+    state.productVariants.set("variant-manual-zero", {
+      ...productVariantFixture(),
+      id: "variant-manual-zero",
+      stockCurrent: 0,
+      stockMin: 1,
+      deliveryType: "manual"
+    });
+    state.productVariants.set("variant-service-zero", {
+      ...productVariantFixture(),
+      id: "variant-service-zero",
+      productId: "product-service",
+      variantCode: "SITE-PROFISSIONAL-BASE",
+      name: "Criação de site profissional | Base",
+      stockCurrent: 0,
+      stockMin: 0,
+      deliveryType: "service"
+    });
+    state.productVariants.set("variant-on-demand-zero", {
+      ...productVariantFixture(),
+      id: "variant-on-demand-zero",
+      variantCode: "CS2-PRIME-NO-PREMIER",
+      name: "CS2 Prime | Sem Premier Ativo | Full Acesso",
+      stockCurrent: 0,
+      stockMin: 0,
+      deliveryType: "on_demand"
+    });
+
+    const summary = dashboardService.getSummary();
+
+    expect(summary.outOfStockProducts).toBe(1);
+    expect(summary.lowStockProducts).toBe(0);
   });
 });

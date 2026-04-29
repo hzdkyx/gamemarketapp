@@ -61,6 +61,22 @@ const fallbackApi: HzdKyxDesktopApi = {
       content: ""
     })
   },
+  productVariants: {
+    listByProduct: async () => ({
+      items: []
+    }),
+    get: unavailable,
+    create: unavailable,
+    update: unavailable,
+    duplicate: unavailable,
+    archive: unavailable,
+    markNeedsReview: unavailable,
+    delete: unavailable,
+    exportCsv: async () => ({
+      filename: "hzdk-product-variants.csv",
+      content: ""
+    })
+  },
   inventory: {
     list: async () => ({
       items: [],
@@ -72,6 +88,7 @@ const fallbackApi: HzdKyxDesktopApi = {
         potentialProfit: 0
       },
       products: [],
+      productVariants: [],
       suppliers: [],
       categories: []
     }),
@@ -97,6 +114,7 @@ const fallbackApi: HzdKyxDesktopApi = {
         estimatedProfit: 0
       },
       products: [],
+      productVariants: [],
       inventoryItems: [],
       categories: []
     }),

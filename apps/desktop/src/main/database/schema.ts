@@ -70,10 +70,51 @@ export const suppliers = sqliteTable("suppliers", {
   updatedAt: text("updated_at").notNull()
 });
 
+export const productVariants = sqliteTable("product_variants", {
+  id: text("id").primaryKey(),
+  productId: text("product_id")
+    .notNull()
+    .references(() => products.id),
+  variantCode: text("variant_code").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description"),
+  salePriceCents: integer("sale_price_cents").notNull().default(0),
+  unitCostCents: integer("unit_cost_cents").notNull().default(0),
+  feePercent: real("fee_percent").notNull().default(13),
+  netValueCents: integer("net_value_cents").notNull().default(0),
+  estimatedProfitCents: integer("estimated_profit_cents").notNull().default(0),
+  marginPercent: real("margin_percent").notNull().default(0),
+  stockCurrent: integer("stock_current").notNull().default(0),
+  stockMin: integer("stock_min").notNull().default(0),
+  supplierName: text("supplier_name"),
+  supplierUrl: text("supplier_url"),
+  deliveryType: text("delivery_type", {
+    enum: ["manual", "automatic", "on_demand", "service"]
+  })
+    .notNull()
+    .default("manual"),
+  status: text("status", {
+    enum: ["active", "paused", "out_of_stock", "archived"]
+  })
+    .notNull()
+    .default("active"),
+  notes: text("notes"),
+  source: text("source", {
+    enum: ["manual", "seeded_from_conversation", "gamemarket_sync", "imported"]
+  })
+    .notNull()
+    .default("manual"),
+  needsReview: integer("needs_review").notNull().default(0),
+  manuallyEditedAt: text("manually_edited_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull()
+});
+
 export const inventoryItems = sqliteTable("inventory_items", {
   id: text("id").primaryKey(),
   inventoryCode: text("inventory_code").notNull().unique(),
   productId: text("product_id").references(() => products.id),
+  productVariantId: text("product_variant_id").references(() => productVariants.id),
   supplierId: text("supplier_id"),
   purchaseCostCents: integer("purchase_cost_cents").notNull(),
   status: text("status", {
@@ -111,6 +152,7 @@ export const orders = sqliteTable("orders", {
   externalPayloadHash: text("external_payload_hash"),
   lastSyncedAt: text("last_synced_at"),
   productId: text("product_id").references(() => products.id),
+  productVariantId: text("product_variant_id").references(() => productVariants.id),
   inventoryItemId: text("inventory_item_id").references(() => inventoryItems.id),
   buyerName: text("buyer_name"),
   buyerContact: text("buyer_contact"),
@@ -247,6 +289,16 @@ export const webhookServerEventImports = sqliteTable("webhook_server_event_impor
 });
 
 export const productRelations = relations(products, ({ many }) => ({
+  variants: many(productVariants),
+  inventoryItems: many(inventoryItems),
+  orders: many(orders)
+}));
+
+export const productVariantRelations = relations(productVariants, ({ one, many }) => ({
+  product: one(products, {
+    fields: [productVariants.productId],
+    references: [products.id]
+  }),
   inventoryItems: many(inventoryItems),
   orders: many(orders)
 }));
@@ -255,6 +307,10 @@ export const inventoryRelations = relations(inventoryItems, ({ one }) => ({
   product: one(products, {
     fields: [inventoryItems.productId],
     references: [products.id]
+  }),
+  productVariant: one(productVariants, {
+    fields: [inventoryItems.productVariantId],
+    references: [productVariants.id]
   }),
   supplier: one(suppliers, {
     fields: [inventoryItems.supplierId],
@@ -266,6 +322,10 @@ export const orderRelations = relations(orders, ({ one, many }) => ({
   product: one(products, {
     fields: [orders.productId],
     references: [products.id]
+  }),
+  productVariant: one(productVariants, {
+    fields: [orders.productVariantId],
+    references: [productVariants.id]
   }),
   inventoryItem: one(inventoryItems, {
     fields: [orders.inventoryItemId],
