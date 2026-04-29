@@ -1,12 +1,14 @@
 import { formatCurrencyBRL } from "@hzdk/shared";
 import {
   Archive,
+  Boxes,
   CheckCircle2,
   Copy,
   Download,
   Edit3,
   Eye,
   EyeOff,
+  Layers3,
   PackagePlus,
   Search,
   ShieldCheck,
@@ -14,6 +16,7 @@ import {
   TriangleAlert
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card";
@@ -22,12 +25,15 @@ import { useAuth } from "@renderer/lib/auth-context";
 import { downloadCsv } from "@renderer/lib/csv";
 import { getDesktopApi } from "@renderer/lib/desktop-api";
 import type {
+  DeliveryType,
   InventoryCreateInput,
   InventoryListInput,
   InventoryListResult,
   InventoryRecord,
   InventorySecretField,
   InventoryStatus,
+  OperationalStockRecord,
+  OperationalStockState,
   InventoryUpdateData
 } from "../../../shared/contracts";
 import { inventorySecretFieldValues, inventoryStatusValues } from "../../../shared/contracts";
@@ -53,6 +59,8 @@ interface InventoryFormState {
   orderId: string;
 }
 
+type InventoryView = "operational" | "variations" | "protected";
+
 const inventoryStatusLabels: Record<InventoryStatus, string> = {
   available: "Disponível",
   reserved: "Reservado",
@@ -71,6 +79,37 @@ const inventoryStatusTone: Record<InventoryStatus, BadgeTone> = {
   problem: "danger",
   refunded: "purple",
   archived: "neutral"
+};
+
+const deliveryTypeLabels: Record<DeliveryType, string> = {
+  manual: "Manual",
+  automatic: "Automática",
+  on_demand: "Sob demanda",
+  service: "Serviço"
+};
+
+const stockStateLabels: Record<OperationalStockState, string> = {
+  available: "Disponível",
+  low_stock: "Estoque baixo",
+  out_of_stock: "Sem estoque",
+  service: "Serviço",
+  on_demand: "Sob demanda"
+};
+
+const stockStateTone: Record<OperationalStockState, BadgeTone> = {
+  available: "success",
+  low_stock: "warning",
+  out_of_stock: "danger",
+  service: "cyan",
+  on_demand: "purple"
+};
+
+const operationalStatusLabels: Record<OperationalStockRecord["status"], string> = {
+  active: "Ativo",
+  paused: "Pausado",
+  out_of_stock: "Sem estoque",
+  on_demand: "Sob demanda",
+  archived: "Arquivado"
 };
 
 const secretLabels: Record<InventorySecretField, string> = {
@@ -517,11 +556,31 @@ export const InventoryPage = (): JSX.Element => {
       totalCost: 0,
       potentialProfit: 0
     },
+    protectedSummary: {
+      available: 0,
+      sold: 0,
+      problem: 0,
+      totalCost: 0,
+      potentialProfit: 0
+    },
+    operationalItems: [],
+    operationalSummary: {
+      available: 0,
+      sold: 0,
+      problem: 0,
+      totalCost: 0,
+      potentialProfit: 0,
+      lowStock: 0,
+      outOfStock: 0,
+      productRows: 0,
+      variantRows: 0
+    },
     products: [],
     productVariants: [],
     suppliers: [],
     categories: []
   });
+  const [activeView, setActiveView] = useState<InventoryView>("operational");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<InventoryFormState | null>(null);
@@ -668,17 +727,42 @@ export const InventoryPage = (): JSX.Element => {
     downloadCsv(csv.filename, csv.content);
   };
 
+  const operationalRows =
+    activeView === "variations"
+      ? data.operationalItems.filter((item) => item.scope === "variant")
+      : data.operationalItems;
+
   return (
     <div className="space-y-6">
       <div className="grid gap-4 xl:grid-cols-5">
-        <Metric label="Disponíveis" value={String(data.summary.available)} helper="Prontos para venda" tone="success" />
-        <Metric label="Vendidos" value={String(data.summary.sold)} helper="Vendidos ou entregues" tone="cyan" />
-        <Metric label="Problemas" value={String(data.summary.problem)} helper="Exigem revisão" tone="danger" />
-        <Metric label="Custo em estoque" value={formatCurrencyBRL(data.summary.totalCost)} helper="Somente disponíveis" tone="warning" />
+        <Metric
+          label="Disponíveis"
+          value={String(data.operationalSummary.available)}
+          helper="Unidades reais em produtos/variações"
+          tone="success"
+        />
+        <Metric
+          label="Vendidos"
+          value={String(data.operationalSummary.sold)}
+          helper="Pedidos entregues ou concluídos"
+          tone="cyan"
+        />
+        <Metric
+          label="Problemas"
+          value={String(data.operationalSummary.problem)}
+          helper="Sem estoque, baixo ou revisão"
+          tone="danger"
+        />
+        <Metric
+          label="Custo em estoque"
+          value={formatCurrencyBRL(data.operationalSummary.totalCost)}
+          helper="Manual/automático disponível"
+          tone="warning"
+        />
         <Metric
           label="Lucro potencial"
-          value={formatCurrencyBRL(data.summary.potentialProfit)}
-          helper="Líquido do produto menos custo"
+          value={formatCurrencyBRL(data.operationalSummary.potentialProfit)}
+          helper="Unidades reais disponíveis"
           tone="purple"
         />
       </div>
@@ -686,8 +770,10 @@ export const InventoryPage = (): JSX.Element => {
       <Card>
         <CardHeader className="items-start">
           <div>
-            <CardTitle>Estoque</CardTitle>
-            <div className="mt-1 text-sm text-slate-400">Itens locais vinculados a produtos, com segredos criptografados no main process.</div>
+            <CardTitle>Estoque operacional e protegido</CardTitle>
+            <div className="mt-1 max-w-3xl text-sm text-slate-400">
+              Itens protegidos são contas/licenças específicas. Estoque operacional usa produtos e variações para alertas e planejamento.
+            </div>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-3">
             <Button variant="secondary" onClick={() => void exportInventory()} disabled={!canExportCsv}>
@@ -701,6 +787,36 @@ export const InventoryPage = (): JSX.Element => {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant={activeView === "operational" ? "primary" : "secondary"}
+              onClick={() => setActiveView("operational")}
+              type="button"
+            >
+              <Boxes size={14} />
+              Estoque operacional
+            </Button>
+            <Button
+              size="sm"
+              variant={activeView === "variations" ? "primary" : "secondary"}
+              onClick={() => setActiveView("variations")}
+              type="button"
+            >
+              <Layers3 size={14} />
+              Estoque por variação
+            </Button>
+            <Button
+              size="sm"
+              variant={activeView === "protected" ? "primary" : "secondary"}
+              onClick={() => setActiveView("protected")}
+              type="button"
+            >
+              <ShieldCheck size={14} />
+              Itens protegidos
+            </Button>
+          </div>
+
           <div className="grid gap-3 xl:grid-cols-[1.4fr_1fr_0.9fr_0.8fr_0.8fr_0.6fr]">
             <label className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
@@ -773,96 +889,212 @@ export const InventoryPage = (): JSX.Element => {
 
           {error && <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">{error}</div>}
 
-          <Table>
-            <thead>
-              <tr>
-                <Th>ID interno</Th>
-                <Th>Produto</Th>
-                <Th>Fornecedor</Th>
-                <Th>Custo</Th>
-                <Th>Lucro potencial</Th>
-                <Th>Status</Th>
-                <Th>Dados protegidos</Th>
-                <Th>Datas</Th>
-                <Th>Ações</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((item) => {
-                const hasAnySecret =
-                  item.hasAccountLogin ||
-                  item.hasAccountPassword ||
-                  item.hasAccountEmail ||
-                  item.hasAccountEmailPassword ||
-                  item.hasAccessNotes;
-                return (
-                  <tr key={item.id} className="hover:bg-slate-900/45">
-                    <Td className="font-mono text-xs text-slate-400">{item.inventoryCode}</Td>
-                    <Td>
-                      <div className="font-semibold text-white">{item.productName ?? "Sem vínculo"}</div>
-                      <div className="mt-1 font-mono text-xs text-slate-500">{item.productInternalCode ?? item.productId ?? "-"}</div>
-                      {item.productVariantName && (
-                        <div className="mt-1 text-xs text-cyan">{item.productVariantName}</div>
-                      )}
-                    </Td>
-                    <Td>{item.supplierId ?? "-"}</Td>
-                    <Td>{formatCurrencyBRL(item.purchaseCost)}</Td>
-                    <Td className={item.potentialProfit >= 0 ? "font-semibold text-emerald-300" : "font-semibold text-red-300"}>
-                      {formatCurrencyBRL(item.potentialProfit)}
-                    </Td>
-                    <Td>
-                      <Badge tone={inventoryStatusTone[item.status]}>{inventoryStatusLabels[item.status]}</Badge>
-                    </Td>
-                    <Td>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={!hasAnySecret || !canRevealSecrets}
-                        onClick={() => openSecretPanel(item)}
-                      >
-                        <Eye size={14} />
-                        {hasAnySecret ? "Revelar" : "Vazio"}
-                      </Button>
-                    </Td>
-                    <Td className="text-xs text-slate-400">
-                      <div>Compra: {item.boughtAt ? new Date(item.boughtAt).toLocaleDateString("pt-BR") : "-"}</div>
-                      <div>Venda: {item.soldAt ? new Date(item.soldAt).toLocaleDateString("pt-BR") : "-"}</div>
-                      <div>Entrega: {item.deliveredAt ? new Date(item.deliveredAt).toLocaleDateString("pt-BR") : "-"}</div>
-                    </Td>
-                    <Td>
-                      <div className="flex items-center gap-1">
-                        <Button size="icon" variant="ghost" title="Editar" disabled={!canEditInventory} onClick={() => openEdit(item)}>
-                          <Edit3 size={15} />
-                        </Button>
-                        <Button size="icon" variant="ghost" title="Marcar vendido" disabled={!canEditInventory} onClick={() => void changeStatus(item, "sold")}>
-                          <CheckCircle2 size={15} />
-                        </Button>
-                        <Button size="icon" variant="ghost" title="Marcar entregue" disabled={!canEditInventory} onClick={() => void changeStatus(item, "delivered")}>
-                          <ShieldCheck size={15} />
-                        </Button>
-                        <Button size="icon" variant="ghost" title="Marcar problema" disabled={!canEditInventory} onClick={() => void changeStatus(item, "problem")}>
-                          <TriangleAlert size={15} />
-                        </Button>
-                        <Button size="icon" variant="ghost" title="Arquivar" disabled={!canEditInventory} onClick={() => void changeStatus(item, "archived")}>
-                          <Archive size={15} />
-                        </Button>
-                        <Button size="icon" variant="ghost" title="Excluir" disabled={!canEditInventory} onClick={() => void deleteItem(item)}>
-                          <Trash2 size={15} />
-                        </Button>
-                      </div>
-                    </Td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </Table>
+          {activeView !== "protected" ? (
+            <>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                <Badge tone="cyan">{operationalRows.length} linha(s)</Badge>
+                <span>{data.operationalSummary.productRows} produto(s) sem variação ativa</span>
+                <span>·</span>
+                <span>{data.operationalSummary.variantRows} variação(ões)</span>
+                <span>·</span>
+                <span>{data.operationalSummary.outOfStock} sem estoque operacional</span>
+                <span>·</span>
+                <span>{data.operationalSummary.lowStock} com estoque baixo</span>
+              </div>
 
-          {!loading && data.items.length === 0 && (
-            <div className="grid place-items-center rounded-lg border border-dashed border-line bg-panelSoft py-12 text-center">
-              <ShieldCheck className="text-slate-600" size={34} />
-              <div className="mt-3 font-semibold text-white">Nenhum item de estoque encontrado</div>
-              <div className="mt-1 text-sm text-slate-400">Cadastre um item ou ajuste os filtros.</div>
-            </div>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Produto</Th>
+                    <Th>Variação</Th>
+                    <Th>Tipo de entrega</Th>
+                    <Th>Estoque atual</Th>
+                    <Th>Estoque mínimo</Th>
+                    <Th>Custo unitário</Th>
+                    <Th>Lucro potencial</Th>
+                    <Th>Status</Th>
+                    <Th>Needs review</Th>
+                    <Th>Fornecedor</Th>
+                    <Th>Ações rápidas</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {operationalRows.map((item) => (
+                    <tr key={`${item.scope}-${item.id}`} className="hover:bg-slate-900/45">
+                      <Td>
+                        <div className="font-semibold text-white">{item.productName}</div>
+                        <div className="mt-1 font-mono text-xs text-slate-500">{item.productInternalCode}</div>
+                        <div className="mt-1 text-xs text-slate-500">{item.game ?? item.category}</div>
+                      </Td>
+                      <Td>
+                        {item.productVariantName ? (
+                          <>
+                            <div className="font-semibold text-cyan">{item.productVariantName}</div>
+                            <div className="mt-1 font-mono text-xs text-slate-500">{item.productVariantCode}</div>
+                          </>
+                        ) : (
+                          <Badge tone="neutral">Produto pai</Badge>
+                        )}
+                      </Td>
+                      <Td>
+                        <div className="flex flex-wrap gap-1">
+                          <Badge tone={stockStateTone[item.stockState]}>{stockStateLabels[item.stockState]}</Badge>
+                          <Badge tone="neutral">{deliveryTypeLabels[item.deliveryType]}</Badge>
+                        </div>
+                      </Td>
+                      <Td>
+                        {item.deliveryType === "service" ? (
+                          <span className="text-cyan">Serviço</span>
+                        ) : item.deliveryType === "on_demand" ? (
+                          <span className="text-violet-200">Sob demanda</span>
+                        ) : (
+                          <span className={item.stockState === "out_of_stock" ? "font-semibold text-red-300" : "text-slate-200"}>
+                            {item.stockCurrent}
+                          </span>
+                        )}
+                      </Td>
+                      <Td>{item.deliveryType === "manual" || item.deliveryType === "automatic" ? item.stockMin : "-"}</Td>
+                      <Td>{formatCurrencyBRL(item.unitCost)}</Td>
+                      <Td className={item.potentialProfit >= 0 ? "font-semibold text-emerald-300" : "font-semibold text-red-300"}>
+                        {formatCurrencyBRL(item.potentialProfit)}
+                      </Td>
+                      <Td>
+                        <Badge tone={item.status === "active" ? "success" : item.status === "out_of_stock" ? "danger" : "warning"}>
+                          {operationalStatusLabels[item.status]}
+                        </Badge>
+                      </Td>
+                      <Td>{item.needsReview ? <Badge tone="warning">revisar</Badge> : <Badge tone="success">ok</Badge>}</Td>
+                      <Td className="max-w-[180px] truncate">{item.supplierName ?? "-"}</Td>
+                      <Td>
+                        <div className="flex items-center gap-1">
+                          <Button size="icon" variant="ghost" title="Abrir produtos" asChild>
+                            <Link to="/products">
+                              <Edit3 size={15} />
+                            </Link>
+                          </Button>
+                          <Button size="icon" variant="ghost" title="Gerenciar variações" asChild>
+                            <Link to="/products">
+                              <Layers3 size={15} />
+                            </Link>
+                          </Button>
+                        </div>
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              {!loading && operationalRows.length === 0 && (
+                <div className="grid place-items-center rounded-lg border border-dashed border-line bg-panelSoft py-12 text-center">
+                  <Boxes className="text-slate-600" size={34} />
+                  <div className="mt-3 font-semibold text-white">Nenhum estoque operacional encontrado</div>
+                  <div className="mt-1 text-sm text-slate-400">Crie produtos/variações ou ajuste os filtros.</div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                <Badge tone="cyan">{data.items.length} item(ns) protegido(s)</Badge>
+                <span>{data.protectedSummary.available} disponível(is)</span>
+                <span>·</span>
+                <span>{data.protectedSummary.sold} vendido(s)/entregue(s)</span>
+                <span>·</span>
+                <span>{data.protectedSummary.problem} problema(s)</span>
+              </div>
+
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>ID interno</Th>
+                    <Th>Produto</Th>
+                    <Th>Fornecedor</Th>
+                    <Th>Custo</Th>
+                    <Th>Lucro potencial</Th>
+                    <Th>Status</Th>
+                    <Th>Dados protegidos</Th>
+                    <Th>Datas</Th>
+                    <Th>Ações</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.map((item) => {
+                    const hasAnySecret =
+                      item.hasAccountLogin ||
+                      item.hasAccountPassword ||
+                      item.hasAccountEmail ||
+                      item.hasAccountEmailPassword ||
+                      item.hasAccessNotes;
+                    return (
+                      <tr key={item.id} className="hover:bg-slate-900/45">
+                        <Td className="font-mono text-xs text-slate-400">{item.inventoryCode}</Td>
+                        <Td>
+                          <div className="font-semibold text-white">{item.productName ?? "Sem vínculo"}</div>
+                          <div className="mt-1 font-mono text-xs text-slate-500">{item.productInternalCode ?? item.productId ?? "-"}</div>
+                          {item.productVariantName && (
+                            <div className="mt-1 text-xs text-cyan">{item.productVariantName}</div>
+                          )}
+                        </Td>
+                        <Td>{item.supplierId ?? "-"}</Td>
+                        <Td>{formatCurrencyBRL(item.purchaseCost)}</Td>
+                        <Td className={item.potentialProfit >= 0 ? "font-semibold text-emerald-300" : "font-semibold text-red-300"}>
+                          {formatCurrencyBRL(item.potentialProfit)}
+                        </Td>
+                        <Td>
+                          <Badge tone={inventoryStatusTone[item.status]}>{inventoryStatusLabels[item.status]}</Badge>
+                        </Td>
+                        <Td>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={!hasAnySecret || !canRevealSecrets}
+                            onClick={() => openSecretPanel(item)}
+                          >
+                            <Eye size={14} />
+                            {hasAnySecret ? "Revelar" : "Vazio"}
+                          </Button>
+                        </Td>
+                        <Td className="text-xs text-slate-400">
+                          <div>Compra: {item.boughtAt ? new Date(item.boughtAt).toLocaleDateString("pt-BR") : "-"}</div>
+                          <div>Venda: {item.soldAt ? new Date(item.soldAt).toLocaleDateString("pt-BR") : "-"}</div>
+                          <div>Entrega: {item.deliveredAt ? new Date(item.deliveredAt).toLocaleDateString("pt-BR") : "-"}</div>
+                        </Td>
+                        <Td>
+                          <div className="flex items-center gap-1">
+                            <Button size="icon" variant="ghost" title="Editar" disabled={!canEditInventory} onClick={() => openEdit(item)}>
+                              <Edit3 size={15} />
+                            </Button>
+                            <Button size="icon" variant="ghost" title="Marcar vendido" disabled={!canEditInventory} onClick={() => void changeStatus(item, "sold")}>
+                              <CheckCircle2 size={15} />
+                            </Button>
+                            <Button size="icon" variant="ghost" title="Marcar entregue" disabled={!canEditInventory} onClick={() => void changeStatus(item, "delivered")}>
+                              <ShieldCheck size={15} />
+                            </Button>
+                            <Button size="icon" variant="ghost" title="Marcar problema" disabled={!canEditInventory} onClick={() => void changeStatus(item, "problem")}>
+                              <TriangleAlert size={15} />
+                            </Button>
+                            <Button size="icon" variant="ghost" title="Arquivar" disabled={!canEditInventory} onClick={() => void changeStatus(item, "archived")}>
+                              <Archive size={15} />
+                            </Button>
+                            <Button size="icon" variant="ghost" title="Excluir" disabled={!canEditInventory} onClick={() => void deleteItem(item)}>
+                              <Trash2 size={15} />
+                            </Button>
+                          </div>
+                        </Td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </Table>
+
+              {!loading && data.items.length === 0 && (
+                <div className="grid place-items-center rounded-lg border border-dashed border-line bg-panelSoft py-12 text-center">
+                  <ShieldCheck className="text-slate-600" size={34} />
+                  <div className="mt-3 font-semibold text-white">Nenhum item protegido encontrado</div>
+                  <div className="mt-1 text-sm text-slate-400">Cadastre uma conta/licença específica ou ajuste os filtros.</div>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

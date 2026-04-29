@@ -87,6 +87,25 @@ const fallbackApi: HzdKyxDesktopApi = {
         totalCost: 0,
         potentialProfit: 0
       },
+      protectedSummary: {
+        available: 0,
+        sold: 0,
+        problem: 0,
+        totalCost: 0,
+        potentialProfit: 0
+      },
+      operationalItems: [],
+      operationalSummary: {
+        available: 0,
+        sold: 0,
+        problem: 0,
+        totalCost: 0,
+        potentialProfit: 0,
+        lowStock: 0,
+        outOfStock: 0,
+        productRows: 0,
+        variantRows: 0
+      },
       products: [],
       productVariants: [],
       suppliers: [],

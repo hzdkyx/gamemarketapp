@@ -206,6 +206,7 @@ export const events = sqliteTable("events", {
       "order.awaiting_delivery",
       "order.delivered",
       "order.completed",
+      "order.status_corrected",
       "order.cancelled",
       "order.refunded",
       "order.mediation",

@@ -212,8 +212,9 @@ const ProductForm = ({
   );
   const stockCurrent = parseInteger(form.stockCurrent);
   const stockMin = parseInteger(form.stockMin);
-  const suggestsOutOfStock = stockCurrent <= 0 && form.status !== "out_of_stock";
-  const lowStock = stockCurrent > 0 && stockCurrent <= stockMin;
+  const tracksStock = form.deliveryType === "manual" || form.deliveryType === "automatic";
+  const suggestsOutOfStock = tracksStock && stockCurrent <= 0 && form.status !== "out_of_stock";
+  const lowStock = tracksStock && stockCurrent > 0 && stockCurrent <= stockMin;
 
   const update = <K extends keyof ProductFormState>(key: K, value: ProductFormState[K]): void => {
     setForm({ ...form, [key]: value });
@@ -582,8 +583,18 @@ export const ProductsPage = (): JSX.Element => {
       <div className="grid gap-4 xl:grid-cols-5">
         <Metric label="Total" value={String(data.summary.total)} helper="Produtos cadastrados" tone="cyan" />
         <Metric label="Ativos" value={String(data.summary.active)} helper="Visíveis para operação" tone="success" />
-        <Metric label="Sem estoque" value={String(data.summary.outOfStock)} helper="Estoque atual zerado" tone="danger" />
-        <Metric label="Estoque baixo" value={String(data.summary.lowStock)} helper="Acima de zero e no mínimo" tone="warning" />
+        <Metric
+          label="Sem estoque"
+          value={String(data.summary.outOfStock)}
+          helper="Produtos sem variação ou variações"
+          tone="danger"
+        />
+        <Metric
+          label="Estoque baixo"
+          value={String(data.summary.lowStock)}
+          helper="Manual/automático no mínimo"
+          tone="warning"
+        />
         <Metric
           label="Lucro médio"
           value={formatCurrencyBRL(data.summary.averageEstimatedProfit)}
@@ -694,7 +705,14 @@ export const ProductsPage = (): JSX.Element => {
             </thead>
             <tbody>
               {data.items.map((product) => {
-                const lowStock = product.stockCurrent <= product.stockMin;
+                const hasVariants = (product.variantCount ?? 0) > 0;
+                const tracksProductStock = product.deliveryType === "manual" || product.deliveryType === "automatic";
+                const lowStock =
+                  !hasVariants &&
+                  tracksProductStock &&
+                  product.stockCurrent > 0 &&
+                  product.stockCurrent <= product.stockMin;
+                const outOfStock = !hasVariants && tracksProductStock && product.stockCurrent <= 0;
                 return (
                   <tr key={product.id} className="hover:bg-slate-900/45">
                     <Td className="font-mono text-xs text-slate-400">{product.internalCode}</Td>
@@ -715,9 +733,20 @@ export const ProductsPage = (): JSX.Element => {
                       <div className="mt-1 text-xs text-slate-500">{formatPercent(product.marginPercent)}</div>
                     </Td>
                     <Td>
-                      <span className={lowStock ? "font-semibold text-amber-300" : "text-slate-200"}>
-                        {product.stockCurrent}/{product.stockMin}
-                      </span>
+                      {hasVariants ? (
+                        <div className="flex flex-col gap-1">
+                          <Badge tone="cyan">Por variação</Badge>
+                          <span className="text-xs text-slate-500">{product.variantCount} variação(ões)</span>
+                        </div>
+                      ) : product.deliveryType === "service" ? (
+                        <Badge tone="cyan">Serviço</Badge>
+                      ) : product.deliveryType === "on_demand" ? (
+                        <Badge tone="purple">Sob demanda</Badge>
+                      ) : (
+                        <span className={outOfStock ? "font-semibold text-red-300" : lowStock ? "font-semibold text-amber-300" : "text-slate-200"}>
+                          {product.stockCurrent}/{product.stockMin}
+                        </span>
+                      )}
                     </Td>
                     <Td>
                       <Badge tone={productStatusTone[product.status]}>{productStatusLabels[product.status]}</Badge>

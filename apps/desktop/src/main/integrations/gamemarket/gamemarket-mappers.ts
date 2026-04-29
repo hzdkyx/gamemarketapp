@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ProductStatus } from "../../../shared/contracts";
+import type { OrderStatus, ProductStatus } from "../../../shared/contracts";
 import type { GameMarketOrderListItem, GameMarketProductListItem } from "./gamemarket-contracts";
 
 const stableStringify = (value: unknown): string => {
@@ -36,6 +36,74 @@ export const mapGameMarketProductStatus = (status: string): ProductStatus => {
   return "paused";
 };
 
+export interface GameMarketOrderStatusMapping {
+  status: OrderStatus;
+  actionRequired: boolean;
+}
+
+const initialSyncMutableOrderStatuses = new Set<OrderStatus>(["draft", "pending_payment"]);
+const externallyCompletableOrderStatuses = new Set<OrderStatus>([
+  "draft",
+  "pending_payment",
+  "payment_confirmed",
+  "awaiting_delivery",
+  "delivered"
+]);
+const completedExternalStatuses = new Set([
+  "completed",
+  "concluded",
+  "concluido",
+  "pedido_concluido",
+  "order_completed",
+  "funds_released",
+  "fundos_liberados"
+]);
+
+const normalizeExternalStatus = (status: string): string =>
+  status
+    .trim()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+export const isGameMarketProcessingStatus = (externalStatus: string | null | undefined): boolean =>
+  normalizeExternalStatus(externalStatus ?? "") === "processing";
+
+export const isGameMarketCompletedStatus = (externalStatus: string | null | undefined): boolean => {
+  const normalized = normalizeExternalStatus(externalStatus ?? "");
+  return completedExternalStatuses.has(normalized);
+};
+
+export const mapGameMarketOrderStatus = (externalStatus: string): GameMarketOrderStatusMapping => {
+  if (isGameMarketProcessingStatus(externalStatus)) {
+    return {
+      status: "payment_confirmed",
+      actionRequired: true
+    };
+  }
+
+  if (isGameMarketCompletedStatus(externalStatus)) {
+    return {
+      status: "completed",
+      actionRequired: false
+    };
+  }
+
+  return {
+    status: "draft",
+    actionRequired: false
+  };
+};
+
+export const shouldApplyGameMarketOrderStatus = (
+  currentStatus: OrderStatus,
+  mappedStatus: OrderStatus
+): boolean =>
+  (mappedStatus === "payment_confirmed" && initialSyncMutableOrderStatuses.has(currentStatus)) ||
+  (mappedStatus === "completed" && externallyCompletableOrderStatuses.has(currentStatus));
+
 export const getGameMarketProductExternalId = (product: GameMarketProductListItem): string =>
   String(product.id);
 
@@ -53,5 +121,5 @@ export const buildImportedOrderNotes = (order: GameMarketOrderListItem): string 
   [
     "Importado via sync manual GameMarket.",
     `Status externo: ${order.status}.`,
-    "O status externo foi armazenado sem automação de entrega nesta fase."
+    "Entrega local não conclui o pedido até status externo concluído/liberado ou confirmação manual explícita."
   ].join(" ");

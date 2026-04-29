@@ -1,6 +1,6 @@
 import { GAMEMARKET_FEE_PERCENT } from "@hzdk/shared";
 import { randomUUID } from "node:crypto";
-import type { GameMarketSyncSummary } from "../../../shared/contracts";
+import type { GameMarketSyncSummary, OrderStatus } from "../../../shared/contracts";
 import { getSqliteDatabase } from "../../database/database";
 import { eventService } from "../../services/event-service";
 import { GameMarketClient } from "./gamemarket-client";
@@ -11,7 +11,11 @@ import {
   getGameMarketOrderExternalId,
   getGameMarketProductExternalId,
   hashExternalPayload,
-  mapGameMarketProductStatus
+  isGameMarketCompletedStatus,
+  isGameMarketProcessingStatus,
+  mapGameMarketOrderStatus,
+  mapGameMarketProductStatus,
+  shouldApplyGameMarketOrderStatus
 } from "./gamemarket-mappers";
 import { gameMarketSettingsService } from "./gamemarket-settings-service";
 import { GameMarketDocsMissingError, toGameMarketSafeError } from "./gamemarket-errors";
@@ -27,7 +31,13 @@ interface ExternalProductRow {
 
 interface ExternalOrderRow {
   id: string;
+  external_status: string | null;
   external_payload_hash: string | null;
+  status: OrderStatus;
+  action_required: number;
+  confirmed_at: string | null;
+  delivered_at: string | null;
+  completed_at: string | null;
 }
 
 interface ProductFinancials {
@@ -135,7 +145,15 @@ const findOrderByExternalId = (externalId: string): ExternalOrderRow | null => {
   const row = getSqliteDatabase()
     .prepare(
       `
-        SELECT id, external_payload_hash
+        SELECT
+          id,
+          external_status,
+          external_payload_hash,
+          status,
+          action_required,
+          confirmed_at,
+          delivered_at,
+          completed_at
         FROM orders
         WHERE external_marketplace = 'gamemarket' AND external_order_id = ?
       `
@@ -322,6 +340,156 @@ const upsertProduct = (
   return "imported";
 };
 
+const syncExistingOrder = (input: {
+  existing: ExternalOrderRow;
+  order: GameMarketOrderListItem;
+  hash: string;
+  actorUserId: string | null;
+  syncedAt: string;
+}): "updated" | "unchanged" => {
+  const { existing, order, hash, actorUserId, syncedAt } = input;
+  const mappedStatus = mapGameMarketOrderStatus(order.status);
+  const shouldApplyStatus = shouldApplyGameMarketOrderStatus(existing.status, mappedStatus.status);
+  const shouldCorrectReleaseState =
+    isGameMarketProcessingStatus(order.status) &&
+    !isGameMarketCompletedStatus(existing.external_status) &&
+    (existing.status === "completed" || (existing.status === "delivered" && Boolean(existing.completed_at)));
+
+  if (existing.external_payload_hash === hash && !shouldApplyStatus && !shouldCorrectReleaseState) {
+    getSqliteDatabase().prepare("UPDATE orders SET last_synced_at = ? WHERE id = ?").run(syncedAt, existing.id);
+    return "unchanged";
+  }
+
+  if (shouldCorrectReleaseState) {
+    getSqliteDatabase()
+      .prepare(
+        `
+          UPDATE orders
+          SET
+            external_status = @externalStatus,
+            external_payload_hash = @externalPayloadHash,
+            last_synced_at = @lastSyncedAt,
+            status = 'delivered',
+            action_required = 0,
+            delivered_at = COALESCE(delivered_at, completed_at, @deliveredAt),
+            completed_at = NULL,
+            updated_by_user_id = @updatedByUserId,
+            updated_at = @updatedAt
+          WHERE id = @id
+        `
+      )
+      .run({
+        id: existing.id,
+        externalStatus: order.status,
+        externalPayloadHash: hash,
+        lastSyncedAt: syncedAt,
+        deliveredAt: syncedAt,
+        updatedByUserId: actorUserId,
+        updatedAt: syncedAt
+      });
+
+    eventService.createInternal({
+      source: "gamemarket_api",
+      type: "order.status_corrected",
+      severity: "warning",
+      title: "Status corrigido para aguardando liberação",
+      message:
+        "Pedido retornado para Entregue / aguardando liberação porque a GameMarket ainda está em processing.",
+      orderId: existing.id,
+      actorUserId,
+      rawPayload: {
+        externalOrderId: getGameMarketOrderExternalId(order),
+        externalStatus: order.status,
+        previousLocalStatus: existing.status,
+        correctedLocalStatus: "delivered",
+        previousCompletedAt: existing.completed_at
+      }
+    });
+
+    return "updated";
+  }
+
+  if (shouldApplyStatus) {
+    getSqliteDatabase()
+      .prepare(
+        `
+          UPDATE orders
+          SET
+            external_status = @externalStatus,
+            external_payload_hash = @externalPayloadHash,
+            last_synced_at = @lastSyncedAt,
+            status = @status,
+            action_required = @actionRequired,
+            confirmed_at = COALESCE(confirmed_at, @confirmedAt),
+            completed_at = CASE
+              WHEN @status = 'completed' THEN COALESCE(completed_at, @completedAt)
+              ELSE completed_at
+            END,
+            updated_by_user_id = @updatedByUserId,
+            updated_at = @updatedAt
+          WHERE id = @id
+        `
+      )
+      .run({
+        id: existing.id,
+        externalStatus: order.status,
+        externalPayloadHash: hash,
+        lastSyncedAt: syncedAt,
+        status: mappedStatus.status,
+        actionRequired: mappedStatus.actionRequired ? 1 : 0,
+        confirmedAt: syncedAt,
+        completedAt: syncedAt,
+        updatedByUserId: actorUserId,
+        updatedAt: syncedAt
+      });
+
+    const isCompleted = mappedStatus.status === "completed";
+    eventService.createInternal({
+      source: "gamemarket_api",
+      type: isCompleted ? "order.completed" : "order.payment_confirmed",
+      severity: "success",
+      title: isCompleted ? "Pedido GameMarket concluído" : "Pedido GameMarket confirmado",
+      message: isCompleted
+        ? `Pedido externo ${getGameMarketOrderExternalId(order)} foi concluído/liberado pela GameMarket.`
+        : `Pedido externo ${getGameMarketOrderExternalId(order)} entrou como processamento confirmado.`,
+      orderId: existing.id,
+      actorUserId,
+      rawPayload: {
+        externalOrderId: getGameMarketOrderExternalId(order),
+        externalStatus: order.status,
+        localStatus: mappedStatus.status,
+        actionRequired: mappedStatus.actionRequired
+      }
+    });
+
+    return "updated";
+  }
+
+  getSqliteDatabase()
+    .prepare(
+      `
+        UPDATE orders
+        SET
+          external_status = @externalStatus,
+          external_payload_hash = @externalPayloadHash,
+          last_synced_at = @lastSyncedAt,
+          updated_by_user_id = @updatedByUserId,
+          updated_at = @updatedAt
+        WHERE id = @id
+      `
+    )
+    .run({
+      id: existing.id,
+      externalStatus: order.status,
+      externalPayloadHash: hash,
+      lastSyncedAt: syncedAt,
+      updatedByUserId: actorUserId,
+      updatedAt: syncedAt
+    });
+
+  return "updated";
+};
+
 const upsertOrder = (
   order: GameMarketOrderListItem,
   actorUserId: string | null,
@@ -333,46 +501,26 @@ const upsertOrder = (
   const existing = findOrderByExternalId(externalId);
 
   if (existing) {
-    if (existing.external_payload_hash === hash) {
-      db.prepare("UPDATE orders SET last_synced_at = ? WHERE id = ?").run(syncedAt, existing.id);
-      return "unchanged";
+    const result = syncExistingOrder({ existing, order, hash, actorUserId, syncedAt });
+
+    if (result === "updated") {
+      eventService.createInternal({
+        source: "gamemarket_api",
+        type: "integration.gamemarket.order_updated",
+        severity: "info",
+        title: "Pedido GameMarket atualizado",
+        message: `Pedido externo ${externalId} teve metadados sincronizados sem sobrescrever status local avançado.`,
+        orderId: existing.id,
+        actorUserId,
+        rawPayload: {
+          externalOrderId: externalId,
+          externalStatus: order.status,
+          externalPayloadHash: hash
+        }
+      });
     }
 
-    db.prepare(
-      `
-        UPDATE orders
-        SET
-          external_status = @externalStatus,
-          external_payload_hash = @externalPayloadHash,
-          last_synced_at = @lastSyncedAt,
-          updated_by_user_id = @updatedByUserId,
-          updated_at = @updatedAt
-        WHERE id = @id
-      `
-    ).run({
-      id: existing.id,
-      externalStatus: order.status,
-      externalPayloadHash: hash,
-      lastSyncedAt: syncedAt,
-      updatedByUserId: actorUserId,
-      updatedAt: syncedAt
-    });
-
-    eventService.createInternal({
-      source: "gamemarket_api",
-      type: "integration.gamemarket.order_updated",
-      severity: "info",
-      title: "Pedido GameMarket atualizado",
-      message: `Pedido externo ${externalId} teve metadados sincronizados.`,
-      orderId: existing.id,
-      actorUserId,
-      rawPayload: {
-        externalOrderId: externalId,
-        externalStatus: order.status,
-        externalPayloadHash: hash
-      }
-    });
-    return "updated";
+    return result;
   }
 
   const product = findLocalProductForOrder(String(order.productId));
@@ -384,6 +532,7 @@ const upsertOrder = (
   const id = randomUUID();
   const orderCode = makeUniqueCode("GMK-ORD", externalId, "orders");
   const createdAt = order.createdAt || syncedAt;
+  const mappedStatus = mapGameMarketOrderStatus(order.status);
 
   db.prepare(
     `
@@ -445,17 +594,17 @@ const upsertOrder = (
         @netValueCents,
         @profitCents,
         @marginPercent,
-        'draft',
-        0,
+        @status,
+        @actionRequired,
         NULL,
         @notes,
         @createdByUserId,
         @updatedByUserId,
         @createdAt,
         @updatedAt,
+        @confirmedAt,
         NULL,
-        NULL,
-        NULL,
+        @completedAt,
         NULL,
         NULL
       )
@@ -475,11 +624,15 @@ const upsertOrder = (
     unitCostCents: product.unit_cost_cents,
     feePercent: product.fee_percent,
     ...financials,
+    status: mappedStatus.status,
+    actionRequired: mappedStatus.actionRequired ? 1 : 0,
     notes: buildImportedOrderNotes(order),
     createdByUserId: actorUserId,
     updatedByUserId: actorUserId,
     createdAt,
-    updatedAt: syncedAt
+    updatedAt: syncedAt,
+    confirmedAt: mappedStatus.status === "payment_confirmed" || mappedStatus.status === "completed" ? syncedAt : null,
+    completedAt: mappedStatus.status === "completed" ? syncedAt : null
   });
 
   eventService.createInternal({

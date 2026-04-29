@@ -20,6 +20,7 @@ import { inventoryRepository } from "../repositories/inventory-repository";
 import { orderRepository, type OrderWriteRecord } from "../repositories/order-repository";
 import { productVariantRepository } from "../repositories/product-variant-repository";
 import { productRepository } from "../repositories/product-repository";
+import { isGameMarketCompletedStatus } from "../integrations/gamemarket/gamemarket-mappers";
 import { eventService } from "./event-service";
 import { inventoryService } from "./inventory-service";
 import { moneyToCents } from "./money";
@@ -474,6 +475,30 @@ const applyInventoryTransition = (order: OrderRecord, actorUserId: string | null
   }
 };
 
+const validateStatusChange = (current: OrderRecord, input: OrderChangeStatusInput): void => {
+  if (current.status === input.status) {
+    throw new Error(`Pedido já está com status ${statusLabel[current.status]}.`);
+  }
+
+  if (
+    input.status === "delivered" &&
+    current.status !== "payment_confirmed" &&
+    current.status !== "awaiting_delivery"
+  ) {
+    throw new Error("A entrega só pode ser registrada em pedido com pagamento confirmado ou aguardando entrega.");
+  }
+
+  if (
+    input.status === "completed" &&
+    !input.manualCompletionConfirmed &&
+    !isGameMarketCompletedStatus(current.externalStatus)
+  ) {
+    throw new Error(
+      "Para concluir manualmente, confirme que a garantia terminou ou que a GameMarket liberou os fundos."
+    );
+  }
+};
+
 export const orderService = {
   list(filters: OrderListInput): OrderListResult {
     const items = orderRepository.list(filters);
@@ -669,6 +694,7 @@ export const orderService = {
     const db = getSqliteDatabase();
     return db.transaction(() => {
       const current = this.get(input.id).order;
+      validateStatusChange(current, input);
       const timestamp = nowIso();
       const updatedWrite: OrderWriteRecord = {
         ...recordToWrite(current),

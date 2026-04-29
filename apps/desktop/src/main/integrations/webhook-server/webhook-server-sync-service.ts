@@ -52,6 +52,22 @@ const mappingByRemoteType: Record<string, LocalEventMapping> = {
     actionRequired: true,
     notificationCandidate: true
   },
+  "gamemarket.order.completed": {
+    type: "order.completed",
+    severity: "success",
+    title: "Pedido concluído na GameMarket",
+    message: "PEDIDO CONCLUÍDO NA GAMEMARKET. O pedido pode ser tratado como liberado.",
+    actionRequired: false,
+    notificationCandidate: true
+  },
+  "gamemarket.financial.funds_released": {
+    type: "order.completed",
+    severity: "success",
+    title: "Fundos liberados na GameMarket",
+    message: "FUNDOS LIBERADOS NA GAMEMARKET. O pedido pode ser tratado como concluído.",
+    actionRequired: false,
+    notificationCandidate: true
+  },
   "gamemarket.review.received": {
     type: "integration.webhook_server.review_received",
     severity: "success",
@@ -239,6 +255,43 @@ const markOrderActionRequired = (orderId: string | null, actionRequired: boolean
     .run(nowIso(), orderId);
 };
 
+const completionRemoteTypes = new Set([
+  "gamemarket.order.completed",
+  "gamemarket.financial.funds_released"
+]);
+
+const promoteOrderCompleted = (
+  orderId: string | null,
+  remoteEvent: WebhookServerEventItem,
+  actorUserId: string | null
+): void => {
+  if (!orderId || !completionRemoteTypes.has(remoteEvent.eventType)) {
+    return;
+  }
+
+  const timestamp = nowIso();
+  getSqliteDatabase()
+    .prepare(
+      `
+        UPDATE orders
+        SET
+          status = 'completed',
+          action_required = 0,
+          completed_at = COALESCE(completed_at, @completedAt),
+          updated_by_user_id = @updatedByUserId,
+          updated_at = @updatedAt
+        WHERE id = @id
+          AND status NOT IN ('completed', 'cancelled', 'refunded', 'archived')
+      `
+    )
+    .run({
+      id: orderId,
+      completedAt: timestamp,
+      updatedByUserId: actorUserId,
+      updatedAt: timestamp
+    });
+};
+
 const makeFailedSummary = (startedAt: string, error: string): WebhookServerSyncSummary => {
   const finishedAt = nowIso();
   return {
@@ -312,6 +365,7 @@ export const webhookServerSyncService = {
           const productId = findLocalProductId(references.productId);
           const mapping = getMapping(remoteEvent);
           markOrderActionRequired(orderId, mapping.actionRequired);
+          promoteOrderCompleted(orderId, remoteEvent, actorUserId);
           const imported = eventService.createInternal({
             source: "webhook_server",
             type: mapping.type,

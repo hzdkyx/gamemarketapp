@@ -74,6 +74,7 @@ export const eventTypeValues = [
   "order.awaiting_delivery",
   "order.delivered",
   "order.completed",
+  "order.status_corrected",
   "order.cancelled",
   "order.refunded",
   "order.mediation",
@@ -441,7 +442,8 @@ export const orderChangeStatusInputSchema = z
   .object({
     id: idSchema,
     status: orderStatusSchema,
-    notes: nullableTextSchema
+    notes: nullableTextSchema,
+    manualCompletionConfirmed: z.boolean().optional()
   })
   .strict();
 
@@ -755,6 +757,7 @@ export interface ProductRecord {
   externalStatus?: string | null;
   externalPayloadHash?: string | null;
   lastSyncedAt?: string | null;
+  variantCount?: number;
   createdByUserId: string | null;
   updatedByUserId: string | null;
   createdAt: string;
@@ -845,9 +848,48 @@ export interface InventorySummary {
   potentialProfit: number;
 }
 
+export type OperationalStockScope = "product" | "variant";
+export type OperationalStockState = "available" | "low_stock" | "out_of_stock" | "service" | "on_demand";
+
+export interface OperationalStockRecord {
+  id: string;
+  scope: OperationalStockScope;
+  productId: string;
+  productInternalCode: string;
+  productName: string;
+  category: string;
+  game: string | null;
+  productVariantId: string | null;
+  productVariantCode: string | null;
+  productVariantName: string | null;
+  deliveryType: DeliveryType;
+  stockCurrent: number;
+  stockMin: number;
+  salePrice: number;
+  unitCost: number;
+  netValue: number;
+  unitProfit: number;
+  potentialProfit: number;
+  status: ProductStatus | ProductVariantStatus;
+  stockState: OperationalStockState;
+  needsReview: boolean;
+  supplierName: string | null;
+  supplierUrl: string | null;
+}
+
+export interface OperationalStockSummary extends InventorySummary {
+  lowStock: number;
+  outOfStock: number;
+  productRows: number;
+  variantRows: number;
+}
+
 export interface InventoryListResult {
   items: InventoryRecord[];
   summary: InventorySummary;
+  protectedSummary: InventorySummary;
+  operationalItems: OperationalStockRecord[];
+  operationalSummary: OperationalStockSummary;
   products: Array<Pick<ProductRecord, "id" | "internalCode" | "name" | "category" | "game">>;
   productVariants: Array<
     Pick<

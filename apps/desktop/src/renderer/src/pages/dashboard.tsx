@@ -198,14 +198,14 @@ export const DashboardPage = (): JSX.Element => {
         <MetricCard
           label="Estoque baixo"
           value={String(summary.lowStockProducts)}
-          helper="Produtos no limite"
+          helper="Produtos/variações operacionais"
           icon={<PackageX size={18} />}
           tone="warning"
         />
         <MetricCard
           label="Sem estoque"
           value={String(summary.outOfStockProducts)}
-          helper="Produtos zerados"
+          helper="Produtos/variações operacionais"
           icon={<PackageX size={18} />}
           tone="danger"
         />

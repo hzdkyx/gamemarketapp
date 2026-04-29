@@ -32,6 +32,7 @@ interface ProductRow {
   external_status: string | null;
   external_payload_hash: string | null;
   last_synced_at: string | null;
+  variant_count: number;
   created_by_user_id: string | null;
   updated_by_user_id: string | null;
   created_at: string;
@@ -104,6 +105,7 @@ const mapProductRow = (row: ProductRow): ProductRecord => ({
   externalStatus: row.external_status,
   externalPayloadHash: row.external_payload_hash,
   lastSyncedAt: row.last_synced_at,
+  variantCount: row.variant_count,
   createdByUserId: row.created_by_user_id,
   updatedByUserId: row.updated_by_user_id,
   createdAt: row.created_at,
@@ -136,6 +138,12 @@ const productSelect = `
     external_status,
     external_payload_hash,
     last_synced_at,
+    (
+      SELECT COUNT(*)
+      FROM product_variants
+      WHERE product_variants.product_id = products.id
+        AND product_variants.status != 'archived'
+    ) AS variant_count,
     created_by_user_id,
     updated_by_user_id,
     created_at,

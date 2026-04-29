@@ -9,6 +9,7 @@ import type {
   InventoryRevealSecretInput,
   InventorySecretField,
   InventorySummary,
+  OperationalStockSummary,
   InventoryUpdateData
 } from "../../shared/contracts";
 import {
@@ -20,6 +21,7 @@ import { productRepository } from "../repositories/product-repository";
 import { decryptLocalSecret, encryptLocalSecret } from "../security/secrets";
 import { eventService } from "./event-service";
 import { centsToMoney, moneyToCents } from "./money";
+import { summarizeOperationalStock } from "./stock-rules";
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -76,6 +78,21 @@ const mapSummary = (summary: ReturnType<typeof inventoryRepository.getSummary>):
   potentialProfit: centsToMoney(summary.potential_profit_cents)
 });
 
+const defaultOperationalFilters: InventoryListInput = {
+  search: null,
+  productId: null,
+  category: null,
+  status: "all",
+  supplierId: null,
+  sortDirection: "asc"
+};
+
+const roundOperationalSummary = (summary: OperationalStockSummary): OperationalStockSummary => ({
+  ...summary,
+  totalCost: Math.round((summary.totalCost + Number.EPSILON) * 100) / 100,
+  potentialProfit: Math.round((summary.potentialProfit + Number.EPSILON) * 100) / 100
+});
+
 type SecretColumn =
   | "account_login_encrypted"
   | "account_password_encrypted"
@@ -93,9 +110,19 @@ const secretColumnByField: Record<InventorySecretField, SecretColumn> = {
 
 export const inventoryService = {
   list(filters: InventoryListInput): InventoryListResult {
+    const protectedSummary = mapSummary(inventoryRepository.getSummary());
+    const operationalItems = inventoryRepository.listOperational(filters);
+    const allOperationalItems = inventoryRepository.listOperational(defaultOperationalFilters);
+    const operationalSummary = roundOperationalSummary(
+      summarizeOperationalStock(allOperationalItems, inventoryRepository.countSoldOperationalOrders())
+    );
+
     return {
       items: inventoryRepository.list(filters),
-      summary: mapSummary(inventoryRepository.getSummary()),
+      summary: protectedSummary,
+      protectedSummary,
+      operationalItems,
+      operationalSummary,
       products: productRepository.listAllForSelect(),
       productVariants: productVariantRepository.listAllForSelect(),
       suppliers: inventoryRepository.listSuppliers(),

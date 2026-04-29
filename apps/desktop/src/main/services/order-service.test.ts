@@ -488,7 +488,7 @@ describe("order service", () => {
     expect(order.variantPending).toBe(false);
   });
 
-  it("updates status to delivered and completed with inventory events", () => {
+  it("updates status to delivered without completing the order automatically", () => {
     const order = createConfirmedOrder();
 
     const delivered = orderService.changeStatus({
@@ -498,12 +498,33 @@ describe("order service", () => {
     });
     expect(delivered.actionRequired).toBe(false);
     expect(delivered.deliveredAt).toBeTruthy();
+    expect(delivered.completedAt).toBeNull();
     expect(state.inventory.get("inventory-1")?.status).toBe("delivered");
+    expect(state.events.map((event) => event.type)).toContain("order.delivered");
+    expect(state.events.map((event) => event.type)).not.toContain("order.completed");
+  });
+
+  it("requires explicit confirmation before completing a GameMarket order manually", () => {
+    const order = createConfirmedOrder();
+    const delivered = orderService.changeStatus({
+      id: order.id,
+      status: "delivered",
+      notes: null
+    });
+
+    expect(() =>
+      orderService.changeStatus({
+        id: delivered.id,
+        status: "completed",
+        notes: null
+      })
+    ).toThrow("Para concluir manualmente");
 
     const completed = orderService.changeStatus({
       id: order.id,
       status: "completed",
-      notes: null
+      notes: null,
+      manualCompletionConfirmed: true
     });
     expect(completed.completedAt).toBeTruthy();
     expect(state.events.map((event) => event.type)).toContain("order.completed");
@@ -550,7 +571,8 @@ describe("dashboard service", () => {
     orderService.changeStatus({
       id: order.id,
       status: "completed",
-      notes: null
+      notes: null,
+      manualCompletionConfirmed: true
     });
 
     const summary = dashboardService.getSummary();
@@ -561,6 +583,111 @@ describe("dashboard service", () => {
     expect(summary.estimatedProfitMonth).toBe(47);
     expect(summary.latestEvents.length).toBeGreaterThan(0);
     expect(summary.statusBreakdown.some((row) => row.status === "completed")).toBe(true);
+  });
+
+  it("keeps a delivered GMK order in monthly dashboard revenue while release is pending", () => {
+    state.products.set("product-1", {
+      ...productFixture(),
+      salePrice: 15,
+      unitCost: 0,
+      netValue: 13.05,
+      estimatedProfit: 13.05
+    });
+
+    const order = orderService.create({
+      productId: "product-1",
+      inventoryItemId: null,
+      buyerName: "comprador",
+      feePercent: 13,
+      status: "payment_confirmed",
+      marketplace: "gamemarket",
+      orderCode: "GMK-ORD-34831",
+      externalOrderId: "34831",
+      buyerContact: null,
+      marketplaceUrl: null,
+      notes: null
+    });
+    orderService.changeStatus({
+      id: order.id,
+      status: "delivered",
+      notes: null
+    });
+
+    const summary = dashboardService.getSummary();
+
+    expect(summary.salesMonth).toBe(1);
+    expect(summary.grossRevenueMonth).toBe(15);
+    expect(summary.netRevenueMonth).toBe(13.05);
+    expect(summary.estimatedProfitMonth).toBe(13.05);
+  });
+
+  it("counts completed sales but excludes draft, cancelled and refunded from dashboard revenue", () => {
+    const completedOrder = createConfirmedOrder();
+    orderService.changeStatus({
+      id: completedOrder.id,
+      status: "completed",
+      notes: null,
+      manualCompletionConfirmed: true
+    });
+
+    orderService.create({
+      productId: "product-1",
+      inventoryItemId: null,
+      buyerName: "Draft",
+      feePercent: 13,
+      status: "draft",
+      marketplace: "gamemarket",
+      orderCode: "ORD-DRAFT",
+      externalOrderId: null,
+      buyerContact: null,
+      marketplaceUrl: null,
+      notes: null
+    });
+
+    const cancelled = orderService.create({
+      productId: "product-1",
+      inventoryItemId: null,
+      buyerName: "Cancelado",
+      feePercent: 13,
+      status: "payment_confirmed",
+      marketplace: "gamemarket",
+      orderCode: "ORD-CANCELLED",
+      externalOrderId: null,
+      buyerContact: null,
+      marketplaceUrl: null,
+      notes: null
+    });
+    orderService.changeStatus({
+      id: cancelled.id,
+      status: "cancelled",
+      notes: null
+    });
+
+    const refunded = orderService.create({
+      productId: "product-1",
+      inventoryItemId: null,
+      buyerName: "Reembolsado",
+      feePercent: 13,
+      status: "payment_confirmed",
+      marketplace: "gamemarket",
+      orderCode: "ORD-REFUNDED",
+      externalOrderId: null,
+      buyerContact: null,
+      marketplaceUrl: null,
+      notes: null
+    });
+    orderService.changeStatus({
+      id: refunded.id,
+      status: "refunded",
+      notes: null
+    });
+
+    const summary = dashboardService.getSummary();
+
+    expect(summary.salesMonth).toBe(1);
+    expect(summary.grossRevenueMonth).toBe(100);
+    expect(summary.netRevenueMonth).toBe(87);
+    expect(summary.estimatedProfitMonth).toBe(47);
   });
 
   it("counts stock problems only for manual or automatic variants when products have variants", () => {
@@ -599,10 +726,19 @@ describe("dashboard service", () => {
       stockMin: 0,
       deliveryType: "on_demand"
     });
+    state.productVariants.set("variant-automatic-zero", {
+      ...productVariantFixture(),
+      id: "variant-automatic-zero",
+      variantCode: "AUTO-KEY-ZERO",
+      name: "Chave automática zerada",
+      stockCurrent: 0,
+      stockMin: 1,
+      deliveryType: "automatic"
+    });
 
     const summary = dashboardService.getSummary();
 
-    expect(summary.outOfStockProducts).toBe(1);
+    expect(summary.outOfStockProducts).toBe(2);
     expect(summary.lowStockProducts).toBe(0);
   });
 });

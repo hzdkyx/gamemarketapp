@@ -51,6 +51,7 @@ const eventLabels: Record<EventType, string> = {
   "order.awaiting_delivery": "Aguardando entrega",
   "order.delivered": "Pedido entregue",
   "order.completed": "Pedido concluído",
+  "order.status_corrected": "Status de pedido corrigido",
   "order.cancelled": "Pedido cancelado",
   "order.refunded": "Pedido reembolsado",
   "order.mediation": "Mediação",

@@ -883,5 +883,176 @@ export const runtimeMigrations: RuntimeMigration[] = [
 
       PRAGMA foreign_keys = ON;
     `
+  },
+  {
+    id: "0007_gamemarket_release_status_hotfix",
+    sql: `
+      PRAGMA foreign_keys = OFF;
+
+      CREATE TABLE events_new (
+        id TEXT PRIMARY KEY,
+        event_code TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL CHECK (source IN ('manual', 'system', 'gamemarket_api', 'gamemarket_future', 'webhook_future', 'webhook_server')),
+        type TEXT NOT NULL CHECK (type IN (
+          'order.created',
+          'order.payment_confirmed',
+          'order.awaiting_delivery',
+          'order.delivered',
+          'order.completed',
+          'order.status_corrected',
+          'order.cancelled',
+          'order.refunded',
+          'order.mediation',
+          'order.problem',
+          'inventory.reserved',
+          'inventory.released',
+          'inventory.sold',
+          'inventory.delivered',
+          'inventory.problem',
+          'product.low_stock',
+          'product.out_of_stock',
+          'security.secret_revealed',
+          'integration.gamemarket.settings_updated',
+          'integration.gamemarket.connection_tested',
+          'integration.gamemarket.connection_failed',
+          'integration.gamemarket.token_revealed',
+          'integration.gamemarket.sync_started',
+          'integration.gamemarket.sync_completed',
+          'integration.gamemarket.sync_failed',
+          'integration.gamemarket.order_imported',
+          'integration.gamemarket.order_updated',
+          'integration.gamemarket.product_imported',
+          'integration.gamemarket.product_updated',
+          'integration.webhook_server.settings_updated',
+          'integration.webhook_server.connection_tested',
+          'integration.webhook_server.connection_failed',
+          'integration.webhook_server.token_revealed',
+          'integration.webhook_server.sync_started',
+          'integration.webhook_server.sync_completed',
+          'integration.webhook_server.sync_failed',
+          'integration.webhook_server.test_event_sent',
+          'integration.webhook_server.event_imported',
+          'integration.webhook_server.review_received',
+          'integration.webhook_server.variant_sold_out',
+          'integration.webhook_server.unknown_event',
+          'system.notification_test'
+        )),
+        severity TEXT NOT NULL DEFAULT 'info' CHECK (severity IN ('info', 'success', 'warning', 'critical')),
+        title TEXT NOT NULL,
+        message TEXT,
+        order_id TEXT REFERENCES orders(id) ON DELETE SET NULL,
+        product_id TEXT REFERENCES products(id) ON DELETE SET NULL,
+        inventory_item_id TEXT REFERENCES inventory_items(id) ON DELETE SET NULL,
+        actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        read_at TEXT,
+        raw_payload TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      INSERT INTO events_new (
+        id,
+        event_code,
+        source,
+        type,
+        severity,
+        title,
+        message,
+        order_id,
+        product_id,
+        inventory_item_id,
+        actor_user_id,
+        read_at,
+        raw_payload,
+        created_at
+      )
+      SELECT
+        id,
+        event_code,
+        source,
+        type,
+        severity,
+        title,
+        message,
+        order_id,
+        product_id,
+        inventory_item_id,
+        actor_user_id,
+        read_at,
+        raw_payload,
+        created_at
+      FROM events;
+
+      INSERT INTO events_new (
+        id,
+        event_code,
+        source,
+        type,
+        severity,
+        title,
+        message,
+        order_id,
+        product_id,
+        inventory_item_id,
+        actor_user_id,
+        read_at,
+        raw_payload,
+        created_at
+      )
+      SELECT
+        lower(hex(randomblob(16))),
+        'EVT-ORDER-STATUS-CORRECTED-' || substr(hex(randomblob(4)), 1, 8),
+        'system',
+        'order.status_corrected',
+        'warning',
+        'Status corrigido para aguardando liberação',
+        'Pedido retornado para Entregue / aguardando liberação porque a GameMarket ainda está em processing.',
+        orders.id,
+        orders.product_id,
+        orders.inventory_item_id,
+        NULL,
+        NULL,
+        'previousStatus=' || orders.status || '; correctedStatus=delivered; externalStatus=' || COALESCE(orders.external_status, '') || '; completedAt=' || COALESCE(orders.completed_at, ''),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      FROM orders
+      WHERE orders.external_marketplace = 'gamemarket'
+        AND lower(COALESCE(orders.external_status, '')) = 'processing'
+        AND (
+          orders.status = 'completed'
+          OR (orders.status = 'delivered' AND orders.completed_at IS NOT NULL)
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM events
+          WHERE events.order_id = orders.id
+            AND events.type = 'order.status_corrected'
+        );
+
+      DROP TABLE events;
+      ALTER TABLE events_new RENAME TO events;
+
+      UPDATE orders
+      SET
+        status = 'delivered',
+        action_required = 0,
+        delivered_at = COALESCE(delivered_at, completed_at, updated_at, created_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        completed_at = NULL,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE external_marketplace = 'gamemarket'
+        AND lower(COALESCE(external_status, '')) = 'processing'
+        AND (
+          status = 'completed'
+          OR (status = 'delivered' AND completed_at IS NOT NULL)
+        );
+
+      CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
+      CREATE INDEX IF NOT EXISTS idx_events_read ON events(read_at);
+      CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
+      CREATE INDEX IF NOT EXISTS idx_events_order ON events(order_id);
+      CREATE INDEX IF NOT EXISTS idx_events_product ON events(product_id);
+      CREATE INDEX IF NOT EXISTS idx_events_inventory_item ON events(inventory_item_id);
+      CREATE INDEX IF NOT EXISTS idx_events_actor ON events(actor_user_id);
+
+      PRAGMA foreign_keys = ON;
+    `
   }
 ];

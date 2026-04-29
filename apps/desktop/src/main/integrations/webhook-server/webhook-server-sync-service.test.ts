@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   details: new Map<string, WebhookServerEventDetail>(),
   acked: [] as string[],
   actionRequiredOrders: [] as string[],
+  completedOrders: [] as string[],
   summary: null as unknown
 }));
 
@@ -46,6 +47,15 @@ vi.mock("../../database/database", () => ({
         return {
           run: (_updatedAt: string, orderId: string) => {
             state.actionRequiredOrders.push(orderId);
+            return { changes: 1 };
+          }
+        };
+      }
+
+      if (sql.includes("UPDATE orders") && sql.includes("status = 'completed'")) {
+        return {
+          run: (params: { id: string }) => {
+            state.completedOrders.push(params.id);
             return { changes: 1 };
           }
         };
@@ -137,6 +147,7 @@ beforeEach(() => {
   state.details.clear();
   state.acked.length = 0;
   state.actionRequiredOrders.length = 0;
+  state.completedOrders.length = 0;
   state.summary = null;
 });
 
@@ -160,4 +171,29 @@ describe("webhookServerSyncService", () => {
     expect(state.actionRequiredOrders).toContain("local-order-1");
     expect(state.acked).toContain("remote-1");
   });
+
+  it.each(["gamemarket.order.completed", "gamemarket.financial.funds_released"] as const)(
+    "promotes linked orders to completed for %s",
+    async (eventType) => {
+      const remote = makeRemoteEvent({
+        id: `remote-${eventType}`,
+        eventType,
+        title: "Conclusão",
+        message: "Conclusão",
+        severity: "success"
+      });
+      state.remoteEvents.push(remote);
+      state.details.set(remote.id, {
+        ...remote,
+        rawPayloadMasked: { order_id: "gm-order-1" },
+        headersMasked: {}
+      });
+
+      await webhookServerSyncService.syncNow("admin-1");
+
+      expect(state.completedOrders).toContain("local-order-1");
+      expect(state.localEvents.some((event) => event.type === "order.completed")).toBe(true);
+      expect(state.actionRequiredOrders).not.toContain("local-order-1");
+    }
+  );
 });

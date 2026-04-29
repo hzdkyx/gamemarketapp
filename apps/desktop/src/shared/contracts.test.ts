@@ -144,10 +144,12 @@ describe("order contracts", () => {
   it("validates status change requests", () => {
     const parsed = orderChangeStatusInputSchema.parse({
       id: "order-1",
-      status: "payment_confirmed"
+      status: "completed",
+      manualCompletionConfirmed: true
     });
 
-    expect(parsed.status).toBe("payment_confirmed");
+    expect(parsed.status).toBe("completed");
+    expect(parsed.manualCompletionConfirmed).toBe(true);
   });
 });
 
@@ -165,6 +167,16 @@ describe("event contracts", () => {
 
     expect(parsed.title).toBe("Problema no pedido");
     expect(parsed.type).toBe("order.problem");
+  });
+
+  it("accepts internal order status correction events", () => {
+    const parsed = eventCreateManualInputSchema.parse({
+      type: "order.status_corrected",
+      severity: "warning",
+      title: "Status corrigido"
+    });
+
+    expect(parsed.type).toBe("order.status_corrected");
   });
 
   it("rejects invented marketplace event names", () => {

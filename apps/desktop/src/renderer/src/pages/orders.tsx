@@ -25,6 +25,7 @@ import { downloadCsv } from "@renderer/lib/csv";
 import { getDesktopApi } from "@renderer/lib/desktop-api";
 import type {
   ManualOrderInitialStatus,
+  OrderChangeStatusInput,
   OrderCreateInput,
   OrderDetailResult,
   OrderListInput,
@@ -58,7 +59,7 @@ const statusLabels: Record<OrderStatus, string> = {
   pending_payment: "Pagamento pendente",
   payment_confirmed: "Pagamento confirmado",
   awaiting_delivery: "Aguardando entrega",
-  delivered: "Entregue",
+  delivered: "Entregue / aguardando liberação",
   completed: "Concluído",
   cancelled: "Cancelado",
   refunded: "Reembolsado",
@@ -80,6 +81,12 @@ const statusTone: Record<OrderStatus, BadgeTone> = {
   problem: "danger",
   archived: "neutral"
 };
+
+const canMarkOrderDelivered = (order: Pick<OrderRecord, "status">): boolean =>
+  order.status === "payment_confirmed" || order.status === "awaiting_delivery";
+
+const canCompleteOrderManually = (order: Pick<OrderRecord, "status">): boolean =>
+  order.status === "delivered";
 
 const defaultFilters: OrderListInput = {
   search: null,
@@ -602,14 +609,47 @@ export const OrdersPage = (): JSX.Element => {
     setSelected(await api.orders.get(order.id));
   };
 
-  const changeStatus = async (order: OrderRecord, status: OrderStatus): Promise<void> => {
-    const notes =
-      status === "problem"
-        ? window.prompt("Observação para o problema do pedido:", order.notes ?? "") || order.notes
-        : order.notes;
-    await api.orders.changeStatus({ id: order.id, status, notes: notes ?? null });
-    await loadOrders();
-    setSelected(await api.orders.get(order.id));
+  const changeStatus = async (
+    order: OrderRecord,
+    status: OrderStatus,
+    options: { manualCompletionConfirmed?: boolean } = {}
+  ): Promise<void> => {
+    setError(null);
+    try {
+      const notes =
+        status === "problem"
+          ? window.prompt("Observação para o problema do pedido:", order.notes ?? "") || order.notes
+          : order.notes;
+      const payload: OrderChangeStatusInput = {
+        id: order.id,
+        status,
+        notes: notes ?? null
+      };
+      if (options.manualCompletionConfirmed !== undefined) {
+        payload.manualCompletionConfirmed = options.manualCompletionConfirmed;
+      }
+      await api.orders.changeStatus(payload);
+      await loadOrders();
+      setSelected(await api.orders.get(order.id));
+    } catch (statusError) {
+      setError(statusError instanceof Error ? statusError.message : "Falha ao atualizar status do pedido.");
+    }
+  };
+
+  const completeManually = async (order: OrderRecord): Promise<void> => {
+    const confirmed = window.confirm(
+      [
+        `Concluir manualmente o pedido "${order.orderCode}"?`,
+        "Use esta ação apenas se a garantia terminou ou se a GameMarket liberou os fundos.",
+        "Se o status GameMarket ainda estiver processing, o pedido deixará de representar a liberação real da plataforma."
+      ].join("\n\n")
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    await changeStatus(order, "completed", { manualCompletionConfirmed: true });
   };
 
   const archiveOrder = async (order: OrderRecord): Promise<void> => {
@@ -793,6 +833,12 @@ export const OrdersPage = (): JSX.Element => {
                     </Td>
                     <Td>
                       <Badge tone={statusTone[order.status]}>{statusLabels[order.status]}</Badge>
+                      {order.status === "delivered" && (
+                        <div className="mt-1 text-xs text-cyan">Aguardando garantia/liberação</div>
+                      )}
+                      {order.externalStatus && (
+                        <div className="mt-1 text-xs text-slate-500">GMK: {order.externalStatus}</div>
+                      )}
                     </Td>
                     <Td>{order.actionRequired ? <Badge tone="warning">pendente</Badge> : <Badge>ok</Badge>}</Td>
                     <Td className="font-mono text-xs text-slate-400">{order.inventoryCode ?? "-"}</Td>
@@ -852,6 +898,14 @@ export const OrdersPage = (): JSX.Element => {
                   )}
                   <div className="mt-3 grid gap-2 text-sm">
                     <div className="flex justify-between gap-3">
+                      <span className="text-slate-500">Status local</span>
+                      <span className="font-semibold text-slate-200">{statusLabels[selected.order.status]}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-slate-500">Status GameMarket</span>
+                      <span className="font-mono text-xs text-slate-300">{selected.order.externalStatus ?? "-"}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
                       <span className="text-slate-500">Líquido</span>
                       <span className="font-semibold text-cyan">{formatCurrencyBRL(selected.order.netValue)}</span>
                     </div>
@@ -860,17 +914,31 @@ export const OrdersPage = (): JSX.Element => {
                       <span className="font-mono text-xs text-slate-300">{selected.order.inventoryCode ?? "-"}</span>
                     </div>
                   </div>
+                  {selected.order.status === "delivered" && (
+                    <div className="mt-4 rounded-md border border-cyan/25 bg-cyan/10 p-3 text-sm text-cyan">
+                      <div className="font-semibold">Entregue — aguardando garantia/liberação</div>
+                      <div className="mt-1 text-xs leading-5 text-slate-300">
+                        A GameMarket pode levar até 7 dias para liberar/concluir o pedido. Status GameMarket:
+                        {" "}
+                        <span className="font-mono">{selected.order.externalStatus ?? "-"}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
-                  <Button size="sm" variant="secondary" disabled={!canEditOrders} onClick={() => void changeStatus(selected.order, "delivered")}>
-                    <PackageCheck size={14} />
-                    Entregue
-                  </Button>
-                  <Button size="sm" variant="secondary" disabled={!canEditOrders} onClick={() => void changeStatus(selected.order, "completed")}>
-                    <CheckCircle2 size={14} />
-                    Concluir
-                  </Button>
+                  {canMarkOrderDelivered(selected.order) && (
+                    <Button size="sm" variant="secondary" disabled={!canEditOrders} onClick={() => void changeStatus(selected.order, "delivered")}>
+                      <PackageCheck size={14} />
+                      Entregue
+                    </Button>
+                  )}
+                  {canCompleteOrderManually(selected.order) && (
+                    <Button size="sm" variant="secondary" disabled={!canEditOrders} onClick={() => void completeManually(selected.order)}>
+                      <CheckCircle2 size={14} />
+                      Concluir manualmente
+                    </Button>
+                  )}
                   <Button size="sm" variant="secondary" disabled={!canEditOrders} onClick={() => void changeStatus(selected.order, "mediation")}>
                     <ShieldAlert size={14} />
                     Mediação
