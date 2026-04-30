@@ -7,12 +7,16 @@ import { registerEventsIpc } from "./ipc/events-ipc";
 import { registerGameMarketIpc } from "./ipc/gamemarket-ipc";
 import { registerInventoryIpc } from "./ipc/inventory-ipc";
 import { registerOrdersIpc } from "./ipc/orders-ipc";
+import { registerProfitIpc } from "./ipc/profit-ipc";
 import { registerProductsIpc } from "./ipc/products-ipc";
 import { registerSettingsIpc } from "./ipc/settings-ipc";
 import { registerWebhookServerIpc } from "./ipc/webhook-server-ipc";
 import { webhookServerPollingService } from "./integrations/webhook-server/webhook-server-polling-service";
 import { logger } from "./logger";
-import { configureNotificationWindow, notificationService } from "./services/notification-service";
+import {
+  configureNotificationWindow,
+  notificationService,
+} from "./services/notification-service";
 
 let mainWindow: BrowserWindow | undefined;
 
@@ -29,8 +33,8 @@ const createWindow = (): void => {
       preload: join(__dirname, "../preload/index.mjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
-    }
+      sandbox: false,
+    },
   });
 
   mainWindow.once("ready-to-show", () => {
@@ -56,6 +60,7 @@ const registerIpcHandlers = (): void => {
   registerInventoryIpc(ipcMain);
   registerOrdersIpc(ipcMain);
   registerEventsIpc(ipcMain);
+  registerProfitIpc(ipcMain);
   registerDashboardIpc(ipcMain);
   registerSettingsIpc(ipcMain);
   registerGameMarketIpc(ipcMain);
@@ -64,14 +69,15 @@ const registerIpcHandlers = (): void => {
   ipcMain.handle("app:get-meta", () => ({
     name: app.getName(),
     version: app.getVersion(),
-    platform: process.platform
+    platform: process.platform,
   }));
 
   ipcMain.handle("database:get-status", () => getDatabaseStatus());
 
   ipcMain.handle(
     "notifications:show",
-    (_event, payload: { title: string; body: string }) => notificationService.show(payload)
+    (_event, payload: { title: string; body: string }) =>
+      notificationService.show(payload),
   );
 };
 

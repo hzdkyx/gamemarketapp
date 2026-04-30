@@ -6,23 +6,28 @@ export const productStatusValues = [
   "paused",
   "out_of_stock",
   "on_demand",
-  "archived"
+  "archived",
 ] as const;
 
-export const deliveryTypeValues = ["manual", "automatic", "on_demand", "service"] as const;
+export const deliveryTypeValues = [
+  "manual",
+  "automatic",
+  "on_demand",
+  "service",
+] as const;
 
 export const productVariantStatusValues = [
   "active",
   "paused",
   "out_of_stock",
-  "archived"
+  "archived",
 ] as const;
 
 export const productVariantSourceValues = [
   "manual",
   "seeded_from_conversation",
   "gamemarket_sync",
-  "imported"
+  "imported",
 ] as const;
 
 export const inventoryStatusValues = [
@@ -32,12 +37,48 @@ export const inventoryStatusValues = [
   "delivered",
   "problem",
   "refunded",
-  "archived"
+  "archived",
 ] as const;
 
-export const productSortValues = ["name", "price", "profit", "stock", "status"] as const;
+export const productSortValues = [
+  "name",
+  "price",
+  "profit",
+  "stock",
+  "status",
+] as const;
 export const sortDirectionValues = ["asc", "desc"] as const;
 export const stockFilterValues = ["all", "low", "out"] as const;
+export const profitDeliveryTypeFilterValues = [
+  "all",
+  ...deliveryTypeValues,
+] as const;
+export const profitStatusFilterValues = [
+  "all",
+  "active",
+  "paused",
+  "out_of_stock",
+  "on_demand",
+  "archived",
+] as const;
+export const profitReviewFilterValues = ["all", "needs_review", "ok"] as const;
+export const profitMarginFilterValues = [
+  "all",
+  "low_margin",
+  "medium_margin",
+  "high_margin",
+  "negative_profit",
+] as const;
+export const profitSortValues = [
+  "profit_desc",
+  "profit_asc",
+  "margin_desc",
+  "margin_asc",
+  "sale_desc",
+  "cost_desc",
+  "stock_desc",
+  "name_asc",
+] as const;
 export const marketplaceValues = ["gamemarket"] as const;
 export const orderStatusValues = [
   "draft",
@@ -50,14 +91,20 @@ export const orderStatusValues = [
   "refunded",
   "mediation",
   "problem",
-  "archived"
+  "archived",
 ] as const;
 export const manualOrderInitialStatusValues = [
   "draft",
   "payment_confirmed",
-  "awaiting_delivery"
+  "awaiting_delivery",
 ] as const;
-export const orderSortValues = ["date", "value", "profit", "status", "product"] as const;
+export const orderSortValues = [
+  "date",
+  "value",
+  "profit",
+  "status",
+  "product",
+] as const;
 export const orderActionFilterValues = ["all", "pending", "clear"] as const;
 export const eventSourceValues = [
   "manual",
@@ -65,9 +112,14 @@ export const eventSourceValues = [
   "gamemarket_api",
   "gamemarket_future",
   "webhook_future",
-  "webhook_server"
+  "webhook_server",
 ] as const;
-export const eventSeverityValues = ["info", "success", "warning", "critical"] as const;
+export const eventSeverityValues = [
+  "info",
+  "success",
+  "warning",
+  "critical",
+] as const;
 export const eventTypeValues = [
   "order.created",
   "order.payment_confirmed",
@@ -110,10 +162,14 @@ export const eventTypeValues = [
   "integration.webhook_server.review_received",
   "integration.webhook_server.variant_sold_out",
   "integration.webhook_server.unknown_event",
-  "system.notification_test"
+  "system.notification_test",
 ] as const;
 export const eventReadFilterValues = ["all", "read", "unread"] as const;
-export const gamemarketEnvironmentValues = ["production", "sandbox", "custom"] as const;
+export const gamemarketEnvironmentValues = [
+  "production",
+  "sandbox",
+  "custom",
+] as const;
 export const gamemarketConnectionStatusValues = [
   "not_configured",
   "configured",
@@ -124,7 +180,7 @@ export const gamemarketConnectionStatusValues = [
   "syncing",
   "synced",
   "partial",
-  "unavailable"
+  "unavailable",
 ] as const;
 export const webhookServerConnectionStatusValues = [
   "not_configured",
@@ -135,14 +191,14 @@ export const webhookServerConnectionStatusValues = [
   "syncing",
   "synced",
   "partial",
-  "unavailable"
+  "unavailable",
 ] as const;
 export const inventorySecretFieldValues = [
   "accountLogin",
   "accountPassword",
   "accountEmail",
   "accountEmailPassword",
-  "accessNotes"
+  "accessNotes",
 ] as const;
 export const userRoleValues = ["admin", "operator", "viewer"] as const;
 export const userStatusValues = ["active", "disabled"] as const;
@@ -153,7 +209,7 @@ export const permissionKeyValues = [
   "canEditProducts",
   "canEditInventory",
   "canEditOrders",
-  "canExportCsv"
+  "canExportCsv",
 ] as const;
 
 const nullableTextSchema = z.preprocess((value) => {
@@ -174,8 +230,28 @@ const usernameSchema = z
   .trim()
   .min(3, "Usuário deve ter pelo menos 3 caracteres.")
   .max(64)
-  .regex(/^[a-zA-Z0-9._-]+$/, "Use letras, números, ponto, hífen ou sublinhado.");
-const passwordSchema = z.string().min(8, "Senha deve ter pelo menos 8 caracteres.");
+  .regex(
+    /^[a-zA-Z0-9._-]+$/,
+    "Use letras, números, ponto, hífen ou sublinhado.",
+  );
+const passwordSchema = z
+  .string()
+  .min(8, "Senha deve ter pelo menos 8 caracteres.");
+
+const enumWithDefaultSchema = <T extends readonly [string, ...string[]]>(
+  values: T,
+  fallback: T[number],
+  aliases: Record<string, T[number]> = {},
+) =>
+  z.preprocess((value) => {
+    if (typeof value !== "string") {
+      return undefined;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    const match = values.find((item) => item === normalized);
+    return match ?? aliases[normalized] ?? fallback;
+  }, z.enum(values).default(fallback));
 
 export const productStatusSchema = z.enum(productStatusValues);
 export const deliveryTypeSchema = z.enum(deliveryTypeValues);
@@ -185,15 +261,21 @@ export const inventoryStatusSchema = z.enum(inventoryStatusValues);
 export const inventorySecretFieldSchema = z.enum(inventorySecretFieldValues);
 export const marketplaceSchema = z.enum(marketplaceValues);
 export const orderStatusSchema = z.enum(orderStatusValues);
-export const manualOrderInitialStatusSchema = z.enum(manualOrderInitialStatusValues);
+export const manualOrderInitialStatusSchema = z.enum(
+  manualOrderInitialStatusValues,
+);
 export const eventSourceSchema = z.enum(eventSourceValues);
 export const eventSeveritySchema = z.enum(eventSeverityValues);
 export const eventTypeSchema = z.enum(eventTypeValues);
 export const userRoleSchema = z.enum(userRoleValues);
 export const userStatusSchema = z.enum(userStatusValues);
 export const gamemarketEnvironmentSchema = z.enum(gamemarketEnvironmentValues);
-export const gamemarketConnectionStatusSchema = z.enum(gamemarketConnectionStatusValues);
-export const webhookServerConnectionStatusSchema = z.enum(webhookServerConnectionStatusValues);
+export const gamemarketConnectionStatusSchema = z.enum(
+  gamemarketConnectionStatusValues,
+);
+export const webhookServerConnectionStatusSchema = z.enum(
+  webhookServerConnectionStatusValues,
+);
 
 export const productCreateInputSchema = z
   .object({
@@ -216,7 +298,7 @@ export const productCreateInputSchema = z
     status: productStatusSchema.default("active"),
     deliveryType: deliveryTypeSchema.default("manual"),
     supplierId: nullableTextSchema,
-    notes: nullableTextSchema
+    notes: nullableTextSchema,
   })
   .strict();
 
@@ -236,14 +318,14 @@ export const productUpdateDataSchema = z
     status: productStatusSchema.optional(),
     deliveryType: deliveryTypeSchema.optional(),
     supplierId: nullableTextSchema,
-    notes: nullableTextSchema
+    notes: nullableTextSchema,
   })
   .strict();
 
 export const productUpdateInputSchema = z
   .object({
     id: idSchema,
-    data: productUpdateDataSchema
+    data: productUpdateDataSchema,
   })
   .strict();
 
@@ -272,7 +354,7 @@ export const productVariantCreateInputSchema = z
     status: productVariantStatusSchema.default("active"),
     notes: nullableTextSchema,
     source: productVariantSourceSchema.default("manual"),
-    needsReview: z.boolean().default(false)
+    needsReview: z.boolean().default(false),
   })
   .strict();
 
@@ -292,21 +374,49 @@ export const productVariantUpdateDataSchema = z
     status: productVariantStatusSchema.optional(),
     notes: nullableTextSchema,
     source: productVariantSourceSchema.optional(),
-    needsReview: z.boolean().optional()
+    needsReview: z.boolean().optional(),
   })
   .strict();
 
 export const productVariantUpdateInputSchema = z
   .object({
     id: idSchema,
-    data: productVariantUpdateDataSchema
+    data: productVariantUpdateDataSchema,
   })
   .strict();
 
-export const productVariantDeleteInputSchema = z.object({ id: idSchema }).strict();
+export const productVariantDeleteInputSchema = z
+  .object({ id: idSchema })
+  .strict();
 export const productVariantGetInputSchema = z.object({ id: idSchema }).strict();
-export const productVariantListInputSchema = z.object({ productId: idSchema }).strict();
-export const productVariantDuplicateInputSchema = z.object({ id: idSchema }).strict();
+export const productVariantListInputSchema = z
+  .object({ productId: idSchema })
+  .strict();
+export const productVariantDuplicateInputSchema = z
+  .object({ id: idSchema })
+  .strict();
+
+export const profitListInputSchema = z
+  .object({
+    search: nullableTextSchema,
+    category: nullableTextSchema,
+    deliveryType: enumWithDefaultSchema(profitDeliveryTypeFilterValues, "all"),
+    status: enumWithDefaultSchema(profitStatusFilterValues, "all"),
+    review: enumWithDefaultSchema(profitReviewFilterValues, "all", {
+      reviewed: "ok",
+      false: "ok",
+      true: "needs_review",
+      needsreview: "needs_review",
+    }),
+    margin: enumWithDefaultSchema(profitMarginFilterValues, "all", {
+      low: "low_margin",
+      medium: "medium_margin",
+      high: "high_margin",
+      negative: "negative_profit",
+    }),
+    sortBy: enumWithDefaultSchema(profitSortValues, "profit_desc"),
+  })
+  .strict();
 
 export const productListInputSchema = z
   .object({
@@ -315,7 +425,7 @@ export const productListInputSchema = z
     category: nullableTextSchema,
     stock: z.enum(stockFilterValues).default("all"),
     sortBy: z.enum(productSortValues).default("name"),
-    sortDirection: z.enum(sortDirectionValues).default("asc")
+    sortDirection: z.enum(sortDirectionValues).default("asc"),
   })
   .strict();
 
@@ -336,7 +446,7 @@ export const inventoryCreateInputSchema = z
     boughtAt: nullableTextSchema,
     soldAt: nullableTextSchema,
     deliveredAt: nullableTextSchema,
-    orderId: nullableTextSchema
+    orderId: nullableTextSchema,
   })
   .strict();
 
@@ -357,14 +467,14 @@ export const inventoryUpdateDataSchema = z
     boughtAt: nullableTextSchema,
     soldAt: nullableTextSchema,
     deliveredAt: nullableTextSchema,
-    orderId: nullableTextSchema
+    orderId: nullableTextSchema,
   })
   .strict();
 
 export const inventoryUpdateInputSchema = z
   .object({
     id: idSchema,
-    data: inventoryUpdateDataSchema
+    data: inventoryUpdateDataSchema,
   })
   .strict();
 
@@ -378,14 +488,14 @@ export const inventoryListInputSchema = z
     category: nullableTextSchema,
     status: inventoryStatusSchema.or(z.literal("all")).default("all"),
     supplierId: nullableTextSchema,
-    sortDirection: z.enum(sortDirectionValues).default("asc")
+    sortDirection: z.enum(sortDirectionValues).default("asc"),
   })
   .strict();
 
 export const inventoryRevealSecretInputSchema = z
   .object({
     id: idSchema,
-    field: inventorySecretFieldSchema
+    field: inventorySecretFieldSchema,
   })
   .strict();
 
@@ -401,10 +511,15 @@ export const orderCreateInputSchema = z
     buyerContact: nullableTextSchema,
     salePrice: nonNegativeMoneySchema.optional(),
     unitCost: nonNegativeMoneySchema.optional(),
-    feePercent: z.number().finite().min(0).lt(100).default(GAMEMARKET_FEE_PERCENT),
+    feePercent: z
+      .number()
+      .finite()
+      .min(0)
+      .lt(100)
+      .default(GAMEMARKET_FEE_PERCENT),
     status: manualOrderInitialStatusSchema.default("draft"),
     marketplaceUrl: nullableTextSchema,
-    notes: nullableTextSchema
+    notes: nullableTextSchema,
   })
   .strict();
 
@@ -423,14 +538,14 @@ export const orderUpdateDataSchema = z
     feePercent: z.number().finite().min(0).lt(100).optional(),
     actionRequired: z.boolean().optional(),
     marketplaceUrl: nullableTextSchema,
-    notes: nullableTextSchema
+    notes: nullableTextSchema,
   })
   .strict();
 
 export const orderUpdateInputSchema = z
   .object({
     id: idSchema,
-    data: orderUpdateDataSchema
+    data: orderUpdateDataSchema,
   })
   .strict();
 
@@ -443,20 +558,20 @@ export const orderChangeStatusInputSchema = z
     id: idSchema,
     status: orderStatusSchema,
     notes: nullableTextSchema,
-    manualCompletionConfirmed: z.boolean().optional()
+    manualCompletionConfirmed: z.boolean().optional(),
   })
   .strict();
 
 export const orderLinkInventoryItemInputSchema = z
   .object({
     orderId: idSchema,
-    inventoryItemId: idSchema
+    inventoryItemId: idSchema,
   })
   .strict();
 
 export const orderUnlinkInventoryItemInputSchema = z
   .object({
-    orderId: idSchema
+    orderId: idSchema,
   })
   .strict();
 
@@ -470,7 +585,7 @@ export const orderListInputSchema = z
     dateTo: nullableTextSchema,
     actionRequired: z.enum(orderActionFilterValues).default("all"),
     sortBy: z.enum(orderSortValues).default("date"),
-    sortDirection: z.enum(sortDirectionValues).default("desc")
+    sortDirection: z.enum(sortDirectionValues).default("desc"),
   })
   .strict();
 
@@ -486,7 +601,7 @@ export const eventCreateManualInputSchema = z
     orderId: nullableTextSchema,
     productId: nullableTextSchema,
     inventoryItemId: nullableTextSchema,
-    rawPayload: z.unknown().optional()
+    rawPayload: z.unknown().optional(),
   })
   .strict();
 
@@ -499,7 +614,7 @@ export const eventListInputSchema = z
     productId: nullableTextSchema,
     read: z.enum(eventReadFilterValues).default("all"),
     dateFrom: nullableTextSchema,
-    dateTo: nullableTextSchema
+    dateTo: nullableTextSchema,
   })
   .strict();
 
@@ -507,11 +622,13 @@ export const notificationSettingsSchema = z
   .object({
     desktopEnabled: z.boolean().default(true),
     soundEnabled: z.boolean().default(false),
-    enabledEventTypes: z.record(z.string(), z.boolean()).default({})
+    enabledEventTypes: z.record(z.string(), z.boolean()).default({}),
   })
   .strict();
 
-export const notificationSettingsUpdateInputSchema = notificationSettingsSchema.partial().strict();
+export const notificationSettingsUpdateInputSchema = notificationSettingsSchema
+  .partial()
+  .strict();
 
 export const gamemarketSettingsUpdateInputSchema = z
   .object({
@@ -523,18 +640,23 @@ export const gamemarketSettingsUpdateInputSchema = z
       .optional(),
     token: z.string().trim().min(8, "Token muito curto.").max(500).optional(),
     clearToken: z.boolean().optional(),
-    integrationName: z.string().trim().min(1, "Campo obrigatório.").max(120).optional(),
-    environment: gamemarketEnvironmentSchema.optional()
+    integrationName: z
+      .string()
+      .trim()
+      .min(1, "Campo obrigatório.")
+      .max(120)
+      .optional(),
+    environment: gamemarketEnvironmentSchema.optional(),
   })
   .strict()
   .refine((input) => !(input.token && input.clearToken), {
     path: ["clearToken"],
-    message: "Não é possível salvar e remover o token na mesma operação."
+    message: "Não é possível salvar e remover o token na mesma operação.",
   });
 
 export const gamemarketRevealTokenInputSchema = z
   .object({
-    confirm: z.literal(true)
+    confirm: z.literal(true),
   })
   .strict();
 
@@ -548,20 +670,25 @@ export const webhookServerSettingsUpdateInputSchema = z
       .url("Informe uma URL válida.")
       .max(500)
       .optional(),
-    appSyncToken: z.string().trim().min(8, "Token muito curto.").max(500).optional(),
+    appSyncToken: z
+      .string()
+      .trim()
+      .min(8, "Token muito curto.")
+      .max(500)
+      .optional(),
     clearToken: z.boolean().optional(),
     pollingEnabled: z.boolean().optional(),
-    pollingIntervalSeconds: z.number().int().min(15).max(3600).optional()
+    pollingIntervalSeconds: z.number().int().min(15).max(3600).optional(),
   })
   .strict()
   .refine((input) => !(input.appSyncToken && input.clearToken), {
     path: ["clearToken"],
-    message: "Não é possível salvar e remover o token na mesma operação."
+    message: "Não é possível salvar e remover o token na mesma operação.",
   });
 
 export const webhookServerRevealTokenInputSchema = z
   .object({
-    confirm: z.literal(true)
+    confirm: z.literal(true),
   })
   .strict();
 
@@ -570,7 +697,7 @@ export const webhookServerEmptyInputSchema = z.object({}).strict();
 export const authLoginInputSchema = z
   .object({
     username: usernameSchema,
-    password: z.string().min(1, "Campo obrigatório.")
+    password: z.string().min(1, "Campo obrigatório."),
   })
   .strict();
 
@@ -579,24 +706,24 @@ export const authSetupAdminInputSchema = z
     name: requiredTextSchema,
     username: usernameSchema,
     password: passwordSchema,
-    confirmPassword: z.string().min(1, "Campo obrigatório.")
+    confirmPassword: z.string().min(1, "Campo obrigatório."),
   })
   .strict()
   .refine((input) => input.password === input.confirmPassword, {
     path: ["confirmPassword"],
-    message: "As senhas não conferem."
+    message: "As senhas não conferem.",
   });
 
 export const authChangePasswordInputSchema = z
   .object({
     currentPassword: z.string().min(1, "Campo obrigatório."),
     password: passwordSchema,
-    confirmPassword: z.string().min(1, "Campo obrigatório.")
+    confirmPassword: z.string().min(1, "Campo obrigatório."),
   })
   .strict()
   .refine((input) => input.password === input.confirmPassword, {
     path: ["confirmPassword"],
-    message: "As senhas não conferem."
+    message: "As senhas não conferem.",
   });
 
 export const userCreateInputSchema = z
@@ -608,12 +735,12 @@ export const userCreateInputSchema = z
     role: userRoleSchema.default("operator"),
     status: userStatusSchema.default("active"),
     allowRevealSecrets: z.boolean().default(false),
-    mustChangePassword: z.boolean().default(true)
+    mustChangePassword: z.boolean().default(true),
   })
   .strict()
   .refine((input) => input.password === input.confirmPassword, {
     path: ["confirmPassword"],
-    message: "As senhas não conferem."
+    message: "As senhas não conferem.",
   });
 
 export const userUpdateInputSchema = z
@@ -626,9 +753,9 @@ export const userUpdateInputSchema = z
         role: userRoleSchema.optional(),
         status: userStatusSchema.optional(),
         allowRevealSecrets: z.boolean().optional(),
-        mustChangePassword: z.boolean().optional()
+        mustChangePassword: z.boolean().optional(),
       })
-      .strict()
+      .strict(),
   })
   .strict();
 
@@ -637,12 +764,12 @@ export const userResetPasswordInputSchema = z
     id: idSchema,
     password: passwordSchema,
     confirmPassword: z.string().min(1, "Campo obrigatório."),
-    mustChangePassword: z.boolean().default(true)
+    mustChangePassword: z.boolean().default(true),
   })
   .strict()
   .refine((input) => input.password === input.confirmPassword, {
     path: ["confirmPassword"],
-    message: "As senhas não conferem."
+    message: "As senhas não conferem.",
   });
 
 export type ProductStatus = (typeof productStatusValues)[number];
@@ -653,6 +780,12 @@ export type InventoryStatus = (typeof inventoryStatusValues)[number];
 export type ProductSort = (typeof productSortValues)[number];
 export type SortDirection = (typeof sortDirectionValues)[number];
 export type StockFilter = (typeof stockFilterValues)[number];
+export type ProfitDeliveryTypeFilter =
+  (typeof profitDeliveryTypeFilterValues)[number];
+export type ProfitStatusFilter = (typeof profitStatusFilterValues)[number];
+export type ProfitReviewFilter = (typeof profitReviewFilterValues)[number];
+export type ProfitMarginFilter = (typeof profitMarginFilterValues)[number];
+export type ProfitSort = (typeof profitSortValues)[number];
 export type InventorySecretField = (typeof inventorySecretFieldValues)[number];
 export type UserRole = (typeof userRoleValues)[number];
 export type UserStatus = (typeof userStatusValues)[number];
@@ -660,52 +793,91 @@ export type PermissionKey = (typeof permissionKeyValues)[number];
 export type Permissions = Record<PermissionKey, boolean>;
 export type Marketplace = (typeof marketplaceValues)[number];
 export type OrderStatus = (typeof orderStatusValues)[number];
-export type ManualOrderInitialStatus = (typeof manualOrderInitialStatusValues)[number];
+export type ManualOrderInitialStatus =
+  (typeof manualOrderInitialStatusValues)[number];
 export type OrderSort = (typeof orderSortValues)[number];
 export type OrderActionFilter = (typeof orderActionFilterValues)[number];
 export type EventSource = (typeof eventSourceValues)[number];
 export type EventSeverity = (typeof eventSeverityValues)[number];
 export type EventType = (typeof eventTypeValues)[number];
 export type EventReadFilter = (typeof eventReadFilterValues)[number];
-export type GameMarketEnvironment = (typeof gamemarketEnvironmentValues)[number];
-export type GameMarketConnectionStatus = (typeof gamemarketConnectionStatusValues)[number];
-export type WebhookServerConnectionStatus = (typeof webhookServerConnectionStatusValues)[number];
+export type GameMarketEnvironment =
+  (typeof gamemarketEnvironmentValues)[number];
+export type GameMarketConnectionStatus =
+  (typeof gamemarketConnectionStatusValues)[number];
+export type WebhookServerConnectionStatus =
+  (typeof webhookServerConnectionStatusValues)[number];
 
 export type ProductCreateInput = z.infer<typeof productCreateInputSchema>;
 export type ProductUpdateData = z.infer<typeof productUpdateDataSchema>;
 export type ProductUpdateInput = z.infer<typeof productUpdateInputSchema>;
 export type ProductListInput = z.infer<typeof productListInputSchema>;
-export type ProductVariantCreateInput = z.infer<typeof productVariantCreateInputSchema>;
-export type ProductVariantUpdateData = z.infer<typeof productVariantUpdateDataSchema>;
-export type ProductVariantUpdateInput = z.infer<typeof productVariantUpdateInputSchema>;
-export type ProductVariantListInput = z.infer<typeof productVariantListInputSchema>;
-export type ProductVariantDuplicateInput = z.infer<typeof productVariantDuplicateInputSchema>;
+export type ProductVariantCreateInput = z.infer<
+  typeof productVariantCreateInputSchema
+>;
+export type ProductVariantUpdateData = z.infer<
+  typeof productVariantUpdateDataSchema
+>;
+export type ProductVariantUpdateInput = z.infer<
+  typeof productVariantUpdateInputSchema
+>;
+export type ProductVariantListInput = z.infer<
+  typeof productVariantListInputSchema
+>;
+export type ProductVariantDuplicateInput = z.infer<
+  typeof productVariantDuplicateInputSchema
+>;
+export type ProfitListInput = z.infer<typeof profitListInputSchema>;
 export type InventoryCreateInput = z.infer<typeof inventoryCreateInputSchema>;
 export type InventoryUpdateData = z.infer<typeof inventoryUpdateDataSchema>;
 export type InventoryUpdateInput = z.infer<typeof inventoryUpdateInputSchema>;
 export type InventoryListInput = z.infer<typeof inventoryListInputSchema>;
-export type InventoryRevealSecretInput = z.infer<typeof inventoryRevealSecretInputSchema>;
+export type InventoryRevealSecretInput = z.infer<
+  typeof inventoryRevealSecretInputSchema
+>;
 export type OrderCreateInput = z.infer<typeof orderCreateInputSchema>;
 export type OrderUpdateData = z.infer<typeof orderUpdateDataSchema>;
 export type OrderUpdateInput = z.infer<typeof orderUpdateInputSchema>;
 export type OrderListInput = z.infer<typeof orderListInputSchema>;
-export type OrderChangeStatusInput = z.infer<typeof orderChangeStatusInputSchema>;
-export type OrderLinkInventoryItemInput = z.infer<typeof orderLinkInventoryItemInputSchema>;
-export type OrderUnlinkInventoryItemInput = z.infer<typeof orderUnlinkInventoryItemInputSchema>;
-export type EventCreateManualInput = z.infer<typeof eventCreateManualInputSchema>;
+export type OrderChangeStatusInput = z.infer<
+  typeof orderChangeStatusInputSchema
+>;
+export type OrderLinkInventoryItemInput = z.infer<
+  typeof orderLinkInventoryItemInputSchema
+>;
+export type OrderUnlinkInventoryItemInput = z.infer<
+  typeof orderUnlinkInventoryItemInputSchema
+>;
+export type EventCreateManualInput = z.infer<
+  typeof eventCreateManualInputSchema
+>;
 export type EventListInput = z.infer<typeof eventListInputSchema>;
 export type NotificationSettings = z.infer<typeof notificationSettingsSchema>;
-export type NotificationSettingsUpdateInput = z.infer<typeof notificationSettingsUpdateInputSchema>;
-export type GameMarketSettingsUpdateInput = z.infer<typeof gamemarketSettingsUpdateInputSchema>;
-export type GameMarketRevealTokenInput = z.infer<typeof gamemarketRevealTokenInputSchema>;
-export type WebhookServerSettingsUpdateInput = z.infer<typeof webhookServerSettingsUpdateInputSchema>;
-export type WebhookServerRevealTokenInput = z.infer<typeof webhookServerRevealTokenInputSchema>;
+export type NotificationSettingsUpdateInput = z.infer<
+  typeof notificationSettingsUpdateInputSchema
+>;
+export type GameMarketSettingsUpdateInput = z.infer<
+  typeof gamemarketSettingsUpdateInputSchema
+>;
+export type GameMarketRevealTokenInput = z.infer<
+  typeof gamemarketRevealTokenInputSchema
+>;
+export type WebhookServerSettingsUpdateInput = z.infer<
+  typeof webhookServerSettingsUpdateInputSchema
+>;
+export type WebhookServerRevealTokenInput = z.infer<
+  typeof webhookServerRevealTokenInputSchema
+>;
 export type AuthLoginInput = z.infer<typeof authLoginInputSchema>;
 export type AuthSetupAdminInput = z.infer<typeof authSetupAdminInputSchema>;
-export type AuthChangePasswordInput = z.infer<typeof authChangePasswordInputSchema>;
+export type AuthChangePasswordInput = z.infer<
+  typeof authChangePasswordInputSchema
+>;
 export type UserCreateInput = z.infer<typeof userCreateInputSchema>;
 export type UserUpdateInput = z.infer<typeof userUpdateInputSchema>;
-export type UserResetPasswordInput = z.infer<typeof userResetPasswordInputSchema>;
+export type UserResetPasswordInput = z.infer<
+  typeof userResetPasswordInputSchema
+>;
 
 export interface UserRecord {
   id: string;
@@ -758,10 +930,21 @@ export interface ProductRecord {
   externalPayloadHash?: string | null;
   lastSyncedAt?: string | null;
   variantCount?: number;
+  variantProfitSummary?: ProductVariantProfitSummary | null;
   createdByUserId: string | null;
   updatedByUserId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProductVariantProfitSummary {
+  variantCount: number;
+  minimumEstimatedProfit: number;
+  averageEstimatedProfit: number;
+  maximumEstimatedProfit: number;
+  averageMarginPercent: number;
+  needsReviewCount: number;
+  pendingCostCount: number;
 }
 
 export interface ProductVariantRecord {
@@ -849,7 +1032,12 @@ export interface InventorySummary {
 }
 
 export type OperationalStockScope = "product" | "variant";
-export type OperationalStockState = "available" | "low_stock" | "out_of_stock" | "service" | "on_demand";
+export type OperationalStockState =
+  | "available"
+  | "low_stock"
+  | "out_of_stock"
+  | "service"
+  | "on_demand";
 
 export interface OperationalStockRecord {
   id: string;
@@ -890,11 +1078,20 @@ export interface InventoryListResult {
   protectedSummary: InventorySummary;
   operationalItems: OperationalStockRecord[];
   operationalSummary: OperationalStockSummary;
-  products: Array<Pick<ProductRecord, "id" | "internalCode" | "name" | "category" | "game">>;
+  products: Array<
+    Pick<ProductRecord, "id" | "internalCode" | "name" | "category" | "game">
+  >;
   productVariants: Array<
     Pick<
       ProductVariantRecord,
-      "id" | "productId" | "variantCode" | "name" | "salePrice" | "unitCost" | "deliveryType" | "status"
+      | "id"
+      | "productId"
+      | "variantCode"
+      | "name"
+      | "salePrice"
+      | "unitCost"
+      | "deliveryType"
+      | "status"
     >
   >;
   suppliers: string[];
@@ -904,6 +1101,99 @@ export interface InventoryListResult {
 export interface CsvExportResult {
   filename: string;
   content: string;
+}
+
+export type ProfitAnalysisScope = "variant" | "product";
+export type ProfitAnalysisStatus = ProductStatus | ProductVariantStatus;
+
+export interface ProfitHighlight {
+  rowId: string;
+  label: string;
+  productName: string;
+  variantName: string | null;
+  value: number;
+  marginPercent: number;
+}
+
+export interface ProfitAnalysisRow {
+  id: string;
+  scope: ProfitAnalysisScope;
+  productId: string;
+  productInternalCode: string;
+  productName: string;
+  productCategory: string;
+  game: string | null;
+  productVariantId: string | null;
+  variantCode: string | null;
+  variantName: string | null;
+  salePrice: number;
+  feePercent: number;
+  netValue: number;
+  unitCost: number;
+  profit: number;
+  estimatedProfit: number;
+  marginPercent: number;
+  marginOnNet: number;
+  breakEvenPrice: number;
+  minimumPrice: number;
+  stockCurrent: number;
+  stockMin: number;
+  deliveryType: DeliveryType;
+  supplierName: string | null;
+  status: ProfitAnalysisStatus;
+  needsReview: boolean;
+  pendingCost: boolean;
+  stockUnitsForPotential: number;
+  grossPotential: number;
+  netPotential: number;
+  costInStock: number;
+  potentialProfit: number;
+}
+
+export interface ProfitSummary {
+  potentialProfitTotal: number;
+  averageProfitPerSale: number;
+  highestMargin: ProfitHighlight | null;
+  lowestMargin: ProfitHighlight | null;
+  stockCostTotal: number;
+  grossPotential: number;
+  netPotential: number;
+  pendingCostCount: number;
+  needsReviewCount: number;
+  analyzedRows: number;
+  variantRows: number;
+  parentOnlyRows: number;
+}
+
+export interface ProfitProductGroup {
+  productId: string;
+  productInternalCode: string;
+  productName: string;
+  category: string;
+  game: string | null;
+  variationCount: number;
+  minimumProfit: number;
+  averageProfit: number;
+  maximumProfit: number;
+  averageCost: number;
+  highestMarginLabel: string;
+  highestMarginPercent: number;
+  needsReviewCount: number;
+  pendingCostCount: number;
+}
+
+export interface ProfitFilters {
+  categories: string[];
+  deliveryTypes: DeliveryType[];
+  statuses: ProfitAnalysisStatus[];
+  suppliers: string[];
+}
+
+export interface ProfitListResult {
+  summary: ProfitSummary;
+  list: ProfitAnalysisRow[];
+  groups: ProfitProductGroup[];
+  filters: ProfitFilters;
 }
 
 export interface OrderRecord {
@@ -987,11 +1277,20 @@ export interface EventSummary {
 export interface OrderListResult {
   items: OrderRecord[];
   summary: OrderSummary;
-  products: Array<Pick<ProductRecord, "id" | "internalCode" | "name" | "category" | "game">>;
+  products: Array<
+    Pick<ProductRecord, "id" | "internalCode" | "name" | "category" | "game">
+  >;
   productVariants: Array<
     Pick<
       ProductVariantRecord,
-      "id" | "productId" | "variantCode" | "name" | "salePrice" | "unitCost" | "deliveryType" | "status"
+      | "id"
+      | "productId"
+      | "variantCode"
+      | "name"
+      | "salePrice"
+      | "unitCost"
+      | "deliveryType"
+      | "status"
     >
   >;
   inventoryItems: Array<

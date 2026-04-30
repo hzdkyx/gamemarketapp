@@ -4,7 +4,7 @@ import type {
   Marketplace,
   ProductListInput,
   ProductRecord,
-  ProductStatus
+  ProductStatus,
 } from "../../shared/contracts";
 
 interface ProductRow {
@@ -33,6 +33,13 @@ interface ProductRow {
   external_payload_hash: string | null;
   last_synced_at: string | null;
   variant_count: number;
+  variant_profit_min_cents: number | null;
+  variant_profit_avg_cents: number | null;
+  variant_profit_max_cents: number | null;
+  variant_margin_avg: number | null;
+  variant_needs_review_count: number;
+  variant_pending_cost_count: number;
+  sort_profit_cents: number;
   created_by_user_id: string | null;
   updated_by_user_id: string | null;
   created_at: string;
@@ -106,10 +113,28 @@ const mapProductRow = (row: ProductRow): ProductRecord => ({
   externalPayloadHash: row.external_payload_hash,
   lastSyncedAt: row.last_synced_at,
   variantCount: row.variant_count,
+  variantProfitSummary:
+    row.variant_count > 0
+      ? {
+          variantCount: row.variant_count,
+          minimumEstimatedProfit: centsToMoney(
+            row.variant_profit_min_cents ?? 0,
+          ),
+          averageEstimatedProfit: centsToMoney(
+            row.variant_profit_avg_cents ?? 0,
+          ),
+          maximumEstimatedProfit: centsToMoney(
+            row.variant_profit_max_cents ?? 0,
+          ),
+          averageMarginPercent: row.variant_margin_avg ?? 0,
+          needsReviewCount: row.variant_needs_review_count,
+          pendingCostCount: row.variant_pending_cost_count,
+        }
+      : null,
   createdByUserId: row.created_by_user_id,
   updatedByUserId: row.updated_by_user_id,
   createdAt: row.created_at,
-  updatedAt: row.updated_at
+  updatedAt: row.updated_at,
 });
 
 const productSelect = `
@@ -144,6 +169,60 @@ const productSelect = `
       WHERE product_variants.product_id = products.id
         AND product_variants.status != 'archived'
     ) AS variant_count,
+    (
+      SELECT MIN(product_variants.estimated_profit_cents)
+      FROM product_variants
+      WHERE product_variants.product_id = products.id
+        AND product_variants.status != 'archived'
+    ) AS variant_profit_min_cents,
+    (
+      SELECT AVG(product_variants.estimated_profit_cents)
+      FROM product_variants
+      WHERE product_variants.product_id = products.id
+        AND product_variants.status != 'archived'
+    ) AS variant_profit_avg_cents,
+    (
+      SELECT MAX(product_variants.estimated_profit_cents)
+      FROM product_variants
+      WHERE product_variants.product_id = products.id
+        AND product_variants.status != 'archived'
+    ) AS variant_profit_max_cents,
+    (
+      SELECT AVG(product_variants.margin_percent)
+      FROM product_variants
+      WHERE product_variants.product_id = products.id
+        AND product_variants.status != 'archived'
+    ) AS variant_margin_avg,
+    (
+      SELECT COUNT(*)
+      FROM product_variants
+      WHERE product_variants.product_id = products.id
+        AND product_variants.status != 'archived'
+        AND product_variants.needs_review = 1
+    ) AS variant_needs_review_count,
+    (
+      SELECT COUNT(*)
+      FROM product_variants
+      WHERE product_variants.product_id = products.id
+        AND product_variants.status != 'archived'
+        AND product_variants.unit_cost_cents = 0
+        AND product_variants.delivery_type != 'service'
+    ) AS variant_pending_cost_count,
+    CASE
+      WHEN (
+        SELECT COUNT(*)
+        FROM product_variants
+        WHERE product_variants.product_id = products.id
+          AND product_variants.status != 'archived'
+      ) > 0
+      THEN COALESCE((
+        SELECT AVG(product_variants.estimated_profit_cents)
+        FROM product_variants
+        WHERE product_variants.product_id = products.id
+          AND product_variants.status != 'archived'
+      ), 0)
+      ELSE products.estimated_profit_cents
+    END AS sort_profit_cents,
     created_by_user_id,
     updated_by_user_id,
     created_at,
@@ -154,12 +233,14 @@ const productSelect = `
 const productOrderBy: Record<ProductListInput["sortBy"], string> = {
   name: "LOWER(name)",
   price: "sale_price_cents",
-  profit: "estimated_profit_cents",
+  profit: "sort_profit_cents",
   stock: "stock_current",
-  status: "status"
+  status: "status",
 };
 
-const buildProductWhere = (filters: ProductListInput): { sql: string; params: Record<string, unknown> } => {
+const buildProductWhere = (
+  filters: ProductListInput,
+): { sql: string; params: Record<string, unknown> } => {
   const where: string[] = [];
   const params: Record<string, unknown> = {};
 
@@ -233,7 +314,7 @@ const buildProductWhere = (filters: ProductListInput): { sql: string; params: Re
 
   return {
     sql: where.length > 0 ? `WHERE ${where.join(" AND ")}` : "",
-    params
+    params,
   };
 };
 
@@ -245,17 +326,21 @@ export const productRepository = {
     const direction = filters.sortDirection === "desc" ? "DESC" : "ASC";
 
     const rows = db
-      .prepare(`${productSelect} ${where.sql} ORDER BY ${orderBy} ${direction}, LOWER(name) ASC`)
+      .prepare(
+        `${productSelect} ${where.sql} ORDER BY ${orderBy} ${direction}, LOWER(name) ASC`,
+      )
       .all(where.params) as ProductRow[];
 
     return rows.map(mapProductRow);
   },
 
-  listAllForSelect(): Array<Pick<ProductRecord, "id" | "internalCode" | "name" | "category" | "game">> {
+  listAllForSelect(): Array<
+    Pick<ProductRecord, "id" | "internalCode" | "name" | "category" | "game">
+  > {
     const db = getSqliteDatabase();
     const rows = db
       .prepare(
-        "SELECT id, internal_code, name, category, game FROM products WHERE status != 'archived' ORDER BY LOWER(name) ASC"
+        "SELECT id, internal_code, name, category, game FROM products WHERE status != 'archived' ORDER BY LOWER(name) ASC",
       )
       .all() as Array<{
       id: string;
@@ -270,13 +355,15 @@ export const productRepository = {
       internalCode: row.internal_code,
       name: row.name,
       category: row.category,
-      game: row.game
+      game: row.game,
     }));
   },
 
   getById(id: string): ProductRecord | null {
     const db = getSqliteDatabase();
-    const row = db.prepare(`${productSelect} WHERE id = ?`).get(id) as ProductRow | undefined;
+    const row = db.prepare(`${productSelect} WHERE id = ?`).get(id) as
+      | ProductRow
+      | undefined;
     return row ? mapProductRow(row) : null;
   },
 
@@ -352,7 +439,7 @@ export const productRepository = {
           @createdAt,
           @updatedAt
         )
-      `
+      `,
     ).run(product);
 
     const created = this.getById(product.id);
@@ -396,7 +483,7 @@ export const productRepository = {
           updated_by_user_id = @updatedByUserId,
           updated_at = @updatedAt
         WHERE id = @id
-      `
+      `,
     ).run(product);
 
     const updated = this.getById(product.id);
@@ -425,7 +512,9 @@ export const productRepository = {
               product_variants.stock_min AS stock_min,
               product_variants.estimated_profit_cents AS estimated_profit_cents
             FROM product_variants
+            INNER JOIN products ON products.id = product_variants.product_id
             WHERE product_variants.status != 'archived'
+              AND products.status != 'archived'
 
             UNION ALL
 
@@ -460,7 +549,7 @@ export const productRepository = {
             ) AS low_stock,
             AVG(estimated_profit_cents) AS average_estimated_profit_cents
           FROM operational_units
-        `
+        `,
       )
       .get() as ProductSummaryRow;
   },
@@ -477,10 +566,10 @@ export const productRepository = {
             SELECT game AS value FROM products WHERE game IS NOT NULL AND game != ''
           )
           ORDER BY LOWER(value) ASC
-        `
+        `,
       )
       .all() as Array<{ value: string }>;
 
     return rows.map((row) => row.value);
-  }
+  },
 };

@@ -1,6 +1,19 @@
-import { calculateProductFinancials, formatCurrencyBRL, formatPercent } from "@hzdk/shared";
-import { Archive, Copy, Download, Edit3, Flag, Plus, Save, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  calculateProductFinancials,
+  formatCurrencyBRL,
+  formatPercent,
+} from "@hzdk/shared";
+import {
+  Archive,
+  Copy,
+  Download,
+  Edit3,
+  Flag,
+  Plus,
+  Save,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { Table, Td, Th } from "@renderer/components/ui/table";
@@ -12,9 +25,12 @@ import type {
   ProductVariantCreateInput,
   ProductVariantRecord,
   ProductVariantStatus,
-  ProductVariantUpdateData
+  ProductVariantUpdateData,
 } from "../../../../shared/contracts";
-import { deliveryTypeValues, productVariantStatusValues } from "../../../../shared/contracts";
+import {
+  deliveryTypeValues,
+  productVariantStatusValues,
+} from "../../../../shared/contracts";
 
 interface VariantFormState {
   variantCode: string;
@@ -37,21 +53,24 @@ const deliveryTypeLabels: Record<DeliveryType, string> = {
   manual: "Manual",
   automatic: "Automática",
   on_demand: "Sob demanda",
-  service: "Serviço"
+  service: "Serviço",
 };
 
 const statusLabels: Record<ProductVariantStatus, string> = {
   active: "Ativa",
   paused: "Pausada",
   out_of_stock: "Sem estoque",
-  archived: "Arquivada"
+  archived: "Arquivada",
 };
 
-const statusTone: Record<ProductVariantStatus, "success" | "warning" | "danger" | "neutral"> = {
+const statusTone: Record<
+  ProductVariantStatus,
+  "success" | "warning" | "danger" | "neutral"
+> = {
   active: "success",
   paused: "warning",
   out_of_stock: "danger",
-  archived: "neutral"
+  archived: "neutral",
 };
 
 const emptyVariantForm: VariantFormState = {
@@ -68,7 +87,7 @@ const emptyVariantForm: VariantFormState = {
   deliveryType: "manual",
   status: "active",
   notes: "",
-  needsReview: false
+  needsReview: false,
 };
 
 const parseNumber = (value: string): number => {
@@ -76,7 +95,8 @@ const parseNumber = (value: string): number => {
   return normalized.length > 0 ? Number(normalized) : 0;
 };
 
-const parseInteger = (value: string): number => Math.max(0, Math.trunc(parseNumber(value)));
+const parseInteger = (value: string): number =>
+  Math.max(0, Math.trunc(parseNumber(value)));
 
 const toNullable = (value: string): string | null => {
   const trimmed = value.trim();
@@ -97,10 +117,13 @@ const variantToForm = (variant: ProductVariantRecord): VariantFormState => ({
   deliveryType: variant.deliveryType,
   status: variant.status,
   notes: variant.notes ?? "",
-  needsReview: variant.needsReview
+  needsReview: variant.needsReview,
 });
 
-const formToCreatePayload = (productId: string, form: VariantFormState): ProductVariantCreateInput => ({
+const formToCreatePayload = (
+  productId: string,
+  form: VariantFormState,
+): ProductVariantCreateInput => ({
   productId,
   variantCode: toNullable(form.variantCode),
   name: form.name.trim(),
@@ -116,10 +139,12 @@ const formToCreatePayload = (productId: string, form: VariantFormState): Product
   status: form.status,
   notes: toNullable(form.notes),
   source: "manual",
-  needsReview: form.needsReview
+  needsReview: form.needsReview,
 });
 
-const formToUpdatePayload = (form: VariantFormState): ProductVariantUpdateData => ({
+const formToUpdatePayload = (
+  form: VariantFormState,
+): ProductVariantUpdateData => ({
   variantCode: toNullable(form.variantCode),
   name: form.name.trim(),
   description: toNullable(form.description),
@@ -133,7 +158,7 @@ const formToUpdatePayload = (form: VariantFormState): ProductVariantUpdateData =
   deliveryType: form.deliveryType,
   status: form.status,
   notes: toNullable(form.notes),
-  needsReview: form.needsReview
+  needsReview: form.needsReview,
 });
 
 const variantAlerts = (variant: ProductVariantRecord): string[] => {
@@ -144,7 +169,11 @@ const variantAlerts = (variant: ProductVariantRecord): string[] => {
   if (variant.salePrice === 0) {
     alerts.push("Preço pendente");
   }
-  if ((variant.deliveryType === "manual" || variant.deliveryType === "automatic") && variant.stockCurrent <= 0) {
+  if (
+    (variant.deliveryType === "manual" ||
+      variant.deliveryType === "automatic") &&
+    variant.stockCurrent <= 0
+  ) {
     alerts.push("Sem estoque");
   }
   return alerts;
@@ -152,11 +181,13 @@ const variantAlerts = (variant: ProductVariantRecord): string[] => {
 
 export const ProductVariantsPanel = ({
   product,
+  initialVariantId,
   canEditProducts,
   canExportCsv,
-  onClose
+  onClose,
 }: {
   product: ProductRecord;
+  initialVariantId?: string | null;
   canEditProducts: boolean;
   canExportCsv: boolean;
   onClose: () => void;
@@ -167,6 +198,7 @@ export const ProductVariantsPanel = ({
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<VariantFormState>(emptyVariantForm);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const initialVariantAppliedRef = useRef(false);
   const [saving, setSaving] = useState(false);
 
   const financials = useMemo(
@@ -174,9 +206,9 @@ export const ProductVariantsPanel = ({
       calculateProductFinancials({
         salePrice: parseNumber(form.salePrice),
         unitCost: parseNumber(form.unitCost),
-        feePercent: parseNumber(form.feePercent) || 13
+        feePercent: parseNumber(form.feePercent) || 13,
       }),
-    [form.feePercent, form.salePrice, form.unitCost]
+    [form.feePercent, form.salePrice, form.unitCost],
   );
 
   const loadVariants = useCallback(async (): Promise<void> => {
@@ -185,12 +217,27 @@ export const ProductVariantsPanel = ({
     try {
       const result = await api.productVariants.listByProduct(product.id);
       setItems(result.items);
+      if (initialVariantId && !initialVariantAppliedRef.current) {
+        const initialVariant = result.items.find(
+          (item) => item.id === initialVariantId,
+        );
+        if (initialVariant) {
+          setEditingId(initialVariant.id);
+          setForm(variantToForm(initialVariant));
+        }
+
+        initialVariantAppliedRef.current = true;
+      }
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Falha ao carregar variações.");
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Falha ao carregar variações.",
+      );
     } finally {
       setLoading(false);
     }
-  }, [api, product.id]);
+  }, [api, initialVariantId, product.id]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -200,12 +247,16 @@ export const ProductVariantsPanel = ({
     return () => window.clearTimeout(timeoutId);
   }, [loadVariants]);
 
-  const update = <K extends keyof VariantFormState>(key: K, value: VariantFormState[K]): void => {
+  const update = <K extends keyof VariantFormState>(
+    key: K,
+    value: VariantFormState[K],
+  ): void => {
     setForm({ ...form, [key]: value });
   };
 
   const resetForm = (): void => {
     setEditingId(null);
+    initialVariantAppliedRef.current = true;
     setForm(emptyVariantForm);
   };
 
@@ -215,7 +266,10 @@ export const ProductVariantsPanel = ({
 
     try {
       if (editingId) {
-        await api.productVariants.update({ id: editingId, data: formToUpdatePayload(form) });
+        await api.productVariants.update({
+          id: editingId,
+          data: formToUpdatePayload(form),
+        });
       } else {
         await api.productVariants.create(formToCreatePayload(product.id, form));
       }
@@ -223,23 +277,33 @@ export const ProductVariantsPanel = ({
       resetForm();
       await loadVariants();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Falha ao salvar variação.");
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Falha ao salvar variação.",
+      );
     } finally {
       setSaving(false);
     }
   };
 
-  const duplicateVariant = async (variant: ProductVariantRecord): Promise<void> => {
+  const duplicateVariant = async (
+    variant: ProductVariantRecord,
+  ): Promise<void> => {
     await api.productVariants.duplicate(variant.id);
     await loadVariants();
   };
 
-  const archiveVariant = async (variant: ProductVariantRecord): Promise<void> => {
+  const archiveVariant = async (
+    variant: ProductVariantRecord,
+  ): Promise<void> => {
     await api.productVariants.archive(variant.id);
     await loadVariants();
   };
 
-  const markNeedsReview = async (variant: ProductVariantRecord): Promise<void> => {
+  const markNeedsReview = async (
+    variant: ProductVariantRecord,
+  ): Promise<void> => {
     await api.productVariants.markNeedsReview(variant.id);
     await loadVariants();
   };
@@ -254,12 +318,22 @@ export const ProductVariantsPanel = ({
       <div className="h-full w-full max-w-7xl overflow-y-auto border-l border-line bg-background shadow-premium">
         <div className="sticky top-0 z-20 flex items-start justify-between gap-4 border-b border-line bg-background/95 px-6 py-5">
           <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">Variações do anúncio</div>
-            <h2 className="mt-1 truncate text-xl font-bold text-white">{product.name}</h2>
-            <div className="mt-1 text-sm text-slate-400">{product.internalCode}</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">
+              Variações do anúncio
+            </div>
+            <h2 className="mt-1 truncate text-xl font-bold text-white">
+              {product.name}
+            </h2>
+            <div className="mt-1 text-sm text-slate-400">
+              {product.internalCode}
+            </div>
           </div>
           <div className="flex flex-wrap justify-end gap-3">
-            <Button variant="secondary" onClick={() => void exportVariants()} disabled={!canExportCsv}>
+            <Button
+              variant="secondary"
+              onClick={() => void exportVariants()}
+              disabled={!canExportCsv}
+            >
               <Download size={16} />
               Exportar variações CSV
             </Button>
@@ -271,7 +345,11 @@ export const ProductVariantsPanel = ({
         </div>
 
         <div className="space-y-5 p-6">
-          {error && <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">{error}</div>}
+          {error && (
+            <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">
+              {error}
+            </div>
+          )}
 
           <div className="rounded-lg border border-line bg-panelSoft p-4">
             <div className="flex items-center justify-between gap-3">
@@ -280,11 +358,17 @@ export const ProductVariantsPanel = ({
                   {editingId ? "Editar variação" : "Nova variação"}
                 </div>
                 <div className="mt-1 text-xs text-slate-400">
-                  Líquido, lucro, margem e preço mínimo são recalculados com taxa GameMarket.
+                  Líquido, lucro, margem e preço mínimo são recalculados com
+                  taxa GameMarket.
                 </div>
               </div>
               {editingId && (
-                <Button variant="ghost" size="sm" type="button" onClick={resetForm}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  onClick={resetForm}
+                >
                   <Plus size={14} />
                   Nova variação
                 </Button>
@@ -293,16 +377,22 @@ export const ProductVariantsPanel = ({
 
             <div className="mt-4 grid gap-4 xl:grid-cols-[0.8fr_1.3fr_0.7fr_0.7fr_0.6fr_0.6fr_0.6fr]">
               <label className="space-y-2">
-                <span className="text-xs font-semibold text-slate-400">Código</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  Código
+                </span>
                 <input
                   className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                   value={form.variantCode}
-                  onChange={(event) => update("variantCode", event.target.value)}
+                  onChange={(event) =>
+                    update("variantCode", event.target.value)
+                  }
                   placeholder="Gerado se vazio"
                 />
               </label>
               <label className="space-y-2">
-                <span className="text-xs font-semibold text-slate-400">Nome da variação</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  Nome da variação
+                </span>
                 <input
                   className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                   value={form.name}
@@ -310,7 +400,9 @@ export const ProductVariantsPanel = ({
                 />
               </label>
               <label className="space-y-2">
-                <span className="text-xs font-semibold text-slate-400">Venda</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  Venda
+                </span>
                 <input
                   className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                   type="number"
@@ -321,7 +413,9 @@ export const ProductVariantsPanel = ({
                 />
               </label>
               <label className="space-y-2">
-                <span className="text-xs font-semibold text-slate-400">Custo</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  Custo
+                </span>
                 <input
                   className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                   type="number"
@@ -332,18 +426,24 @@ export const ProductVariantsPanel = ({
                 />
               </label>
               <label className="space-y-2">
-                <span className="text-xs font-semibold text-slate-400">Estoque</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  Estoque
+                </span>
                 <input
                   className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                   type="number"
                   min="0"
                   step="1"
                   value={form.stockCurrent}
-                  onChange={(event) => update("stockCurrent", event.target.value)}
+                  onChange={(event) =>
+                    update("stockCurrent", event.target.value)
+                  }
                 />
               </label>
               <label className="space-y-2">
-                <span className="text-xs font-semibold text-slate-400">Mínimo</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  Mínimo
+                </span>
                 <input
                   className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                   type="number"
@@ -354,7 +454,9 @@ export const ProductVariantsPanel = ({
                 />
               </label>
               <label className="space-y-2">
-                <span className="text-xs font-semibold text-slate-400">Taxa %</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  Taxa %
+                </span>
                 <input
                   className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                   type="number"
@@ -369,11 +471,15 @@ export const ProductVariantsPanel = ({
 
             <div className="mt-4 grid gap-4 xl:grid-cols-[0.8fr_0.8fr_1fr_1fr]">
               <label className="space-y-2">
-                <span className="text-xs font-semibold text-slate-400">Entrega</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  Entrega
+                </span>
                 <select
                   className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                   value={form.deliveryType}
-                  onChange={(event) => update("deliveryType", event.target.value as DeliveryType)}
+                  onChange={(event) =>
+                    update("deliveryType", event.target.value as DeliveryType)
+                  }
                 >
                   {deliveryTypeValues.map((deliveryType) => (
                     <option key={deliveryType} value={deliveryType}>
@@ -383,11 +489,15 @@ export const ProductVariantsPanel = ({
                 </select>
               </label>
               <label className="space-y-2">
-                <span className="text-xs font-semibold text-slate-400">Status</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  Status
+                </span>
                 <select
                   className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                   value={form.status}
-                  onChange={(event) => update("status", event.target.value as ProductVariantStatus)}
+                  onChange={(event) =>
+                    update("status", event.target.value as ProductVariantStatus)
+                  }
                 >
                   {productVariantStatusValues.map((status) => (
                     <option key={status} value={status}>
@@ -397,19 +507,27 @@ export const ProductVariantsPanel = ({
                 </select>
               </label>
               <label className="space-y-2">
-                <span className="text-xs font-semibold text-slate-400">Fornecedor</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  Fornecedor
+                </span>
                 <input
                   className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                   value={form.supplierName}
-                  onChange={(event) => update("supplierName", event.target.value)}
+                  onChange={(event) =>
+                    update("supplierName", event.target.value)
+                  }
                 />
               </label>
               <label className="space-y-2">
-                <span className="text-xs font-semibold text-slate-400">Link fornecedor</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  Link fornecedor
+                </span>
                 <input
                   className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                   value={form.supplierUrl}
-                  onChange={(event) => update("supplierUrl", event.target.value)}
+                  onChange={(event) =>
+                    update("supplierUrl", event.target.value)
+                  }
                   placeholder="https://..."
                 />
               </label>
@@ -418,35 +536,53 @@ export const ProductVariantsPanel = ({
             <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_1fr_1fr_1fr]">
               <div className="rounded-md border border-line bg-panel p-3">
                 <div className="text-xs text-slate-500">Líquido</div>
-                <div className="mt-1 font-bold text-cyan">{formatCurrencyBRL(financials.netValue)}</div>
+                <div className="mt-1 font-bold text-cyan">
+                  {formatCurrencyBRL(financials.netValue)}
+                </div>
               </div>
               <div className="rounded-md border border-line bg-panel p-3">
                 <div className="text-xs text-slate-500">Lucro</div>
-                <div className={financials.estimatedProfit >= 0 ? "mt-1 font-bold text-emerald-300" : "mt-1 font-bold text-red-300"}>
+                <div
+                  className={
+                    financials.estimatedProfit >= 0
+                      ? "mt-1 font-bold text-emerald-300"
+                      : "mt-1 font-bold text-red-300"
+                  }
+                >
                   {formatCurrencyBRL(financials.estimatedProfit)}
                 </div>
               </div>
               <div className="rounded-md border border-line bg-panel p-3">
                 <div className="text-xs text-slate-500">Margem</div>
-                <div className="mt-1 font-bold text-white">{formatPercent(financials.marginPercent)}</div>
+                <div className="mt-1 font-bold text-white">
+                  {formatPercent(financials.marginPercent)}
+                </div>
               </div>
               <div className="rounded-md border border-line bg-panel p-3">
                 <div className="text-xs text-slate-500">Preço mínimo</div>
-                <div className="mt-1 font-bold text-white">{formatCurrencyBRL(financials.minimumPrice)}</div>
+                <div className="mt-1 font-bold text-white">
+                  {formatCurrencyBRL(financials.minimumPrice)}
+                </div>
               </div>
             </div>
 
             <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_1fr]">
               <label className="space-y-2">
-                <span className="text-xs font-semibold text-slate-400">Descrição</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  Descrição
+                </span>
                 <textarea
                   className="focus-ring min-h-20 w-full rounded-md border border-line bg-panel px-3 py-2 text-sm text-white"
                   value={form.description}
-                  onChange={(event) => update("description", event.target.value)}
+                  onChange={(event) =>
+                    update("description", event.target.value)
+                  }
                 />
               </label>
               <label className="space-y-2">
-                <span className="text-xs font-semibold text-slate-400">Observações</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  Observações
+                </span>
                 <textarea
                   className="focus-ring min-h-20 w-full rounded-md border border-line bg-panel px-3 py-2 text-sm text-white"
                   value={form.notes}
@@ -460,18 +596,26 @@ export const ProductVariantsPanel = ({
                 <input
                   type="checkbox"
                   checked={form.needsReview}
-                  onChange={(event) => update("needsReview", event.target.checked)}
+                  onChange={(event) =>
+                    update("needsReview", event.target.checked)
+                  }
                 />
                 Precisa revisar
               </label>
               <Button
                 variant="primary"
                 type="button"
-                disabled={!canEditProducts || saving || form.name.trim().length === 0}
+                disabled={
+                  !canEditProducts || saving || form.name.trim().length === 0
+                }
                 onClick={() => void saveVariant()}
               >
                 <Save size={16} />
-                {saving ? "Salvando..." : editingId ? "Salvar variação" : "Criar variação"}
+                {saving
+                  ? "Salvando..."
+                  : editingId
+                    ? "Salvar variação"
+                    : "Criar variação"}
               </Button>
             </div>
           </div>
@@ -499,23 +643,44 @@ export const ProductVariantsPanel = ({
                 const alerts = variantAlerts(variant);
                 return (
                   <tr key={variant.id} className="hover:bg-slate-900/45">
-                    <Td className="font-mono text-xs text-slate-400">{variant.variantCode}</Td>
+                    <Td className="font-mono text-xs text-slate-400">
+                      {variant.variantCode}
+                    </Td>
                     <Td>
-                      <div className="font-semibold text-white">{variant.name}</div>
+                      <div className="font-semibold text-white">
+                        {variant.name}
+                      </div>
                       <div className="mt-1 flex flex-wrap gap-1">
                         {alerts.map((alert) => (
-                          <Badge key={alert} tone={alert === "Sem estoque" ? "danger" : "warning"}>
+                          <Badge
+                            key={alert}
+                            tone={
+                              alert === "Sem estoque" ? "danger" : "warning"
+                            }
+                          >
                             {alert}
                           </Badge>
                         ))}
-                        {variant.deliveryType === "on_demand" && <Badge tone="purple">sob demanda</Badge>}
-                        {variant.deliveryType === "service" && <Badge tone="cyan">serviço</Badge>}
+                        {variant.deliveryType === "on_demand" && (
+                          <Badge tone="purple">sob demanda</Badge>
+                        )}
+                        {variant.deliveryType === "service" && (
+                          <Badge tone="cyan">serviço</Badge>
+                        )}
                       </div>
                     </Td>
                     <Td>{formatCurrencyBRL(variant.salePrice)}</Td>
                     <Td>{formatCurrencyBRL(variant.unitCost)}</Td>
-                    <Td className="font-semibold text-cyan">{formatCurrencyBRL(variant.netValue)}</Td>
-                    <Td className={variant.estimatedProfit >= 0 ? "font-semibold text-emerald-300" : "font-semibold text-red-300"}>
+                    <Td className="font-semibold text-cyan">
+                      {formatCurrencyBRL(variant.netValue)}
+                    </Td>
+                    <Td
+                      className={
+                        variant.estimatedProfit >= 0
+                          ? "font-semibold text-emerald-300"
+                          : "font-semibold text-red-300"
+                      }
+                    >
                       {formatCurrencyBRL(variant.estimatedProfit)}
                     </Td>
                     <Td>{formatPercent(variant.marginPercent)}</Td>
@@ -523,15 +688,27 @@ export const ProductVariantsPanel = ({
                       {variant.deliveryType === "service" ? (
                         <span className="text-cyan">ilimitado</span>
                       ) : (
-                        <span>{variant.stockCurrent}/{variant.stockMin}</span>
+                        <span>
+                          {variant.stockCurrent}/{variant.stockMin}
+                        </span>
                       )}
                     </Td>
                     <Td>{deliveryTypeLabels[variant.deliveryType]}</Td>
-                    <Td className="max-w-[180px] truncate">{variant.supplierName ?? "-"}</Td>
-                    <Td>
-                      <Badge tone={statusTone[variant.status]}>{statusLabels[variant.status]}</Badge>
+                    <Td className="max-w-[180px] truncate">
+                      {variant.supplierName ?? "-"}
                     </Td>
-                    <Td>{variant.needsReview ? <Badge tone="warning">revisar</Badge> : <Badge tone="success">ok</Badge>}</Td>
+                    <Td>
+                      <Badge tone={statusTone[variant.status]}>
+                        {statusLabels[variant.status]}
+                      </Badge>
+                    </Td>
+                    <Td>
+                      {variant.needsReview ? (
+                        <Badge tone="warning">revisar</Badge>
+                      ) : (
+                        <Badge tone="success">ok</Badge>
+                      )}
+                    </Td>
                     <Td>
                       <div className="flex items-center gap-1">
                         <Button

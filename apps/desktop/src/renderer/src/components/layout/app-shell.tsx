@@ -14,7 +14,11 @@ const titles: Record<string, { title: string; eyebrow: string }> = {
   "/inventory": { title: "Estoque", eyebrow: "Contas, fornecedores e status" },
   "/orders": { title: "Pedidos", eyebrow: "Fila operacional" },
   "/events": { title: "Eventos", eyebrow: "Auditoria e notificações" },
-  "/settings": { title: "Configurações", eyebrow: "Sistema e segurança" }
+  "/profit": {
+    title: "Lucro",
+    eyebrow: "Análise financeira por produto, variação e margem",
+  },
+  "/settings": { title: "Configurações", eyebrow: "Sistema e segurança" },
 };
 
 export const AppShell = (): JSX.Element => {
@@ -41,7 +45,7 @@ export const AppShell = (): JSX.Element => {
 
         return true;
       }),
-    [session]
+    [session],
   );
 
   const initials = useMemo(() => {
@@ -68,8 +72,12 @@ export const AppShell = (): JSX.Element => {
               <ShieldCheck size={22} />
             </div>
             <div>
-              <div className="text-sm font-bold tracking-wide text-white">HzdKyx</div>
-              <div className="text-xs font-medium text-slate-400">GameMarket Manager</div>
+              <div className="text-sm font-bold tracking-wide text-white">
+                HzdKyx
+              </div>
+              <div className="text-xs font-medium text-slate-400">
+                GameMarket Manager
+              </div>
             </div>
           </div>
         </div>
@@ -85,7 +93,7 @@ export const AppShell = (): JSX.Element => {
                   "focus-ring flex h-11 items-center gap-3 rounded-md px-3 text-sm font-semibold transition",
                   isActive
                     ? "bg-cyan/12 text-cyan ring-1 ring-cyan/25"
-                    : "text-slate-400 hover:bg-slate-900 hover:text-slate-100"
+                    : "text-slate-400 hover:bg-slate-900 hover:text-slate-100",
                 )
               }
             >
@@ -114,11 +122,14 @@ export const AppShell = (): JSX.Element => {
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan">
               {current.eyebrow}
             </div>
-            <h1 className="mt-1 text-2xl font-bold text-white">{current.title}</h1>
+            <h1 className="mt-1 text-2xl font-bold text-white">
+              {current.title}
+            </h1>
           </div>
           <div className="flex items-center gap-3 text-sm">
             <div className="rounded-md border border-line bg-panel px-3 py-2 text-slate-300">
-              Taxa GameMarket <span className="font-semibold text-white">13%</span>
+              Taxa GameMarket{" "}
+              <span className="font-semibold text-white">13%</span>
             </div>
             <div className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 font-semibold text-emerald-300">
               Líquido 87%
@@ -132,7 +143,9 @@ export const AppShell = (): JSX.Element => {
                   <UserCircle size={14} className="text-slate-500" />
                   {session?.user.name}
                 </div>
-                <div className="text-xs text-slate-500">{session?.user.role}</div>
+                <div className="text-xs text-slate-500">
+                  {session?.user.role}
+                </div>
               </div>
             </div>
             <Button variant="ghost" size="sm" onClick={() => void logout()}>
@@ -152,7 +165,9 @@ export const AppShell = (): JSX.Element => {
       {fallbackNotification && (
         <div className="fixed bottom-5 right-5 z-50 w-[360px] rounded-lg border border-cyan/25 bg-panel shadow-premium">
           <div className="flex items-start justify-between gap-3 border-b border-line p-4">
-            <div className="text-sm font-semibold text-white">{fallbackNotification.title}</div>
+            <div className="text-sm font-semibold text-white">
+              {fallbackNotification.title}
+            </div>
             <Badge
               tone={
                 fallbackNotification.severity === "critical"
@@ -167,7 +182,9 @@ export const AppShell = (): JSX.Element => {
               local
             </Badge>
           </div>
-          <div className="p-4 text-sm leading-6 text-slate-300">{fallbackNotification.body}</div>
+          <div className="p-4 text-sm leading-6 text-slate-300">
+            {fallbackNotification.body}
+          </div>
         </div>
       )}
     </div>

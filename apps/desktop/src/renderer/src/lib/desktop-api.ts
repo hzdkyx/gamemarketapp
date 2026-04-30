@@ -1,44 +1,71 @@
 import type { HzdKyxDesktopApi } from "../../../preload";
-import type { GameMarketSettingsView, WebhookServerSettingsView } from "../../../shared/contracts";
+import type {
+  GameMarketSettingsView,
+  WebhookServerSettingsView,
+} from "../../../shared/contracts";
+import { emptyProfitListResult } from "../../../shared/profit-analysis";
 
 const unavailable = async (): Promise<never> => {
   throw new Error("Electron preload indisponível no preview web.");
+};
+
+const unavailableElectronProfit = async (): Promise<never> => {
+  throw new Error(
+    "Módulo de lucro indisponível no preload. Reinicie o app para carregar a versão atual.",
+  );
+};
+
+const buildProfitApi = (
+  api: Partial<HzdKyxDesktopApi> | undefined,
+): HzdKyxDesktopApi["profit"] => {
+  const profitApi = (api?.profit ?? {}) as Partial<HzdKyxDesktopApi["profit"]>;
+
+  return {
+    list:
+      typeof profitApi.list === "function"
+        ? profitApi.list
+        : unavailableElectronProfit,
+    exportCsv:
+      typeof profitApi.exportCsv === "function"
+        ? profitApi.exportCsv
+        : unavailableElectronProfit,
+  };
 };
 
 const fallbackApi: HzdKyxDesktopApi = {
   getAppMeta: async () => ({
     name: "HzdKyx GameMarket Manager",
     version: "0.1.0",
-    platform: "win32"
+    platform: "win32",
   }),
   getDatabaseStatus: async () => ({
     path: "Electron preload indisponível no preview web.",
     connected: false,
-    appliedMigrations: []
+    appliedMigrations: [],
   }),
   showNotification: async () => ({
     shown: false,
-    reason: "Notificações desktop exigem execução no Electron."
+    reason: "Notificações desktop exigem execução no Electron.",
   }),
   notifications: {
-    onFallback: () => () => undefined
+    onFallback: () => () => undefined,
   },
   auth: {
     getBootstrap: async () => ({
       hasAdmin: true,
-      session: null
+      session: null,
     }),
     setupAdmin: unavailable,
     login: unavailable,
     logout: async () => ({ loggedOut: true }),
     getSession: async () => null,
-    changeOwnPassword: unavailable
+    changeOwnPassword: unavailable,
   },
   users: {
     list: async () => [],
     create: unavailable,
     update: unavailable,
-    resetPassword: unavailable
+    resetPassword: unavailable,
   },
   products: {
     list: async () => ({
@@ -48,9 +75,9 @@ const fallbackApi: HzdKyxDesktopApi = {
         active: 0,
         outOfStock: 0,
         lowStock: 0,
-        averageEstimatedProfit: 0
+        averageEstimatedProfit: 0,
       },
-      categories: []
+      categories: [],
     }),
     get: unavailable,
     create: unavailable,
@@ -58,12 +85,12 @@ const fallbackApi: HzdKyxDesktopApi = {
     delete: unavailable,
     exportCsv: async () => ({
       filename: "hzdk-products.csv",
-      content: ""
-    })
+      content: "",
+    }),
   },
   productVariants: {
     listByProduct: async () => ({
-      items: []
+      items: [],
     }),
     get: unavailable,
     create: unavailable,
@@ -74,8 +101,8 @@ const fallbackApi: HzdKyxDesktopApi = {
     delete: unavailable,
     exportCsv: async () => ({
       filename: "hzdk-product-variants.csv",
-      content: ""
-    })
+      content: "",
+    }),
   },
   inventory: {
     list: async () => ({
@@ -85,14 +112,14 @@ const fallbackApi: HzdKyxDesktopApi = {
         sold: 0,
         problem: 0,
         totalCost: 0,
-        potentialProfit: 0
+        potentialProfit: 0,
       },
       protectedSummary: {
         available: 0,
         sold: 0,
         problem: 0,
         totalCost: 0,
-        potentialProfit: 0
+        potentialProfit: 0,
       },
       operationalItems: [],
       operationalSummary: {
@@ -104,12 +131,12 @@ const fallbackApi: HzdKyxDesktopApi = {
         lowStock: 0,
         outOfStock: 0,
         productRows: 0,
-        variantRows: 0
+        variantRows: 0,
       },
       products: [],
       productVariants: [],
       suppliers: [],
-      categories: []
+      categories: [],
     }),
     get: unavailable,
     create: unavailable,
@@ -118,8 +145,8 @@ const fallbackApi: HzdKyxDesktopApi = {
     revealSecret: unavailable,
     exportCsv: async () => ({
       filename: "hzdk-inventory.csv",
-      content: ""
-    })
+      content: "",
+    }),
   },
   orders: {
     list: async () => ({
@@ -130,12 +157,12 @@ const fallbackApi: HzdKyxDesktopApi = {
         problemOrMediation: 0,
         grossRevenue: 0,
         netRevenue: 0,
-        estimatedProfit: 0
+        estimatedProfit: 0,
       },
       products: [],
       productVariants: [],
       inventoryItems: [],
-      categories: []
+      categories: [],
     }),
     get: unavailable,
     create: unavailable,
@@ -147,8 +174,8 @@ const fallbackApi: HzdKyxDesktopApi = {
     unlinkInventoryItem: unavailable,
     exportCsv: async () => ({
       filename: "hzdk-orders.csv",
-      content: ""
-    })
+      content: "",
+    }),
   },
   events: {
     list: async () => ({
@@ -157,9 +184,9 @@ const fallbackApi: HzdKyxDesktopApi = {
         total: 0,
         unread: 0,
         critical: 0,
-        warnings: 0
+        warnings: 0,
       },
-      types: []
+      types: [],
     }),
     get: unavailable,
     markRead: unavailable,
@@ -167,8 +194,15 @@ const fallbackApi: HzdKyxDesktopApi = {
     createManual: unavailable,
     exportCsv: async () => ({
       filename: "hzdk-events.csv",
-      content: ""
-    })
+      content: "",
+    }),
+  },
+  profit: {
+    list: async () => emptyProfitListResult,
+    exportCsv: async () => ({
+      filename: "hzdk-profit-analysis.csv",
+      content: "",
+    }),
   },
   dashboard: {
     getSummary: async () => ({
@@ -184,20 +218,20 @@ const fallbackApi: HzdKyxDesktopApi = {
       latestEvents: [],
       salesByDay: [],
       profitByCategory: [],
-      statusBreakdown: []
-    })
+      statusBreakdown: [],
+    }),
   },
   settings: {
     getNotificationSettings: async () => ({
       desktopEnabled: true,
       soundEnabled: false,
-      enabledEventTypes: {}
+      enabledEventTypes: {},
     }),
     updateNotificationSettings: async (payload) => ({
       desktopEnabled: payload.desktopEnabled ?? true,
       soundEnabled: payload.soundEnabled ?? false,
-      enabledEventTypes: payload.enabledEventTypes ?? {}
-    })
+      enabledEventTypes: payload.enabledEventTypes ?? {},
+    }),
   },
   gamemarket: {
     getSettings: async (): Promise<GameMarketSettingsView> => ({
@@ -215,14 +249,14 @@ const fallbackApi: HzdKyxDesktopApi = {
         status: "missing",
         files: [],
         missing: ["docs/gamemarket-api/"],
-        message: "Electron preload indisponível no preview web."
+        message: "Electron preload indisponível no preview web.",
       },
       permissions: {
         read: true,
         write: false,
         delete: false,
-        source: "documentation"
-      }
+        source: "documentation",
+      },
     }),
     updateSettings: unavailable,
     revealToken: unavailable,
@@ -231,7 +265,7 @@ const fallbackApi: HzdKyxDesktopApi = {
       status: "unavailable",
       checkedAt: new Date().toISOString(),
       endpoint: null,
-      safeMessage: "Teste exige execução no Electron."
+      safeMessage: "Teste exige execução no Electron.",
     }),
     syncNow: async () => ({
       startedAt: new Date().toISOString(),
@@ -244,9 +278,9 @@ const fallbackApi: HzdKyxDesktopApi = {
       productsUpdated: 0,
       ordersNew: 0,
       ordersUpdated: 0,
-      errors: ["Sync exige execução no Electron."]
+      errors: ["Sync exige execução no Electron."],
     }),
-    getLastSyncSummary: async () => null
+    getLastSyncSummary: async () => null,
   },
   webhookServer: {
     getSettings: async (): Promise<WebhookServerSettingsView> => ({
@@ -259,7 +293,7 @@ const fallbackApi: HzdKyxDesktopApi = {
       lastCheckedAt: null,
       lastSyncAt: null,
       lastEventReceivedAt: null,
-      lastError: "Electron preload indisponível no preview web."
+      lastError: "Electron preload indisponível no preview web.",
     }),
     updateSettings: unavailable,
     revealToken: unavailable,
@@ -268,14 +302,14 @@ const fallbackApi: HzdKyxDesktopApi = {
       status: "unavailable",
       checkedAt: new Date().toISOString(),
       endpoint: null,
-      safeMessage: "Teste exige execução no Electron."
+      safeMessage: "Teste exige execução no Electron.",
     }),
     sendTestEvent: async () => ({
       ok: false,
       id: "",
       eventType: "gamemarket.unknown",
       severity: "warning",
-      message: "Teste exige execução no Electron."
+      message: "Teste exige execução no Electron.",
     }),
     syncEventsNow: async () => ({
       startedAt: new Date().toISOString(),
@@ -287,10 +321,67 @@ const fallbackApi: HzdKyxDesktopApi = {
       eventsAcked: 0,
       duplicatesSkipped: 0,
       notificationsTriggered: 0,
-      errors: ["Sync exige execução no Electron."]
+      errors: ["Sync exige execução no Electron."],
     }),
-    getLastSyncSummary: async () => null
-  }
+    getLastSyncSummary: async () => null,
+  },
 };
 
-export const getDesktopApi = (): HzdKyxDesktopApi => window.hzdk ?? fallbackApi;
+const mergeDesktopApi = (
+  api: Partial<HzdKyxDesktopApi> | undefined,
+): HzdKyxDesktopApi => ({
+  ...fallbackApi,
+  ...api,
+  notifications: {
+    ...fallbackApi.notifications,
+    ...api?.notifications,
+  },
+  auth: {
+    ...fallbackApi.auth,
+    ...api?.auth,
+  },
+  users: {
+    ...fallbackApi.users,
+    ...api?.users,
+  },
+  products: {
+    ...fallbackApi.products,
+    ...api?.products,
+  },
+  productVariants: {
+    ...fallbackApi.productVariants,
+    ...api?.productVariants,
+  },
+  inventory: {
+    ...fallbackApi.inventory,
+    ...api?.inventory,
+  },
+  orders: {
+    ...fallbackApi.orders,
+    ...api?.orders,
+  },
+  events: {
+    ...fallbackApi.events,
+    ...api?.events,
+  },
+  profit: buildProfitApi(api),
+  dashboard: {
+    ...fallbackApi.dashboard,
+    ...api?.dashboard,
+  },
+  settings: {
+    ...fallbackApi.settings,
+    ...api?.settings,
+  },
+  gamemarket: {
+    ...fallbackApi.gamemarket,
+    ...api?.gamemarket,
+  },
+  webhookServer: {
+    ...fallbackApi.webhookServer,
+    ...api?.webhookServer,
+  },
+});
+
+export const getDesktopApi = (): HzdKyxDesktopApi =>
+  window.hzdk ? mergeDesktopApi(window.hzdk) : fallbackApi;

@@ -8,13 +8,14 @@ import {
   inventoryRevealSecretInputSchema,
   orderChangeStatusInputSchema,
   orderCreateInputSchema,
+  profitListInputSchema,
   productCreateInputSchema,
   productListInputSchema,
   productVariantCreateInputSchema,
   productVariantUpdateInputSchema,
   userCreateInputSchema,
   webhookServerRevealTokenInputSchema,
-  webhookServerSettingsUpdateInputSchema
+  webhookServerSettingsUpdateInputSchema,
 } from "./contracts";
 
 describe("product contracts", () => {
@@ -24,7 +25,7 @@ describe("product contracts", () => {
       salePrice: 74.9,
       unitCost: 49,
       stockCurrent: 3,
-      stockMin: 1
+      stockMin: 1,
     });
 
     expect(parsed.name).toBe("CS2 Prime");
@@ -37,8 +38,8 @@ describe("product contracts", () => {
     expect(() =>
       productCreateInputSchema.parse({
         name: "Conta LoL",
-        status: "enabled"
-      })
+        status: "enabled",
+      }),
     ).toThrow();
   });
 
@@ -60,7 +61,7 @@ describe("inventory contracts", () => {
       productVariantId: null,
       purchaseCost: 50,
       accountLogin: "login",
-      accountPassword: "secret"
+      accountPassword: "secret",
     });
 
     expect(parsed.inventoryCode).toBe("inv-cs2-1");
@@ -72,8 +73,8 @@ describe("inventory contracts", () => {
     expect(() =>
       inventoryRevealSecretInputSchema.parse({
         id: "item-1",
-        field: "plainPassword"
-      })
+        field: "plainPassword",
+      }),
     ).toThrow();
   });
 });
@@ -85,7 +86,7 @@ describe("product variant contracts", () => {
       variantCode: " lol-br-base ",
       name: " [BR] Conta base ",
       salePrice: 15,
-      unitCost: 7.5
+      unitCost: 7.5,
     });
 
     expect(parsed.variantCode).toBe("lol-br-base");
@@ -108,12 +109,40 @@ describe("product variant contracts", () => {
         deliveryType: "manual",
         supplierName: "Fornecedor / a definir",
         supplierUrl: null,
-        notes: "Atualizado manualmente"
-      }
+        notes: "Atualizado manualmente",
+      },
     });
 
     expect(parsed.data.unitCost).toBe(9);
     expect(parsed.data.stockCurrent).toBe(3);
+  });
+});
+
+describe("profit contracts", () => {
+  it("parses profit filters with operational defaults", () => {
+    const parsed = profitListInputSchema.parse({});
+
+    expect(parsed.deliveryType).toBe("all");
+    expect(parsed.status).toBe("all");
+    expect(parsed.review).toBe("all");
+    expect(parsed.margin).toBe("all");
+    expect(parsed.sortBy).toBe("profit_desc");
+  });
+
+  it("normalizes unknown and legacy profit filters safely", () => {
+    const parsed = profitListInputSchema.parse({
+      deliveryType: "invalid",
+      status: "ativo",
+      review: "OK",
+      margin: "negative",
+      sortBy: "unknown",
+    });
+
+    expect(parsed.deliveryType).toBe("all");
+    expect(parsed.status).toBe("all");
+    expect(parsed.review).toBe("ok");
+    expect(parsed.margin).toBe("negative_profit");
+    expect(parsed.sortBy).toBe("profit_desc");
   });
 });
 
@@ -122,7 +151,7 @@ describe("order contracts", () => {
     const parsed = orderCreateInputSchema.parse({
       productId: "product-1",
       productVariantId: "variant-1",
-      buyerName: " comprador "
+      buyerName: " comprador ",
     });
 
     expect(parsed.marketplace).toBe("gamemarket");
@@ -136,8 +165,8 @@ describe("order contracts", () => {
     expect(() =>
       orderCreateInputSchema.parse({
         productId: "product-1",
-        status: "completed"
-      })
+        status: "completed",
+      }),
     ).toThrow();
   });
 
@@ -145,7 +174,7 @@ describe("order contracts", () => {
     const parsed = orderChangeStatusInputSchema.parse({
       id: "order-1",
       status: "completed",
-      manualCompletionConfirmed: true
+      manualCompletionConfirmed: true,
     });
 
     expect(parsed.status).toBe("completed");
@@ -161,8 +190,8 @@ describe("event contracts", () => {
       title: " Problema no pedido ",
       rawPayload: {
         token: "secret",
-        visible: true
-      }
+        visible: true,
+      },
     });
 
     expect(parsed.title).toBe("Problema no pedido");
@@ -173,7 +202,7 @@ describe("event contracts", () => {
     const parsed = eventCreateManualInputSchema.parse({
       type: "order.status_corrected",
       severity: "warning",
-      title: "Status corrigido"
+      title: "Status corrigido",
     });
 
     expect(parsed.type).toBe("order.status_corrected");
@@ -183,8 +212,8 @@ describe("event contracts", () => {
     expect(() =>
       eventCreateManualInputSchema.parse({
         type: "gamemarket.sale.approved",
-        title: "Evento"
-      })
+        title: "Evento",
+      }),
     ).toThrow();
   });
 });
@@ -194,7 +223,7 @@ describe("GameMarket contracts", () => {
     const parsed = gamemarketSettingsUpdateInputSchema.parse({
       apiBaseUrl: "https://gamemarket.com.br",
       integrationName: "HzdKyx Desktop",
-      environment: "production"
+      environment: "production",
     });
 
     expect(parsed.apiBaseUrl).toBe("https://gamemarket.com.br");
@@ -202,8 +231,12 @@ describe("GameMarket contracts", () => {
   });
 
   it("requires explicit confirmation to reveal token", () => {
-    expect(gamemarketRevealTokenInputSchema.parse({ confirm: true }).confirm).toBe(true);
-    expect(() => gamemarketRevealTokenInputSchema.parse({ confirm: false })).toThrow();
+    expect(
+      gamemarketRevealTokenInputSchema.parse({ confirm: true }).confirm,
+    ).toBe(true);
+    expect(() =>
+      gamemarketRevealTokenInputSchema.parse({ confirm: false }),
+    ).toThrow();
   });
 });
 
@@ -213,7 +246,7 @@ describe("Webhook Server contracts", () => {
       backendUrl: "http://localhost:3001",
       appSyncToken: "test-sync-token",
       pollingEnabled: true,
-      pollingIntervalSeconds: 30
+      pollingIntervalSeconds: 30,
     });
 
     expect(parsed.backendUrl).toBe("http://localhost:3001");
@@ -224,11 +257,15 @@ describe("Webhook Server contracts", () => {
     expect(() =>
       webhookServerSettingsUpdateInputSchema.parse({
         backendUrl: "http://localhost:3001",
-        pollingIntervalSeconds: 5
-      })
+        pollingIntervalSeconds: 5,
+      }),
     ).toThrow();
-    expect(webhookServerRevealTokenInputSchema.parse({ confirm: true }).confirm).toBe(true);
-    expect(() => webhookServerRevealTokenInputSchema.parse({ confirm: false })).toThrow();
+    expect(
+      webhookServerRevealTokenInputSchema.parse({ confirm: true }).confirm,
+    ).toBe(true);
+    expect(() =>
+      webhookServerRevealTokenInputSchema.parse({ confirm: false }),
+    ).toThrow();
   });
 });
 
@@ -238,7 +275,7 @@ describe("auth and user contracts", () => {
       name: " Admin ",
       username: "Admin.Local",
       password: "senha-forte-1",
-      confirmPassword: "senha-forte-1"
+      confirmPassword: "senha-forte-1",
     });
 
     expect(parsed.name).toBe("Admin");
@@ -251,8 +288,8 @@ describe("auth and user contracts", () => {
         name: "Admin",
         username: "admin local",
         password: "senha-forte-1",
-        confirmPassword: "senha-forte-1"
-      })
+        confirmPassword: "senha-forte-1",
+      }),
     ).toThrow();
 
     expect(() =>
@@ -260,8 +297,8 @@ describe("auth and user contracts", () => {
         name: "Admin",
         username: "admin.local",
         password: "curta",
-        confirmPassword: "curta"
-      })
+        confirmPassword: "curta",
+      }),
     ).toThrow();
 
     expect(() =>
@@ -270,8 +307,8 @@ describe("auth and user contracts", () => {
         username: "admin.local",
         password: "senha-forte-1",
         confirmPassword: "senha-diferente",
-        role: "viewer"
-      })
+        role: "viewer",
+      }),
     ).toThrow();
   });
 
@@ -281,8 +318,8 @@ describe("auth and user contracts", () => {
         name: "Operador",
         username: "operador1",
         password: "senha-forte-1",
-        confirmPassword: "senha-diferente"
-      })
+        confirmPassword: "senha-diferente",
+      }),
     ).toThrow();
   });
 });

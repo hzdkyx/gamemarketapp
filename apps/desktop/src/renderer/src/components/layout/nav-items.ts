@@ -5,7 +5,7 @@ import {
   LayoutDashboard,
   PackageSearch,
   ReceiptText,
-  Settings
+  Settings,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -21,7 +21,8 @@ export const navItems: NavItem[] = [
   { label: "Estoque", path: "/inventory", icon: Boxes },
   { label: "Pedidos", path: "/orders", icon: ReceiptText },
   { label: "Eventos", path: "/events", icon: Bell },
-  { label: "Configurações", path: "/settings", icon: Settings }
+  { label: "Lucro", path: "/profit", icon: BarChart3 },
+  { label: "Configurações", path: "/settings", icon: Settings },
 ];
 
 export const analyticsIcon = BarChart3;

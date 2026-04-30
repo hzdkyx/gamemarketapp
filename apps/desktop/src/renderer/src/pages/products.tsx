@@ -1,4 +1,8 @@
-import { calculateProductFinancials, formatCurrencyBRL, formatPercent } from "@hzdk/shared";
+import {
+  calculateProductFinancials,
+  formatCurrencyBRL,
+  formatPercent,
+} from "@hzdk/shared";
 import {
   Archive,
   Copy,
@@ -10,12 +14,17 @@ import {
   Plus,
   Search,
   Trash2,
-  TrendingUp
+  TrendingUp,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@renderer/components/ui/card";
 import { Table, Td, Th } from "@renderer/components/ui/table";
 import { ProductVariantsPanel } from "@renderer/components/products/product-variants-panel";
 import { useAuth } from "@renderer/lib/auth-context";
@@ -27,11 +36,20 @@ import type {
   ProductListInput,
   ProductListResult,
   ProductRecord,
-  ProductStatus
+  ProductStatus,
 } from "../../../shared/contracts";
-import { deliveryTypeValues, productStatusValues } from "../../../shared/contracts";
+import {
+  deliveryTypeValues,
+  productStatusValues,
+} from "../../../shared/contracts";
 
-type BadgeTone = "success" | "warning" | "danger" | "purple" | "neutral" | "cyan";
+type BadgeTone =
+  | "success"
+  | "warning"
+  | "danger"
+  | "purple"
+  | "neutral"
+  | "cyan";
 
 interface ProductFormState {
   internalCode: string;
@@ -56,14 +74,14 @@ const productStatusLabels: Record<ProductStatus, string> = {
   paused: "Pausado",
   out_of_stock: "Sem estoque",
   on_demand: "Sob demanda",
-  archived: "Arquivado"
+  archived: "Arquivado",
 };
 
 const deliveryTypeLabels: Record<DeliveryType, string> = {
   manual: "Manual",
   automatic: "Automática",
   on_demand: "Sob demanda",
-  service: "Serviço"
+  service: "Serviço",
 };
 
 const productStatusTone: Record<ProductStatus, BadgeTone> = {
@@ -71,7 +89,7 @@ const productStatusTone: Record<ProductStatus, BadgeTone> = {
   paused: "warning",
   out_of_stock: "danger",
   on_demand: "purple",
-  archived: "neutral"
+  archived: "neutral",
 };
 
 const defaultFilters: ProductListInput = {
@@ -80,7 +98,7 @@ const defaultFilters: ProductListInput = {
   category: null,
   stock: "all",
   sortBy: "name",
-  sortDirection: "asc"
+  sortDirection: "asc",
 };
 
 const emptyForm: ProductFormState = {
@@ -98,7 +116,7 @@ const emptyForm: ProductFormState = {
   status: "active",
   deliveryType: "manual",
   supplierId: "",
-  notes: ""
+  notes: "",
 };
 
 const parseNumber = (value: string): number => {
@@ -106,7 +124,8 @@ const parseNumber = (value: string): number => {
   return normalized.length > 0 ? Number(normalized) : 0;
 };
 
-const parseInteger = (value: string): number => Math.max(0, Math.trunc(parseNumber(value)));
+const parseInteger = (value: string): number =>
+  Math.max(0, Math.trunc(parseNumber(value)));
 
 const toNullable = (value: string): string | null => {
   const trimmed = value.trim();
@@ -128,7 +147,7 @@ const productToForm = (product: ProductRecord): ProductFormState => ({
   status: product.status,
   deliveryType: product.deliveryType,
   supplierId: product.supplierId ?? "",
-  notes: product.notes ?? ""
+  notes: product.notes ?? "",
 });
 
 const formToPayload = (form: ProductFormState): ProductCreateInput => ({
@@ -146,14 +165,14 @@ const formToPayload = (form: ProductFormState): ProductCreateInput => ({
   status: form.status,
   deliveryType: form.deliveryType,
   supplierId: toNullable(form.supplierId),
-  notes: toNullable(form.notes)
+  notes: toNullable(form.notes),
 });
 
 const Metric = ({
   label,
   value,
   helper,
-  tone = "cyan"
+  tone = "cyan",
 }: {
   label: string;
   value: string;
@@ -166,21 +185,107 @@ const Metric = ({
     danger: "border-danger/25 bg-danger/10 text-red-300",
     purple: "border-purple/25 bg-purple/10 text-violet-200",
     neutral: "border-slate-600/60 bg-slate-800/50 text-slate-200",
-    cyan: "border-cyan/25 bg-cyan/10 text-cyan"
+    cyan: "border-cyan/25 bg-cyan/10 text-cyan",
   };
 
   return (
     <Card className="min-h-[126px]">
       <CardContent className="flex h-full flex-col justify-between">
-        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</div>
+        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+          {label}
+        </div>
         <div>
-          <div className={`inline-flex rounded-md border px-2.5 py-1 text-2xl font-bold ${toneClass[tone]}`}>
+          <div
+            className={`inline-flex rounded-md border px-2.5 py-1 text-2xl font-bold ${toneClass[tone]}`}
+          >
             {value}
           </div>
           <div className="mt-3 text-xs text-slate-400">{helper}</div>
         </div>
       </CardContent>
     </Card>
+  );
+};
+
+const VariantProfitCell = ({
+  product,
+}: {
+  product: ProductRecord;
+}): JSX.Element => {
+  const summary = product.variantProfitSummary;
+
+  if (!summary || summary.variantCount === 0) {
+    return (
+      <div>
+        <div
+          className={
+            product.estimatedProfit >= 0
+              ? "font-semibold text-emerald-300"
+              : "font-semibold text-red-300"
+          }
+        >
+          {formatCurrencyBRL(product.estimatedProfit)}
+        </div>
+        <div className="mt-1 text-xs text-slate-500">
+          {formatPercent(product.marginPercent)}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-w-[150px] space-y-1.5">
+      <div className="flex flex-wrap items-center gap-1">
+        <Badge tone="cyan">Por variação</Badge>
+        {summary.needsReviewCount > 0 && (
+          <Badge tone="warning">{summary.needsReviewCount} revisar</Badge>
+        )}
+        {summary.pendingCostCount > 0 && (
+          <Badge tone="warning">custo pendente</Badge>
+        )}
+      </div>
+      <div className="grid gap-0.5 text-xs">
+        <span className="text-slate-400">
+          Lucro mín:{" "}
+          <strong
+            className={
+              summary.minimumEstimatedProfit >= 0
+                ? "text-emerald-300"
+                : "text-red-300"
+            }
+          >
+            {formatCurrencyBRL(summary.minimumEstimatedProfit)}
+          </strong>
+        </span>
+        <span className="text-slate-400">
+          Lucro méd:{" "}
+          <strong
+            className={
+              summary.averageEstimatedProfit >= 0
+                ? "text-emerald-300"
+                : "text-red-300"
+            }
+          >
+            {formatCurrencyBRL(summary.averageEstimatedProfit)}
+          </strong>
+        </span>
+        <span className="text-slate-400">
+          Lucro máx:{" "}
+          <strong
+            className={
+              summary.maximumEstimatedProfit >= 0
+                ? "text-emerald-300"
+                : "text-red-300"
+            }
+          >
+            {formatCurrencyBRL(summary.maximumEstimatedProfit)}
+          </strong>
+        </span>
+        <span className="text-slate-500">
+          {formatPercent(summary.averageMarginPercent)} margem média
+        </span>
+      </div>
+    </div>
   );
 };
 
@@ -191,7 +296,7 @@ const ProductForm = ({
   onClose,
   onSubmit,
   saving,
-  error
+  error,
 }: {
   mode: "create" | "edit" | "duplicate";
   form: ProductFormState;
@@ -206,17 +311,22 @@ const ProductForm = ({
       calculateProductFinancials({
         salePrice: parseNumber(form.salePrice),
         unitCost: parseNumber(form.unitCost),
-        feePercent: parseNumber(form.feePercent) || 13
+        feePercent: parseNumber(form.feePercent) || 13,
       }),
-    [form.feePercent, form.salePrice, form.unitCost]
+    [form.feePercent, form.salePrice, form.unitCost],
   );
   const stockCurrent = parseInteger(form.stockCurrent);
   const stockMin = parseInteger(form.stockMin);
-  const tracksStock = form.deliveryType === "manual" || form.deliveryType === "automatic";
-  const suggestsOutOfStock = tracksStock && stockCurrent <= 0 && form.status !== "out_of_stock";
+  const tracksStock =
+    form.deliveryType === "manual" || form.deliveryType === "automatic";
+  const suggestsOutOfStock =
+    tracksStock && stockCurrent <= 0 && form.status !== "out_of_stock";
   const lowStock = tracksStock && stockCurrent > 0 && stockCurrent <= stockMin;
 
-  const update = <K extends keyof ProductFormState>(key: K, value: ProductFormState[K]): void => {
+  const update = <K extends keyof ProductFormState>(
+    key: K,
+    value: ProductFormState[K],
+  ): void => {
     setForm({ ...form, [key]: value });
   };
 
@@ -226,26 +336,43 @@ const ProductForm = ({
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-background/95 px-6 py-5">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">
-              {mode === "edit" ? "Editar produto" : mode === "duplicate" ? "Duplicar produto" : "Novo produto"}
+              {mode === "edit"
+                ? "Editar produto"
+                : mode === "duplicate"
+                  ? "Duplicar produto"
+                  : "Novo produto"}
             </div>
-            <h2 className="mt-1 text-xl font-bold text-white">Catálogo e precificação</h2>
+            <h2 className="mt-1 text-xl font-bold text-white">
+              Catálogo e precificação
+            </h2>
           </div>
           <div className="flex gap-3">
             <Button variant="ghost" onClick={onClose} type="button">
               Cancelar
             </Button>
-            <Button variant="primary" onClick={onSubmit} disabled={saving || form.name.trim().length === 0} type="button">
+            <Button
+              variant="primary"
+              onClick={onSubmit}
+              disabled={saving || form.name.trim().length === 0}
+              type="button"
+            >
               {saving ? "Salvando..." : "Salvar produto"}
             </Button>
           </div>
         </div>
 
         <div className="space-y-5 p-6">
-          {error && <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">{error}</div>}
+          {error && (
+            <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">
+              {error}
+            </div>
+          )}
 
           <div className="grid gap-4 lg:grid-cols-3">
             <label className="space-y-2">
-              <span className="text-xs font-semibold text-slate-400">ID interno</span>
+              <span className="text-xs font-semibold text-slate-400">
+                ID interno
+              </span>
               <input
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 value={form.internalCode}
@@ -254,7 +381,9 @@ const ProductForm = ({
               />
             </label>
             <label className="space-y-2 lg:col-span-2">
-              <span className="text-xs font-semibold text-slate-400">Nome obrigatório</span>
+              <span className="text-xs font-semibold text-slate-400">
+                Nome obrigatório
+              </span>
               <input
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 value={form.name}
@@ -263,7 +392,9 @@ const ProductForm = ({
               />
             </label>
             <label className="space-y-2">
-              <span className="text-xs font-semibold text-slate-400">Categoria</span>
+              <span className="text-xs font-semibold text-slate-400">
+                Categoria
+              </span>
               <input
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 value={form.category}
@@ -281,7 +412,9 @@ const ProductForm = ({
               />
             </label>
             <label className="space-y-2">
-              <span className="text-xs font-semibold text-slate-400">Plataforma</span>
+              <span className="text-xs font-semibold text-slate-400">
+                Plataforma
+              </span>
               <input
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 value={form.platform}
@@ -293,7 +426,9 @@ const ProductForm = ({
 
           <div className="grid gap-4 lg:grid-cols-[1fr_1fr_1fr_1fr]">
             <label className="space-y-2">
-              <span className="text-xs font-semibold text-slate-400">Preço de venda</span>
+              <span className="text-xs font-semibold text-slate-400">
+                Preço de venda
+              </span>
               <input
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 type="number"
@@ -304,7 +439,9 @@ const ProductForm = ({
               />
             </label>
             <label className="space-y-2">
-              <span className="text-xs font-semibold text-slate-400">Custo unitário</span>
+              <span className="text-xs font-semibold text-slate-400">
+                Custo unitário
+              </span>
               <input
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 type="number"
@@ -315,7 +452,9 @@ const ProductForm = ({
               />
             </label>
             <label className="space-y-2">
-              <span className="text-xs font-semibold text-slate-400">Taxa GameMarket %</span>
+              <span className="text-xs font-semibold text-slate-400">
+                Taxa GameMarket %
+              </span>
               <input
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 type="number"
@@ -340,25 +479,35 @@ const ProductForm = ({
           <div className="grid gap-4 lg:grid-cols-4">
             <div className="rounded-md border border-line bg-panel p-3">
               <div className="text-xs text-slate-500">Valor líquido</div>
-              <div className="mt-1 font-bold text-cyan">{formatCurrencyBRL(financials.netValue)}</div>
+              <div className="mt-1 font-bold text-cyan">
+                {formatCurrencyBRL(financials.netValue)}
+              </div>
             </div>
             <div className="rounded-md border border-line bg-panel p-3">
               <div className="text-xs text-slate-500">Margem sobre venda</div>
-              <div className="mt-1 font-bold text-white">{formatPercent(financials.marginPercent)}</div>
+              <div className="mt-1 font-bold text-white">
+                {formatPercent(financials.marginPercent)}
+              </div>
             </div>
             <div className="rounded-md border border-line bg-panel p-3">
               <div className="text-xs text-slate-500">Preço mínimo</div>
-              <div className="mt-1 font-bold text-slate-200">{formatCurrencyBRL(financials.minimumPrice)}</div>
+              <div className="mt-1 font-bold text-slate-200">
+                {formatCurrencyBRL(financials.minimumPrice)}
+              </div>
             </div>
             <div className="rounded-md border border-line bg-panel p-3">
               <div className="text-xs text-slate-500">Taxa aplicada</div>
-              <div className="mt-1 font-bold text-slate-200">{form.feePercent || "13"}%</div>
+              <div className="mt-1 font-bold text-slate-200">
+                {form.feePercent || "13"}%
+              </div>
             </div>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-4">
             <label className="space-y-2">
-              <span className="text-xs font-semibold text-slate-400">Estoque atual</span>
+              <span className="text-xs font-semibold text-slate-400">
+                Estoque atual
+              </span>
               <input
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 type="number"
@@ -369,7 +518,9 @@ const ProductForm = ({
               />
             </label>
             <label className="space-y-2">
-              <span className="text-xs font-semibold text-slate-400">Estoque mínimo</span>
+              <span className="text-xs font-semibold text-slate-400">
+                Estoque mínimo
+              </span>
               <input
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 type="number"
@@ -380,11 +531,15 @@ const ProductForm = ({
               />
             </label>
             <label className="space-y-2">
-              <span className="text-xs font-semibold text-slate-400">Status</span>
+              <span className="text-xs font-semibold text-slate-400">
+                Status
+              </span>
               <select
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 value={form.status}
-                onChange={(event) => update("status", event.target.value as ProductStatus)}
+                onChange={(event) =>
+                  update("status", event.target.value as ProductStatus)
+                }
               >
                 {productStatusValues.map((status) => (
                   <option key={status} value={status}>
@@ -394,11 +549,15 @@ const ProductForm = ({
               </select>
             </label>
             <label className="space-y-2">
-              <span className="text-xs font-semibold text-slate-400">Entrega</span>
+              <span className="text-xs font-semibold text-slate-400">
+                Entrega
+              </span>
               <select
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 value={form.deliveryType}
-                onChange={(event) => update("deliveryType", event.target.value as DeliveryType)}
+                onChange={(event) =>
+                  update("deliveryType", event.target.value as DeliveryType)
+                }
               >
                 {deliveryTypeValues.map((deliveryType) => (
                   <option key={deliveryType} value={deliveryType}>
@@ -417,7 +576,12 @@ const ProductForm = ({
                   : "Produto abaixo do estoque mínimo configurado."}
               </span>
               {suggestsOutOfStock && (
-                <Button size="sm" variant="ghost" type="button" onClick={() => update("status", "out_of_stock")}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  type="button"
+                  onClick={() => update("status", "out_of_stock")}
+                >
                   Usar sem estoque
                 </Button>
               )}
@@ -426,7 +590,9 @@ const ProductForm = ({
 
           <div className="grid gap-4 lg:grid-cols-2">
             <label className="space-y-2">
-              <span className="text-xs font-semibold text-slate-400">Fornecedor</span>
+              <span className="text-xs font-semibold text-slate-400">
+                Fornecedor
+              </span>
               <input
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 value={form.supplierId}
@@ -435,7 +601,9 @@ const ProductForm = ({
               />
             </label>
             <label className="space-y-2">
-              <span className="text-xs font-semibold text-slate-400">Link do anúncio</span>
+              <span className="text-xs font-semibold text-slate-400">
+                Link do anúncio
+              </span>
               <input
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 value={form.listingUrl}
@@ -446,7 +614,9 @@ const ProductForm = ({
           </div>
 
           <label className="block space-y-2">
-            <span className="text-xs font-semibold text-slate-400">Observações</span>
+            <span className="text-xs font-semibold text-slate-400">
+              Observações
+            </span>
             <textarea
               className="focus-ring min-h-28 w-full rounded-md border border-line bg-panel px-3 py-2 text-sm text-white"
               value={form.notes}
@@ -473,16 +643,20 @@ export const ProductsPage = (): JSX.Element => {
       active: 0,
       outOfStock: 0,
       lowStock: 0,
-      averageEstimatedProfit: 0
+      averageEstimatedProfit: 0,
     },
-    categories: []
+    categories: [],
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<ProductFormState | null>(null);
-  const [formMode, setFormMode] = useState<"create" | "edit" | "duplicate">("create");
+  const [formMode, setFormMode] = useState<"create" | "edit" | "duplicate">(
+    "create",
+  );
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [variantsProduct, setVariantsProduct] = useState<ProductRecord | null>(null);
+  const [variantsProduct, setVariantsProduct] = useState<ProductRecord | null>(
+    null,
+  );
   const [saving, setSaving] = useState(false);
 
   const loadProducts = useCallback(async (): Promise<void> => {
@@ -492,7 +666,11 @@ export const ProductsPage = (): JSX.Element => {
     try {
       setData(await api.products.list(filters));
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Falha ao carregar produtos.");
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Falha ao carregar produtos.",
+      );
     } finally {
       setLoading(false);
     }
@@ -524,7 +702,7 @@ export const ProductsPage = (): JSX.Element => {
     setForm({
       ...productToForm(product),
       internalCode: `${product.internalCode}-COPY`,
-      name: `${product.name} cópia`
+      name: `${product.name} cópia`,
     });
   };
 
@@ -553,14 +731,22 @@ export const ProductsPage = (): JSX.Element => {
       closeForm();
       await loadProducts();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Falha ao salvar produto.");
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Falha ao salvar produto.",
+      );
     } finally {
       setSaving(false);
     }
   };
 
   const deleteProduct = async (product: ProductRecord): Promise<void> => {
-    if (!window.confirm(`Excluir o produto "${product.name}"? Itens de estoque vinculados ficarão sem produto.`)) {
+    if (
+      !window.confirm(
+        `Excluir o produto "${product.name}"? Itens de estoque vinculados ficarão sem produto.`,
+      )
+    ) {
       return;
     }
 
@@ -581,12 +767,22 @@ export const ProductsPage = (): JSX.Element => {
   return (
     <div className="space-y-6">
       <div className="grid gap-4 xl:grid-cols-5">
-        <Metric label="Total" value={String(data.summary.total)} helper="Produtos cadastrados" tone="cyan" />
-        <Metric label="Ativos" value={String(data.summary.active)} helper="Visíveis para operação" tone="success" />
+        <Metric
+          label="Total"
+          value={String(data.summary.total)}
+          helper="Produtos pai cadastrados"
+          tone="cyan"
+        />
+        <Metric
+          label="Ativos"
+          value={String(data.summary.active)}
+          helper="Visíveis para operação"
+          tone="success"
+        />
         <Metric
           label="Sem estoque"
           value={String(data.summary.outOfStock)}
-          helper="Produtos sem variação ou variações"
+          helper="Manual/automático sem estoque"
           tone="danger"
         />
         <Metric
@@ -598,7 +794,7 @@ export const ProductsPage = (): JSX.Element => {
         <Metric
           label="Lucro médio"
           value={formatCurrencyBRL(data.summary.averageEstimatedProfit)}
-          helper="Estimativa por produto"
+          helper="Produto sem variação ou variações"
           tone="purple"
         />
       </div>
@@ -607,14 +803,24 @@ export const ProductsPage = (): JSX.Element => {
         <CardHeader className="items-start">
           <div>
             <CardTitle>Produtos</CardTitle>
-            <div className="mt-1 text-sm text-slate-400">CRUD local com taxa GameMarket de 13% recalculada no main process.</div>
+            <div className="mt-1 text-sm text-slate-400">
+              CRUD local com taxa GameMarket de 13% recalculada no main process.
+            </div>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-3">
-            <Button variant="secondary" onClick={() => void exportProducts()} disabled={!canExportCsv}>
+            <Button
+              variant="secondary"
+              onClick={() => void exportProducts()}
+              disabled={!canExportCsv}
+            >
               <Download size={16} />
               Exportar CSV
             </Button>
-            <Button variant="primary" onClick={openCreate} disabled={!canEditProducts}>
+            <Button
+              variant="primary"
+              onClick={openCreate}
+              disabled={!canEditProducts}
+            >
               <Plus size={16} />
               Novo produto
             </Button>
@@ -623,18 +829,28 @@ export const ProductsPage = (): JSX.Element => {
         <CardContent className="space-y-4">
           <div className="grid gap-3 xl:grid-cols-[1.4fr_0.8fr_0.8fr_0.8fr_0.8fr_0.6fr]">
             <label className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+                size={16}
+              />
               <input
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panelSoft pl-9 pr-3 text-sm text-white"
                 value={filters.search ?? ""}
-                onChange={(event) => setFilters({ ...filters, search: event.target.value || null })}
+                onChange={(event) =>
+                  setFilters({ ...filters, search: event.target.value || null })
+                }
                 placeholder="Buscar nome, jogo, categoria ou status"
               />
             </label>
             <select
               className="focus-ring h-10 rounded-md border border-line bg-panelSoft px-3 text-sm text-white"
               value={filters.status}
-              onChange={(event) => setFilters({ ...filters, status: event.target.value as ProductListInput["status"] })}
+              onChange={(event) =>
+                setFilters({
+                  ...filters,
+                  status: event.target.value as ProductListInput["status"],
+                })
+              }
             >
               <option value="all">Todos os status</option>
               {productStatusValues.map((status) => (
@@ -646,7 +862,9 @@ export const ProductsPage = (): JSX.Element => {
             <select
               className="focus-ring h-10 rounded-md border border-line bg-panelSoft px-3 text-sm text-white"
               value={filters.category ?? ""}
-              onChange={(event) => setFilters({ ...filters, category: event.target.value || null })}
+              onChange={(event) =>
+                setFilters({ ...filters, category: event.target.value || null })
+              }
             >
               <option value="">Todas categorias/jogos</option>
               {data.categories.map((category) => (
@@ -658,7 +876,12 @@ export const ProductsPage = (): JSX.Element => {
             <select
               className="focus-ring h-10 rounded-md border border-line bg-panelSoft px-3 text-sm text-white"
               value={filters.stock}
-              onChange={(event) => setFilters({ ...filters, stock: event.target.value as ProductListInput["stock"] })}
+              onChange={(event) =>
+                setFilters({
+                  ...filters,
+                  stock: event.target.value as ProductListInput["stock"],
+                })
+              }
             >
               <option value="all">Todo estoque</option>
               <option value="low">Estoque baixo</option>
@@ -667,7 +890,12 @@ export const ProductsPage = (): JSX.Element => {
             <select
               className="focus-ring h-10 rounded-md border border-line bg-panelSoft px-3 text-sm text-white"
               value={filters.sortBy}
-              onChange={(event) => setFilters({ ...filters, sortBy: event.target.value as ProductListInput["sortBy"] })}
+              onChange={(event) =>
+                setFilters({
+                  ...filters,
+                  sortBy: event.target.value as ProductListInput["sortBy"],
+                })
+              }
             >
               <option value="name">Ordenar por nome</option>
               <option value="price">Ordenar por preço</option>
@@ -679,7 +907,11 @@ export const ProductsPage = (): JSX.Element => {
               className="focus-ring h-10 rounded-md border border-line bg-panelSoft px-3 text-sm text-white"
               value={filters.sortDirection}
               onChange={(event) =>
-                setFilters({ ...filters, sortDirection: event.target.value as ProductListInput["sortDirection"] })
+                setFilters({
+                  ...filters,
+                  sortDirection: event.target
+                    .value as ProductListInput["sortDirection"],
+                })
               }
             >
               <option value="asc">Asc</option>
@@ -687,7 +919,11 @@ export const ProductsPage = (): JSX.Element => {
             </select>
           </div>
 
-          {error && <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">{error}</div>}
+          {error && (
+            <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">
+              {error}
+            </div>
+          )}
 
           <Table>
             <thead>
@@ -706,54 +942,86 @@ export const ProductsPage = (): JSX.Element => {
             <tbody>
               {data.items.map((product) => {
                 const hasVariants = (product.variantCount ?? 0) > 0;
-                const tracksProductStock = product.deliveryType === "manual" || product.deliveryType === "automatic";
+                const tracksProductStock =
+                  product.deliveryType === "manual" ||
+                  product.deliveryType === "automatic";
                 const lowStock =
                   !hasVariants &&
                   tracksProductStock &&
                   product.stockCurrent > 0 &&
                   product.stockCurrent <= product.stockMin;
-                const outOfStock = !hasVariants && tracksProductStock && product.stockCurrent <= 0;
+                const outOfStock =
+                  !hasVariants &&
+                  tracksProductStock &&
+                  product.stockCurrent <= 0;
                 return (
                   <tr key={product.id} className="hover:bg-slate-900/45">
-                    <Td className="font-mono text-xs text-slate-400">{product.internalCode}</Td>
-                    <Td>
-                      <div className="font-semibold text-white">{product.name}</div>
-                      <div className="mt-1 max-w-[260px] truncate text-xs text-slate-500">{product.notes ?? product.platform ?? "-"}</div>
+                    <Td className="font-mono text-xs text-slate-400">
+                      {product.internalCode}
                     </Td>
                     <Td>
-                      <div className="text-slate-200">{product.game ?? product.category}</div>
-                      <div className="mt-1 text-xs text-slate-500">{product.category}</div>
+                      <div className="font-semibold text-white">
+                        {product.name}
+                      </div>
+                      <div className="mt-1 max-w-[260px] truncate text-xs text-slate-500">
+                        {product.notes ?? product.platform ?? "-"}
+                      </div>
+                    </Td>
+                    <Td>
+                      <div className="text-slate-200">
+                        {product.game ?? product.category}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {product.category}
+                      </div>
                     </Td>
                     <Td>{formatCurrencyBRL(product.salePrice)}</Td>
-                    <Td className="font-semibold text-cyan">{formatCurrencyBRL(product.netValue)}</Td>
+                    <Td className="font-semibold text-cyan">
+                      {formatCurrencyBRL(product.netValue)}
+                    </Td>
                     <Td>
-                      <div className={product.estimatedProfit >= 0 ? "font-semibold text-emerald-300" : "font-semibold text-red-300"}>
-                        {formatCurrencyBRL(product.estimatedProfit)}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">{formatPercent(product.marginPercent)}</div>
+                      <VariantProfitCell product={product} />
                     </Td>
                     <Td>
                       {hasVariants ? (
                         <div className="flex flex-col gap-1">
                           <Badge tone="cyan">Por variação</Badge>
-                          <span className="text-xs text-slate-500">{product.variantCount} variação(ões)</span>
+                          <span className="text-xs text-slate-500">
+                            {product.variantCount} variação(ões)
+                          </span>
                         </div>
                       ) : product.deliveryType === "service" ? (
                         <Badge tone="cyan">Serviço</Badge>
                       ) : product.deliveryType === "on_demand" ? (
                         <Badge tone="purple">Sob demanda</Badge>
                       ) : (
-                        <span className={outOfStock ? "font-semibold text-red-300" : lowStock ? "font-semibold text-amber-300" : "text-slate-200"}>
+                        <span
+                          className={
+                            outOfStock
+                              ? "font-semibold text-red-300"
+                              : lowStock
+                                ? "font-semibold text-amber-300"
+                                : "text-slate-200"
+                          }
+                        >
                           {product.stockCurrent}/{product.stockMin}
                         </span>
                       )}
                     </Td>
                     <Td>
-                      <Badge tone={productStatusTone[product.status]}>{productStatusLabels[product.status]}</Badge>
+                      <Badge tone={productStatusTone[product.status]}>
+                        {productStatusLabels[product.status]}
+                      </Badge>
                     </Td>
                     <Td>
                       <div className="flex items-center gap-1">
-                        <Button size="icon" variant="ghost" title="Editar" disabled={!canEditProducts} onClick={() => openEdit(product)}>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Editar"
+                          disabled={!canEditProducts}
+                          onClick={() => openEdit(product)}
+                        >
                           <Edit3 size={15} />
                         </Button>
                         <Button
@@ -764,22 +1032,49 @@ export const ProductsPage = (): JSX.Element => {
                         >
                           <Layers3 size={15} />
                         </Button>
-                        <Button size="icon" variant="ghost" title="Duplicar" disabled={!canEditProducts} onClick={() => openDuplicate(product)}>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Duplicar"
+                          disabled={!canEditProducts}
+                          onClick={() => openDuplicate(product)}
+                        >
                           <Copy size={15} />
                         </Button>
                         {product.listingUrl && (
-                          <Button size="icon" variant="ghost" title="Abrir anúncio" asChild>
-                            <a href={product.listingUrl} target="_blank" rel="noreferrer">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            title="Abrir anúncio"
+                            asChild
+                          >
+                            <a
+                              href={product.listingUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
                               <ExternalLink size={15} />
                             </a>
                           </Button>
                         )}
                         {product.status !== "archived" && (
-                          <Button size="icon" variant="ghost" title="Arquivar" disabled={!canEditProducts} onClick={() => void archiveProduct(product)}>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            title="Arquivar"
+                            disabled={!canEditProducts}
+                            onClick={() => void archiveProduct(product)}
+                          >
                             <Archive size={15} />
                           </Button>
                         )}
-                        <Button size="icon" variant="ghost" title="Excluir" disabled={!canEditProducts} onClick={() => void deleteProduct(product)}>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Excluir"
+                          disabled={!canEditProducts}
+                          onClick={() => void deleteProduct(product)}
+                        >
                           <Trash2 size={15} />
                         </Button>
                       </div>
@@ -793,8 +1088,12 @@ export const ProductsPage = (): JSX.Element => {
           {!loading && data.items.length === 0 && (
             <div className="grid place-items-center rounded-lg border border-dashed border-line bg-panelSoft py-12 text-center">
               <PackageX className="text-slate-600" size={34} />
-              <div className="mt-3 font-semibold text-white">Nenhum produto encontrado</div>
-              <div className="mt-1 text-sm text-slate-400">Crie um produto ou limpe os filtros atuais.</div>
+              <div className="mt-3 font-semibold text-white">
+                Nenhum produto encontrado
+              </div>
+              <div className="mt-1 text-sm text-slate-400">
+                Crie um produto ou limpe os filtros atuais.
+              </div>
             </div>
           )}
         </CardContent>
