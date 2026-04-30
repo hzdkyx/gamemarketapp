@@ -6,6 +6,7 @@ import {
   BellRing,
   CircleDollarSign,
   PackageX,
+  RefreshCw,
   ReceiptText,
   TrendingUp,
   TriangleAlert
@@ -40,6 +41,14 @@ const emptySummary: DashboardSummary = {
   problemOrMediationOrders: 0,
   lowStockProducts: 0,
   outOfStockProducts: 0,
+  unreadNewSales: 0,
+  deliveredAwaitingRelease: 0,
+  gameMarketApiConfigured: false,
+  gameMarketPollingActive: false,
+  gameMarketLastCheckedAt: null,
+  gameMarketNextRunAt: null,
+  gameMarketLastPollingStatus: "not_configured",
+  gameMarketLastPollingMessage: null,
   latestEvents: [],
   salesByDay: [],
   profitByCategory: [],
@@ -114,6 +123,7 @@ export const DashboardPage = (): JSX.Element => {
   const api = useMemo(() => getDesktopApi(), []);
   const [summary, setSummary] = useState<DashboardSummary>(emptySummary);
   const [loading, setLoading] = useState(true);
+  const [pollingBusy, setPollingBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadSummary = useCallback(async (): Promise<void> => {
@@ -137,6 +147,20 @@ export const DashboardPage = (): JSX.Element => {
     return () => window.clearTimeout(timeoutId);
   }, [loadSummary]);
 
+  const checkGameMarketNow = async (): Promise<void> => {
+    setPollingBusy(true);
+    setError(null);
+
+    try {
+      await api.gamemarket.pollNow();
+      await loadSummary();
+    } catch (pollError) {
+      setError(pollError instanceof Error ? pollError.message : "Falha ao verificar GameMarket.");
+    } finally {
+      setPollingBusy(false);
+    }
+  };
+
   const hasSalesChart = summary.salesByDay.some((day) => day.orders > 0 || day.gross > 0 || day.profit !== 0);
   const hasCategoryChart = summary.profitByCategory.length > 0;
   const hasStatusChart = summary.statusBreakdown.length > 0;
@@ -144,6 +168,68 @@ export const DashboardPage = (): JSX.Element => {
   return (
     <div className="space-y-6">
       {error && <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">{error}</div>}
+
+      {(!summary.gameMarketApiConfigured || !summary.gameMarketPollingActive) && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 p-4">
+          <div>
+            <div className="text-sm font-semibold text-amber-200">Atenção GameMarket</div>
+            <div className="mt-1 text-sm text-slate-300">
+              {!summary.gameMarketApiConfigured
+                ? "API GameMarket sem configuração pronta para leitura."
+                : "Polling automático de backup está desativado."}
+            </div>
+          </div>
+          <Button variant="secondary" disabled={pollingBusy} onClick={() => void checkGameMarketNow()}>
+            <RefreshCw size={16} />
+            {pollingBusy ? "Verificando..." : "Verificar agora"}
+          </Button>
+        </div>
+      )}
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <MetricCard
+          label="Novas vendas não vistas"
+          value={String(summary.unreadNewSales)}
+          helper="Notificações locais pendentes"
+          icon={<BellRing size={18} />}
+          tone="cyan"
+        />
+        <MetricCard
+          label="Entregues aguardando liberação"
+          value={String(summary.deliveredAwaitingRelease)}
+          helper="Delivered não concluído automaticamente"
+          icon={<PackageX size={18} />}
+          tone="warning"
+        />
+        <Card className="min-h-[132px]">
+          <CardContent className="flex h-full flex-col justify-between">
+            <div className="flex items-start justify-between gap-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                Última verificação GameMarket
+              </div>
+              <Badge tone={summary.gameMarketPollingActive ? "success" : "warning"}>
+                {summary.gameMarketPollingActive ? "ativo" : "inativo"}
+              </Badge>
+            </div>
+            <div>
+              <div className="mt-5 text-sm font-semibold text-white">
+                {summary.gameMarketLastCheckedAt
+                  ? new Date(summary.gameMarketLastCheckedAt).toLocaleString("pt-BR")
+                  : "Sem verificação"}
+              </div>
+              <div className="mt-1 text-xs font-medium text-slate-400">
+                {summary.gameMarketNextRunAt
+                  ? `Próxima: ${new Date(summary.gameMarketNextRunAt).toLocaleString("pt-BR")}`
+                  : summary.gameMarketLastPollingMessage ?? summary.gameMarketLastPollingStatus}
+              </div>
+              <Button className="mt-3" size="sm" variant="secondary" disabled={pollingBusy} onClick={() => void checkGameMarketNow()}>
+                <RefreshCw size={14} />
+                {pollingBusy ? "Verificando..." : "Verificar agora"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       <div className="grid gap-4 xl:grid-cols-4 2xl:grid-cols-9">
         <MetricCard

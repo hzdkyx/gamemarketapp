@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   acked: [] as string[],
   actionRequiredOrders: [] as string[],
   completedOrders: [] as string[],
+  notifications: [] as Array<{ type: string; dedupeKey?: string | null; playSound?: boolean }>,
+  gameMarketSyncCalls: 0,
   summary: null as unknown
 }));
 
@@ -75,6 +77,53 @@ vi.mock("../../services/event-service", () => ({
         ...input
       };
     }
+  }
+}));
+
+vi.mock("../../services/local-notification-service", () => ({
+  localNotificationService: {
+    notify: vi.fn((input: { type: string; dedupeKey?: string | null; playSound?: boolean }) => {
+      state.notifications.push(input);
+      return {
+        created: true,
+        nativeShown: false,
+        notification: {
+          id: `notification-${state.notifications.length}`,
+          type: input.type,
+          severity: "info",
+          title: "Teste",
+          message: "",
+          orderId: null,
+          externalOrderId: null,
+          eventId: null,
+          dedupeKey: input.dedupeKey ?? null,
+          readAt: null,
+          createdAt: new Date(0).toISOString(),
+          metadataJson: null
+        }
+      };
+    })
+  }
+}));
+
+vi.mock("../gamemarket/gamemarket-sync-service", () => ({
+  gameMarketSyncService: {
+    syncNow: vi.fn(async () => {
+      state.gameMarketSyncCalls += 1;
+      return {
+        startedAt: new Date(0).toISOString(),
+        finishedAt: new Date(0).toISOString(),
+        durationMs: 0,
+        status: "synced",
+        productsFound: 0,
+        ordersFound: 0,
+        productsNew: 0,
+        productsUpdated: 0,
+        ordersNew: 0,
+        ordersUpdated: 0,
+        errors: []
+      };
+    })
   }
 }));
 
@@ -148,6 +197,8 @@ beforeEach(() => {
   state.acked.length = 0;
   state.actionRequiredOrders.length = 0;
   state.completedOrders.length = 0;
+  state.notifications.length = 0;
+  state.gameMarketSyncCalls = 0;
   state.summary = null;
 });
 
@@ -170,6 +221,12 @@ describe("webhookServerSyncService", () => {
     expect(state.localEvents.some((event) => event.type === "order.payment_confirmed")).toBe(true);
     expect(state.actionRequiredOrders).toContain("local-order-1");
     expect(state.acked).toContain("remote-1");
+    expect(state.notifications[0]).toMatchObject({
+      type: "new_sale",
+      dedupeKey: "sale:new:gm-order-1",
+      playSound: true
+    });
+    expect(state.notifications).toHaveLength(1);
   });
 
   it.each(["gamemarket.order.completed", "gamemarket.financial.funds_released"] as const)(

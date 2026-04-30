@@ -1,5 +1,8 @@
 import type { DashboardSummary, OrderStatus } from "../../shared/contracts";
+import { gameMarketPollingService } from "../integrations/gamemarket/gamemarket-polling-service";
+import { gameMarketSettingsService } from "../integrations/gamemarket/gamemarket-settings-service";
 import { getSqliteDatabase } from "../database/database";
+import { appNotificationRepository } from "../repositories/app-notification-repository";
 import { eventRepository } from "../repositories/event-repository";
 import { centsToMoney } from "./money";
 
@@ -87,6 +90,17 @@ export const dashboardService = {
       )
       .get() as { low_stock: number | null; out_of_stock: number | null };
 
+    const deliveredRow = db
+      .prepare(
+        `
+          SELECT COUNT(*) AS delivered_awaiting_release
+          FROM orders
+          WHERE status = 'delivered'
+            AND completed_at IS NULL
+        `
+      )
+      .get() as { delivered_awaiting_release: number | null };
+
     const dayStart = new Date();
     dayStart.setUTCDate(dayStart.getUTCDate() - 6);
     const salesRows = db
@@ -145,6 +159,9 @@ export const dashboardService = {
         `
       )
       .all() as Array<{ status: OrderStatus; count: number }>;
+    const gameMarketSettings = gameMarketSettingsService.getSettings();
+    const pollingStatus = gameMarketPollingService.getStatus();
+    const notificationSummary = appNotificationRepository.getSummary();
 
     return {
       salesToday: monthRow.sales_today ?? 0,
@@ -156,6 +173,15 @@ export const dashboardService = {
       problemOrMediationOrders: monthRow.problem_or_mediation ?? 0,
       lowStockProducts: stockRow.low_stock ?? 0,
       outOfStockProducts: stockRow.out_of_stock ?? 0,
+      unreadNewSales: notificationSummary.unreadNewSales,
+      deliveredAwaitingRelease: deliveredRow.delivered_awaiting_release ?? 0,
+      gameMarketApiConfigured:
+        gameMarketSettings.hasToken && gameMarketSettings.documentation.status === "available",
+      gameMarketPollingActive: pollingStatus.active,
+      gameMarketLastCheckedAt: pollingStatus.finishedAt ?? gameMarketSettings.lastSyncAt,
+      gameMarketNextRunAt: pollingStatus.nextRunAt,
+      gameMarketLastPollingStatus: pollingStatus.status,
+      gameMarketLastPollingMessage: pollingStatus.lastResult,
       latestEvents: eventRepository.listLatest(8),
       salesByDay,
       profitByCategory: profitByCategory.map((row) => ({

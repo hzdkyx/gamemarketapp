@@ -59,7 +59,7 @@
     "vitest": "^4.0.8"
   },
   "build": {
-    "appId": "br.com.hzdk.gamemarketmanager",
+    "appId": "com.hzdk.gamemarket.manager",
     "productName": "HzdKyx GameMarket Manager",
     "directories": {
       "output": "release"

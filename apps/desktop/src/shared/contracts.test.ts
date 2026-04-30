@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   eventCreateManualInputSchema,
+  appNotificationListInputSchema,
   authSetupAdminInputSchema,
   gamemarketRevealTokenInputSchema,
   gamemarketSettingsUpdateInputSchema,
@@ -13,6 +14,7 @@ import {
   productListInputSchema,
   productVariantCreateInputSchema,
   productVariantUpdateInputSchema,
+  notificationSettingsSchema,
   userCreateInputSchema,
   webhookServerRevealTokenInputSchema,
   webhookServerSettingsUpdateInputSchema,
@@ -266,6 +268,27 @@ describe("Webhook Server contracts", () => {
     expect(() =>
       webhookServerRevealTokenInputSchema.parse({ confirm: false }),
     ).toThrow();
+  });
+});
+
+describe("local notification contracts", () => {
+  it("defaults local notification and polling settings for phase 6", () => {
+    const parsed = notificationSettingsSchema.parse({
+      enabledEventTypes: {},
+    });
+
+    expect(parsed.localNotificationsEnabled).toBe(true);
+    expect(parsed.soundEnabled).toBe(true);
+    expect(parsed.soundVolume).toBe(0.7);
+    expect(parsed.automaticPollingEnabled).toBe(true);
+    expect(parsed.pollingIntervalSeconds).toBe(60);
+    expect(parsed.notifyNewSale).toBe(true);
+    expect(parsed.notifyOrderCompleted).toBe(true);
+  });
+
+  it("validates app notification list bounds", () => {
+    expect(appNotificationListInputSchema.parse({}).limit).toBe(20);
+    expect(() => appNotificationListInputSchema.parse({ limit: 101 })).toThrow();
   });
 });
 

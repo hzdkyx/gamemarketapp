@@ -58,6 +58,12 @@ const completedExternalStatuses = new Set([
   "funds_released",
   "fundos_liberados"
 ]);
+const deliveredExternalStatuses = new Set([
+  "delivered",
+  "entregue",
+  "pedido_entregue",
+  "order_delivered"
+]);
 
 const normalizeExternalStatus = (status: string): string =>
   status
@@ -76,6 +82,11 @@ export const isGameMarketCompletedStatus = (externalStatus: string | null | unde
   return completedExternalStatuses.has(normalized);
 };
 
+export const isGameMarketDeliveredStatus = (externalStatus: string | null | undefined): boolean => {
+  const normalized = normalizeExternalStatus(externalStatus ?? "");
+  return deliveredExternalStatuses.has(normalized);
+};
+
 export const mapGameMarketOrderStatus = (externalStatus: string): GameMarketOrderStatusMapping => {
   if (isGameMarketProcessingStatus(externalStatus)) {
     return {
@@ -91,6 +102,13 @@ export const mapGameMarketOrderStatus = (externalStatus: string): GameMarketOrde
     };
   }
 
+  if (isGameMarketDeliveredStatus(externalStatus)) {
+    return {
+      status: "delivered",
+      actionRequired: false
+    };
+  }
+
   return {
     status: "draft",
     actionRequired: false
@@ -102,6 +120,8 @@ export const shouldApplyGameMarketOrderStatus = (
   mappedStatus: OrderStatus
 ): boolean =>
   (mappedStatus === "payment_confirmed" && initialSyncMutableOrderStatuses.has(currentStatus)) ||
+  (mappedStatus === "delivered" &&
+    ["draft", "pending_payment", "payment_confirmed", "awaiting_delivery"].includes(currentStatus)) ||
   (mappedStatus === "completed" && externallyCompletableOrderStatuses.has(currentStatus));
 
 export const getGameMarketProductExternalId = (product: GameMarketProductListItem): string =>

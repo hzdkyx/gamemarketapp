@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { GameMarketSyncSummary, OrderStatus } from "../../../shared/contracts";
 import { getSqliteDatabase } from "../../database/database";
 import { eventService } from "../../services/event-service";
+import { localNotificationService } from "../../services/local-notification-service";
 import { GameMarketClient } from "./gamemarket-client";
 import type { GameMarketOrderListItem, GameMarketProductListItem } from "./gamemarket-contracts";
 import {
@@ -53,6 +54,16 @@ interface LocalProductForOrder {
   game: string | null;
   unit_cost_cents: number;
   fee_percent: number;
+  active_variant_count: number;
+}
+
+interface SyncOptions {
+  trigger?: "manual" | "polling" | "webhook";
+}
+
+interface OrderSyncResult {
+  result: "imported" | "updated" | "unchanged";
+  orderId: string;
 }
 
 const nowIso = (): string => new Date().toISOString();
@@ -67,6 +78,12 @@ const makeFinancials = (salePriceCents: number, unitCostCents: number, feePercen
     marginPercent: salePriceCents === 0 ? 0 : profitCents / salePriceCents
   };
 };
+
+const formatCentsBRL = (value: number): string =>
+  new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  }).format(value / 100);
 
 const makeUniqueCode = (prefix: string, externalId: string, table: "products" | "orders"): string => {
   const db = getSqliteDatabase();
@@ -167,14 +184,90 @@ const findLocalProductForOrder = (externalProductId: string): LocalProductForOrd
   const row = getSqliteDatabase()
     .prepare(
       `
-        SELECT id, name, category, game, unit_cost_cents, fee_percent
+        SELECT
+          products.id,
+          products.name,
+          products.category,
+          products.game,
+          products.unit_cost_cents,
+          products.fee_percent,
+          (
+            SELECT COUNT(*)
+            FROM product_variants
+            WHERE product_variants.product_id = products.id
+              AND product_variants.status != 'archived'
+          ) AS active_variant_count
         FROM products
-        WHERE external_marketplace = 'gamemarket' AND external_product_id = ?
+        WHERE products.external_marketplace = 'gamemarket'
+          AND products.external_product_id = ?
       `
     )
     .get(externalProductId) as LocalProductForOrder | undefined;
 
   return row ?? null;
+};
+
+const createNewSaleNotification = (input: {
+  orderId: string;
+  externalOrderId: string;
+  externalStatus: string;
+  productName: string;
+  variantLinked: boolean;
+  salePriceCents: number;
+  profitCents: number;
+}): void => {
+  const variantName = input.variantLinked ? "Variação vinculada" : "Variação não vinculada";
+
+  localNotificationService.notify({
+    type: "new_sale",
+    severity: input.variantLinked ? "success" : "warning",
+    title: "🚨 Nova venda na GameMarket",
+    message: [
+      `Pedido: ${input.externalOrderId}`,
+      `Produto: ${input.productName}`,
+      `Variação: ${variantName}`,
+      `Valor: ${formatCentsBRL(input.salePriceCents)}`,
+      `Lucro previsto: ${formatCentsBRL(input.profitCents)}`
+    ].join("\n"),
+    orderId: input.orderId,
+    externalOrderId: input.externalOrderId,
+    dedupeKey: `sale:new:${input.externalOrderId}`,
+    metadata: {
+      externalOrderId: input.externalOrderId,
+      externalStatus: input.externalStatus,
+      variantLinked: input.variantLinked,
+      actionRequired: !input.variantLinked
+    },
+    playSound: true
+  });
+};
+
+const createOrderStatusNotification = (input: {
+  type: "order_delivered" | "order_completed";
+  orderId: string;
+  externalOrderId: string;
+  externalStatus: string;
+}): void => {
+  const completed = input.type === "order_completed";
+
+  localNotificationService.notify({
+    type: input.type,
+    severity: "success",
+    title: completed ? "Pedido concluído/liberado na GameMarket" : "Pedido entregue na GameMarket",
+    message: completed
+      ? `Pedido ${input.externalOrderId} foi concluído ou liberado pela GameMarket.`
+      : `Pedido ${input.externalOrderId} foi entregue e aguarda liberação.`,
+    orderId: input.orderId,
+    externalOrderId: input.externalOrderId,
+    dedupeKey: completed
+      ? `order:completed:${input.externalOrderId}`
+      : `order:delivered:${input.orderId}`,
+    metadata: {
+      externalOrderId: input.externalOrderId,
+      externalStatus: input.externalStatus
+    },
+    playSound: false
+  });
 };
 
 const upsertProduct = (
@@ -346,7 +439,7 @@ const syncExistingOrder = (input: {
   hash: string;
   actorUserId: string | null;
   syncedAt: string;
-}): "updated" | "unchanged" => {
+}): OrderSyncResult => {
   const { existing, order, hash, actorUserId, syncedAt } = input;
   const mappedStatus = mapGameMarketOrderStatus(order.status);
   const shouldApplyStatus = shouldApplyGameMarketOrderStatus(existing.status, mappedStatus.status);
@@ -357,7 +450,7 @@ const syncExistingOrder = (input: {
 
   if (existing.external_payload_hash === hash && !shouldApplyStatus && !shouldCorrectReleaseState) {
     getSqliteDatabase().prepare("UPDATE orders SET last_synced_at = ? WHERE id = ?").run(syncedAt, existing.id);
-    return "unchanged";
+    return { result: "unchanged", orderId: existing.id };
   }
 
   if (shouldCorrectReleaseState) {
@@ -406,7 +499,7 @@ const syncExistingOrder = (input: {
       }
     });
 
-    return "updated";
+    return { result: "updated", orderId: existing.id };
   }
 
   if (shouldApplyStatus) {
@@ -421,6 +514,10 @@ const syncExistingOrder = (input: {
             status = @status,
             action_required = @actionRequired,
             confirmed_at = COALESCE(confirmed_at, @confirmedAt),
+            delivered_at = CASE
+              WHEN @status = 'delivered' THEN COALESCE(delivered_at, @deliveredAt)
+              ELSE delivered_at
+            END,
             completed_at = CASE
               WHEN @status = 'completed' THEN COALESCE(completed_at, @completedAt)
               ELSE completed_at
@@ -438,20 +535,44 @@ const syncExistingOrder = (input: {
         status: mappedStatus.status,
         actionRequired: mappedStatus.actionRequired ? 1 : 0,
         confirmedAt: syncedAt,
+        deliveredAt: syncedAt,
         completedAt: syncedAt,
         updatedByUserId: actorUserId,
         updatedAt: syncedAt
       });
 
     const isCompleted = mappedStatus.status === "completed";
+    const isDelivered = mappedStatus.status === "delivered";
+    if (mappedStatus.status === "delivered") {
+      createOrderStatusNotification({
+        type: "order_delivered",
+        orderId: existing.id,
+        externalOrderId: getGameMarketOrderExternalId(order),
+        externalStatus: order.status
+      });
+    }
+    if (isCompleted) {
+      createOrderStatusNotification({
+        type: "order_completed",
+        orderId: existing.id,
+        externalOrderId: getGameMarketOrderExternalId(order),
+        externalStatus: order.status
+      });
+    }
     eventService.createInternal({
       source: "gamemarket_api",
-      type: isCompleted ? "order.completed" : "order.payment_confirmed",
+      type: isCompleted ? "order.completed" : isDelivered ? "order.delivered" : "order.payment_confirmed",
       severity: "success",
-      title: isCompleted ? "Pedido GameMarket concluído" : "Pedido GameMarket confirmado",
+      title: isCompleted
+        ? "Pedido GameMarket concluído"
+        : isDelivered
+          ? "Pedido GameMarket entregue"
+          : "Pedido GameMarket confirmado",
       message: isCompleted
         ? `Pedido externo ${getGameMarketOrderExternalId(order)} foi concluído/liberado pela GameMarket.`
-        : `Pedido externo ${getGameMarketOrderExternalId(order)} entrou como processamento confirmado.`,
+        : isDelivered
+          ? `Pedido externo ${getGameMarketOrderExternalId(order)} foi entregue e aguarda liberação.`
+          : `Pedido externo ${getGameMarketOrderExternalId(order)} entrou como processamento confirmado.`,
       orderId: existing.id,
       actorUserId,
       rawPayload: {
@@ -462,7 +583,7 @@ const syncExistingOrder = (input: {
       }
     });
 
-    return "updated";
+    return { result: "updated", orderId: existing.id };
   }
 
   getSqliteDatabase()
@@ -487,14 +608,14 @@ const syncExistingOrder = (input: {
       updatedAt: syncedAt
     });
 
-  return "updated";
+  return { result: "updated", orderId: existing.id };
 };
 
 const upsertOrder = (
   order: GameMarketOrderListItem,
   actorUserId: string | null,
   syncedAt: string
-): "imported" | "updated" | "unchanged" => {
+): OrderSyncResult => {
   const db = getSqliteDatabase();
   const externalId = getGameMarketOrderExternalId(order);
   const hash = hashExternalPayload(order);
@@ -503,7 +624,7 @@ const upsertOrder = (
   if (existing) {
     const result = syncExistingOrder({ existing, order, hash, actorUserId, syncedAt });
 
-    if (result === "updated") {
+    if (result.result === "updated") {
       eventService.createInternal({
         source: "gamemarket_api",
         type: "integration.gamemarket.order_updated",
@@ -533,6 +654,8 @@ const upsertOrder = (
   const orderCode = makeUniqueCode("GMK-ORD", externalId, "orders");
   const createdAt = order.createdAt || syncedAt;
   const mappedStatus = mapGameMarketOrderStatus(order.status);
+  const variantLinked = product.active_variant_count === 0;
+  const actionRequired = mappedStatus.actionRequired || !variantLinked;
 
   db.prepare(
     `
@@ -603,7 +726,7 @@ const upsertOrder = (
         @createdAt,
         @updatedAt,
         @confirmedAt,
-        NULL,
+        @deliveredAt,
         @completedAt,
         NULL,
         NULL
@@ -625,15 +748,49 @@ const upsertOrder = (
     feePercent: product.fee_percent,
     ...financials,
     status: mappedStatus.status,
-    actionRequired: mappedStatus.actionRequired ? 1 : 0,
+    actionRequired: actionRequired ? 1 : 0,
     notes: buildImportedOrderNotes(order),
     createdByUserId: actorUserId,
     updatedByUserId: actorUserId,
     createdAt,
     updatedAt: syncedAt,
-    confirmedAt: mappedStatus.status === "payment_confirmed" || mappedStatus.status === "completed" ? syncedAt : null,
+    confirmedAt:
+      mappedStatus.status === "payment_confirmed" ||
+      mappedStatus.status === "delivered" ||
+      mappedStatus.status === "completed"
+        ? syncedAt
+        : null,
+    deliveredAt: mappedStatus.status === "delivered" ? syncedAt : null,
     completedAt: mappedStatus.status === "completed" ? syncedAt : null
   });
+
+  createNewSaleNotification({
+    orderId: id,
+    externalOrderId: externalId,
+    externalStatus: order.status,
+    productName: product.name,
+    variantLinked,
+    salePriceCents: order.price,
+    profitCents: financials.profitCents
+  });
+
+  if (mappedStatus.status === "delivered") {
+    createOrderStatusNotification({
+      type: "order_delivered",
+      orderId: id,
+      externalOrderId: externalId,
+      externalStatus: order.status
+    });
+  }
+
+  if (mappedStatus.status === "completed") {
+    createOrderStatusNotification({
+      type: "order_completed",
+      orderId: id,
+      externalOrderId: externalId,
+      externalStatus: order.status
+    });
+  }
 
   eventService.createInternal({
     source: "gamemarket_api",
@@ -647,11 +804,13 @@ const upsertOrder = (
     rawPayload: {
       externalOrderId: externalId,
       externalStatus: order.status,
-      externalPayloadHash: hash
+      externalPayloadHash: hash,
+      variantLinked,
+      actionRequired
     }
   });
 
-  return "imported";
+  return { result: "imported", orderId: id };
 };
 
 const makeFailedSummary = (startedAt: string, error: string): GameMarketSyncSummary => {
@@ -672,15 +831,22 @@ const makeFailedSummary = (startedAt: string, error: string): GameMarketSyncSumm
 };
 
 export const gameMarketSyncService = {
-  async syncNow(actorUserId: string | null = null): Promise<GameMarketSyncSummary> {
+  async syncNow(
+    actorUserId: string | null = null,
+    options: SyncOptions = {}
+  ): Promise<GameMarketSyncSummary> {
     const startedAt = nowIso();
+    const triggerLabel = options.trigger === "polling" ? "automática" : "manual";
     eventService.createInternal({
       source: "gamemarket_api",
       type: "integration.gamemarket.sync_started",
       severity: "info",
       title: "Sync GameMarket iniciado",
-      message: "Sincronização manual de leitura iniciada.",
-      actorUserId
+      message: `Sincronização ${triggerLabel} de leitura iniciada.`,
+      actorUserId,
+      rawPayload: {
+        trigger: options.trigger ?? "manual"
+      }
     });
 
     try {
@@ -738,10 +904,10 @@ export const gameMarketSyncService = {
       for (const order of ordersResult.items) {
         try {
           const result = upsertOrder(order, actorUserId, syncedAt);
-          if (result === "imported") {
+          if (result.result === "imported") {
             summary.ordersNew += 1;
           }
-          if (result === "updated") {
+          if (result.result === "updated") {
             summary.ordersUpdated += 1;
           }
         } catch (error) {

@@ -22,6 +22,6 @@ describe("settings page scroll layout", () => {
 
     expect(settingsPage).toContain('className="grid gap-6 pb-10 xl:grid-cols-2"');
     expect(settingsPage).toContain("<CardTitle>Webhook Server / Tempo Real</CardTitle>");
-    expect(settingsPage).toContain("<CardTitle>Notificações</CardTitle>");
+    expect(settingsPage).toContain("<CardTitle>Notificações Locais</CardTitle>");
   });
 });

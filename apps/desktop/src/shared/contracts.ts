@@ -165,6 +165,14 @@ export const eventTypeValues = [
   "system.notification_test",
 ] as const;
 export const eventReadFilterValues = ["all", "read", "unread"] as const;
+export const appNotificationTypeValues = [
+  "new_sale",
+  "mediation_problem",
+  "order_delivered",
+  "order_completed",
+  "internal_event",
+  "system_test",
+] as const;
 export const gamemarketEnvironmentValues = [
   "production",
   "sandbox",
@@ -267,6 +275,7 @@ export const manualOrderInitialStatusSchema = z.enum(
 export const eventSourceSchema = z.enum(eventSourceValues);
 export const eventSeveritySchema = z.enum(eventSeverityValues);
 export const eventTypeSchema = z.enum(eventTypeValues);
+export const appNotificationTypeSchema = z.enum(appNotificationTypeValues);
 export const userRoleSchema = z.enum(userRoleValues);
 export const userStatusSchema = z.enum(userStatusValues);
 export const gamemarketEnvironmentSchema = z.enum(gamemarketEnvironmentValues);
@@ -618,10 +627,30 @@ export const eventListInputSchema = z
   })
   .strict();
 
+export const appNotificationListInputSchema = z
+  .object({
+    limit: z.number().int().positive().max(100).default(20),
+    unreadOnly: z.boolean().default(false),
+  })
+  .strict();
+
+export const appNotificationMarkReadInputSchema = z
+  .object({ id: idSchema })
+  .strict();
+
 export const notificationSettingsSchema = z
   .object({
     desktopEnabled: z.boolean().default(true),
-    soundEnabled: z.boolean().default(false),
+    localNotificationsEnabled: z.boolean().default(true),
+    soundEnabled: z.boolean().default(true),
+    soundVolume: z.number().finite().min(0).max(1).default(0.7),
+    showWhenMinimized: z.boolean().default(true),
+    automaticPollingEnabled: z.boolean().default(true),
+    pollingIntervalSeconds: z.number().int().min(15).max(3600).default(60),
+    notifyNewSale: z.boolean().default(true),
+    notifyMediationProblem: z.boolean().default(true),
+    notifyOrderDelivered: z.boolean().default(true),
+    notifyOrderCompleted: z.boolean().default(true),
     enabledEventTypes: z.record(z.string(), z.boolean()).default({}),
   })
   .strict();
@@ -801,6 +830,7 @@ export type EventSource = (typeof eventSourceValues)[number];
 export type EventSeverity = (typeof eventSeverityValues)[number];
 export type EventType = (typeof eventTypeValues)[number];
 export type EventReadFilter = (typeof eventReadFilterValues)[number];
+export type AppNotificationType = (typeof appNotificationTypeValues)[number];
 export type GameMarketEnvironment =
   (typeof gamemarketEnvironmentValues)[number];
 export type GameMarketConnectionStatus =
@@ -852,6 +882,12 @@ export type EventCreateManualInput = z.infer<
   typeof eventCreateManualInputSchema
 >;
 export type EventListInput = z.infer<typeof eventListInputSchema>;
+export type AppNotificationListInput = z.infer<
+  typeof appNotificationListInputSchema
+>;
+export type AppNotificationMarkReadInput = z.infer<
+  typeof appNotificationMarkReadInputSchema
+>;
 export type NotificationSettings = z.infer<typeof notificationSettingsSchema>;
 export type NotificationSettingsUpdateInput = z.infer<
   typeof notificationSettingsUpdateInputSchema
@@ -1274,6 +1310,33 @@ export interface EventSummary {
   warnings: number;
 }
 
+export interface AppNotificationRecord {
+  id: string;
+  type: AppNotificationType;
+  severity: EventSeverity;
+  title: string;
+  message: string;
+  orderId: string | null;
+  externalOrderId: string | null;
+  eventId: string | null;
+  dedupeKey: string | null;
+  readAt: string | null;
+  createdAt: string;
+  metadataJson: string | null;
+}
+
+export interface AppNotificationSummary {
+  total: number;
+  unread: number;
+  unreadNewSales: number;
+  criticalUnread: number;
+}
+
+export interface AppNotificationListResult {
+  items: AppNotificationRecord[];
+  summary: AppNotificationSummary;
+}
+
 export interface OrderListResult {
   items: OrderRecord[];
   summary: OrderSummary;
@@ -1329,6 +1392,14 @@ export interface DashboardSummary {
   problemOrMediationOrders: number;
   lowStockProducts: number;
   outOfStockProducts: number;
+  unreadNewSales: number;
+  deliveredAwaitingRelease: number;
+  gameMarketApiConfigured: boolean;
+  gameMarketPollingActive: boolean;
+  gameMarketLastCheckedAt: string | null;
+  gameMarketNextRunAt: string | null;
+  gameMarketLastPollingStatus: GameMarketPollingStatus["status"];
+  gameMarketLastPollingMessage: string | null;
   latestEvents: EventRecord[];
   salesByDay: Array<{
     day: string;
@@ -1393,6 +1464,28 @@ export interface GameMarketSyncSummary {
   ordersNew: number;
   ordersUpdated: number;
   errors: string[];
+}
+
+export interface GameMarketPollingStatus {
+  active: boolean;
+  running: boolean;
+  intervalSeconds: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  status:
+    | "idle"
+    | "scheduled"
+    | "running"
+    | "synced"
+    | "partial"
+    | "failed"
+    | "disabled"
+    | "not_configured";
+  importedOrders: number;
+  updatedOrders: number;
+  errors: string[];
+  nextRunAt: string | null;
+  lastResult: string | null;
 }
 
 export interface WebhookServerSettingsView {

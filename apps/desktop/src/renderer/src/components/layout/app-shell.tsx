@@ -1,12 +1,26 @@
-import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Activity, LogOut, ShieldCheck, UserCircle } from "lucide-react";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import {
+  Activity,
+  BellRing,
+  CheckCheck,
+  CheckCircle2,
+  LogOut,
+  PackageOpen,
+  ShieldCheck,
+  UserCircle,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { navItems } from "./nav-items";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { useAuth } from "@renderer/lib/auth-context";
 import { getDesktopApi } from "@renderer/lib/desktop-api";
+import { playSaleAlertSound } from "@renderer/lib/notification-sound";
 import { cn } from "@renderer/lib/utils";
+import type {
+  AppNotificationListResult,
+  AppNotificationRecord,
+} from "../../../../shared/contracts";
 
 const titles: Record<string, { title: string; eyebrow: string }> = {
   "/": { title: "Dashboard", eyebrow: "Operação GameMarket" },
@@ -23,6 +37,7 @@ const titles: Record<string, { title: string; eyebrow: string }> = {
 
 export const AppShell = (): JSX.Element => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { session, logout } = useAuth();
   const current = titles[location.pathname] ?? titles["/"]!;
   const api = useMemo(() => getDesktopApi(), []);
@@ -31,6 +46,17 @@ export const AppShell = (): JSX.Element => {
     body: string;
     severity?: "info" | "success" | "warning" | "critical";
   } | null>(null);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationData, setNotificationData] = useState<AppNotificationListResult>({
+    items: [],
+    summary: {
+      total: 0,
+      unread: 0,
+      unreadNewSales: 0,
+      criticalUnread: 0,
+    },
+  });
+  const [toast, setToast] = useState<AppNotificationRecord | null>(null);
 
   const visibleNavItems = useMemo(
     () =>
@@ -55,13 +81,70 @@ export const AppShell = (): JSX.Element => {
   }, [session]);
 
   useEffect(() => {
-    const unsubscribe = api.notifications.onFallback((payload) => {
+    const loadNotifications = async (): Promise<void> => {
+      try {
+        setNotificationData(await api.appNotifications.list({ limit: 20, unreadOnly: false }));
+      } catch {
+        setNotificationData((currentValue) => currentValue);
+      }
+    };
+
+    const unsubscribeCreated = api.notifications.onCreated((payload) => {
+      void loadNotifications();
+      if (payload.playSound) {
+        void playSaleAlertSound(payload.soundVolume);
+      }
+      if (payload.showToast) {
+        setToast(payload.notification);
+        window.setTimeout(() => setToast(null), 7000);
+      }
+    });
+    const unsubscribeOpenOrder = api.notifications.onOpenOrder((payload) => {
+      navigate(`/orders?orderId=${encodeURIComponent(payload.orderId)}`);
+    });
+    const unsubscribeFallback = api.notifications.onFallback((payload) => {
       setFallbackNotification(payload);
       window.setTimeout(() => setFallbackNotification(null), 6000);
     });
+    void loadNotifications();
 
-    return unsubscribe;
-  }, [api]);
+    return () => {
+      unsubscribeCreated();
+      unsubscribeOpenOrder();
+      unsubscribeFallback();
+    };
+  }, [api, navigate]);
+
+  const openOrder = async (notification: AppNotificationRecord): Promise<void> => {
+    if (notification.orderId) {
+      await api.appNotifications.markRead(notification.id);
+      setNotificationData(await api.appNotifications.list({ limit: 20, unreadOnly: false }));
+      navigate(`/orders?orderId=${encodeURIComponent(notification.orderId)}`);
+      setNotificationsOpen(false);
+    }
+  };
+
+  const markNotificationRead = async (id: string): Promise<void> => {
+    await api.appNotifications.markRead(id);
+    setNotificationData(await api.appNotifications.list({ limit: 20, unreadOnly: false }));
+  };
+
+  const markAllNotificationsRead = async (): Promise<void> => {
+    await api.appNotifications.markAllRead();
+    setNotificationData(await api.appNotifications.list({ limit: 20, unreadOnly: false }));
+  };
+
+  const navBadge = (path: string): number => {
+    if (path === "/orders") {
+      return notificationData.summary.unreadNewSales;
+    }
+
+    if (path === "/events") {
+      return notificationData.summary.unread;
+    }
+
+    return 0;
+  };
 
   return (
     <div className="grid h-screen grid-cols-[260px_1fr] bg-background text-slate-100">
@@ -98,7 +181,12 @@ export const AppShell = (): JSX.Element => {
               }
             >
               <item.icon size={18} />
-              <span>{item.label}</span>
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              {navBadge(item.path) > 0 && (
+                <span className="rounded-full bg-cyan px-2 py-0.5 text-[11px] font-bold text-slate-950">
+                  {navBadge(item.path)}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -134,6 +222,20 @@ export const AppShell = (): JSX.Element => {
             <div className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 font-semibold text-emerald-300">
               Líquido 87%
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative"
+              title="Notificações"
+              onClick={() => setNotificationsOpen((currentValue) => !currentValue)}
+            >
+              <BellRing size={17} />
+              {notificationData.summary.unread > 0 && (
+                <span className="absolute -right-1 -top-1 rounded-full bg-cyan px-1.5 text-[10px] font-bold text-slate-950">
+                  {notificationData.summary.unread}
+                </span>
+              )}
+            </Button>
             <div className="flex items-center gap-3 rounded-md border border-line bg-panel px-3 py-2">
               <div className="grid h-8 w-8 place-items-center rounded-md bg-cyan/10 text-xs font-bold text-cyan">
                 {initials.toUpperCase()}
@@ -161,6 +263,103 @@ export const AppShell = (): JSX.Element => {
           </div>
         </main>
       </div>
+
+      {notificationsOpen && (
+        <div className="fixed right-6 top-24 z-40 w-[420px] rounded-lg border border-line bg-panel shadow-premium">
+          <div className="flex items-start justify-between gap-4 border-b border-line p-4">
+            <div>
+              <div className="text-sm font-semibold text-white">Notificações recentes</div>
+              <div className="mt-1 text-xs text-slate-500">
+                {notificationData.summary.unread} não vista(s)
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={notificationData.summary.unread === 0}
+              onClick={() => void markAllNotificationsRead()}
+            >
+              <CheckCheck size={14} />
+              Marcar todas
+            </Button>
+          </div>
+          <div className="max-h-[560px] space-y-3 overflow-y-auto p-4">
+            {notificationData.items.map((notification) => (
+              <div
+                key={notification.id}
+                className={cn(
+                  "rounded-lg border p-3",
+                  notification.readAt
+                    ? "border-line bg-panelSoft"
+                    : "border-cyan/25 bg-cyan/10",
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-white">
+                      {notification.title}
+                    </div>
+                    <div className="mt-1 whitespace-pre-line text-xs leading-5 text-slate-400">
+                      {notification.message}
+                    </div>
+                    <div className="mt-2 text-[11px] text-slate-500">
+                      {new Date(notification.createdAt).toLocaleString("pt-BR")}
+                    </div>
+                  </div>
+                  {!notification.readAt && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-cyan" />}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {notification.orderId && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void openOrder(notification)}
+                    >
+                      <PackageOpen size={14} />
+                      Abrir pedido
+                    </Button>
+                  )}
+                  {!notification.readAt && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void markNotificationRead(notification.id)}
+                    >
+                      <CheckCircle2 size={14} />
+                      Marcar como visto
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {notificationData.items.length === 0 && (
+              <div className="rounded-lg border border-dashed border-line bg-panelSoft p-6 text-center text-sm text-slate-400">
+                Nenhuma notificação local registrada.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-5 right-5 z-50 w-[380px] rounded-lg border border-cyan/25 bg-panel shadow-premium">
+          <div className="flex items-start justify-between gap-3 border-b border-line p-4">
+            <div className="text-sm font-semibold text-white">{toast.title}</div>
+            <Badge tone={toast.severity === "warning" ? "warning" : toast.severity === "critical" ? "danger" : "cyan"}>
+              local
+            </Badge>
+          </div>
+          <div className="space-y-3 p-4">
+            <div className="whitespace-pre-line text-sm leading-6 text-slate-300">{toast.message}</div>
+            {toast.orderId && (
+              <Button size="sm" variant="primary" onClick={() => void openOrder(toast)}>
+                <PackageOpen size={14} />
+                Abrir pedido
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {fallbackNotification && (
         <div className="fixed bottom-5 right-5 z-50 w-[360px] rounded-lg border border-cyan/25 bg-panel shadow-premium">

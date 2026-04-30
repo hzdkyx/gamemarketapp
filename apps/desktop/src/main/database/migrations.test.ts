@@ -23,4 +23,15 @@ describe("runtime migrations", () => {
     expect(migration?.sql).toContain("external_status, '')) = 'processing'");
     expect(migration?.sql).toContain("completed_at = NULL");
   });
+
+  it("defines the local app notifications migration with dedupe indexes", () => {
+    const migration = runtimeMigrations.find((item) => item.id === "0008_phase6_local_notifications_polling");
+
+    expect(migration).toBeTruthy();
+    expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS app_notifications");
+    expect(migration?.sql).toContain("dedupe_key TEXT");
+    expect(migration?.sql).toContain("metadata_json TEXT");
+    expect(migration?.sql).toContain("idx_app_notifications_dedupe");
+    expect(migration?.sql).toContain("WHERE dedupe_key IS NOT NULL");
+  });
 });

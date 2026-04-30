@@ -19,9 +19,11 @@ import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card";
 import { getDesktopApi } from "@renderer/lib/desktop-api";
+import { playSaleAlertSound } from "@renderer/lib/notification-sound";
 import type {
   EventType,
   GameMarketEnvironment,
+  GameMarketPollingStatus,
   GameMarketSettingsView,
   GameMarketSyncSummary,
   NotificationSettings,
@@ -155,6 +157,19 @@ const isUserLocked = (user: UserRecord): boolean =>
 const formatDateTime = (value: string | null | undefined): string =>
   value ? new Date(value).toLocaleString("pt-BR") : "-";
 
+type LocalNotificationToggleKey =
+  | "notifyNewSale"
+  | "notifyMediationProblem"
+  | "notifyOrderDelivered"
+  | "notifyOrderCompleted";
+
+const localNotificationToggles: Array<{ key: LocalNotificationToggleKey; label: string }> = [
+  { key: "notifyNewSale", label: "Notificar nova venda" },
+  { key: "notifyMediationProblem", label: "Notificar mediação/problema" },
+  { key: "notifyOrderDelivered", label: "Notificar pedido entregue" },
+  { key: "notifyOrderCompleted", label: "Notificar pedido concluído/liberado" }
+];
+
 const gameMarketStatusLabel: Record<GameMarketSettingsView["connectionStatus"], string> = {
   not_configured: "Não configurado",
   configured: "Configurado",
@@ -238,6 +253,7 @@ export const SettingsPage = (): JSX.Element => {
   const [gameMarketResult, setGameMarketResult] = useState("");
   const [revealedGameMarketToken, setRevealedGameMarketToken] = useState<string | null>(null);
   const [lastSyncSummary, setLastSyncSummary] = useState<GameMarketSyncSummary | null>(null);
+  const [gameMarketPollingStatus, setGameMarketPollingStatus] = useState<GameMarketPollingStatus | null>(null);
   const [webhookServerSettings, setWebhookServerSettings] = useState<WebhookServerSettingsView | null>(null);
   const [webhookServerForm, setWebhookServerForm] = useState<WebhookServerFormState>({
     backendUrl: "http://localhost:3001",
@@ -269,9 +285,10 @@ export const SettingsPage = (): JSX.Element => {
         api.settings.getNotificationSettings(),
         api.users.list()
       ]);
-      const [loadedGameMarketSettings, syncSummary] = await Promise.all([
+      const [loadedGameMarketSettings, syncSummary, pollingStatus] = await Promise.all([
         api.gamemarket.getSettings(),
-        api.gamemarket.getLastSyncSummary()
+        api.gamemarket.getLastSyncSummary(),
+        api.gamemarket.getPollingStatus()
       ]);
       const [loadedWebhookServerSettings, webhookSyncSummary] = await Promise.all([
         api.webhookServer.getSettings(),
@@ -288,6 +305,7 @@ export const SettingsPage = (): JSX.Element => {
         environment: loadedGameMarketSettings.environment
       });
       setLastSyncSummary(syncSummary);
+      setGameMarketPollingStatus(pollingStatus);
       setWebhookServerSettings(loadedWebhookServerSettings);
       setWebhookServerForm({
         backendUrl: loadedWebhookServerSettings.backendUrl,
@@ -311,6 +329,11 @@ export const SettingsPage = (): JSX.Element => {
   const updateSettings = async (next: Partial<NotificationSettings>): Promise<void> => {
     const updated = await api.settings.updateNotificationSettings(next);
     setSettings(updated);
+    try {
+      setGameMarketPollingStatus(await api.gamemarket.getPollingStatus());
+    } catch {
+      setGameMarketPollingStatus((currentValue) => currentValue);
+    }
   };
 
   const toggleEvent = async (type: EventType): Promise<void> => {
@@ -327,28 +350,44 @@ export const SettingsPage = (): JSX.Element => {
 
   const testNotification = async (): Promise<void> => {
     try {
-      const event = await api.events.createManual({
-        type: "system.notification_test",
-        severity: "info",
-        title: "Teste de notificação local",
-        message: "Notificação desktop ou fallback visual funcionando.",
-        orderId: null,
-        productId: null,
-        inventoryItemId: null
-      });
-      setNotificationResult(`Evento ${event.eventCode} criado`);
+      const result = await api.appNotifications.testNotification();
+      setNotificationResult(result.shown ? "Notificação enviada." : result.reason ?? "Fallback visual enviado.");
     } catch (testError) {
       setNotificationResult(testError instanceof Error ? testError.message : "Falha ao enviar teste.");
     }
   };
 
+  const testSound = async (): Promise<void> => {
+    const played = await playSaleAlertSound(settings?.soundVolume ?? 0.7);
+    setNotificationResult(played ? "Som de teste reproduzido." : "Som indisponível nesta execução.");
+  };
+
+  const pollGameMarketNow = async (): Promise<void> => {
+    setGameMarketBusy("syncing");
+    setGameMarketResult("Verificando GameMarket...");
+    setError(null);
+
+    try {
+      const status = await api.gamemarket.pollNow();
+      setGameMarketPollingStatus(status);
+      setGameMarketResult(status.lastResult ?? "Verificação concluída.");
+      await refreshGameMarketSettings();
+    } catch (pollError) {
+      setGameMarketResult(pollError instanceof Error ? pollError.message : "Falha ao verificar GameMarket.");
+    } finally {
+      setGameMarketBusy(null);
+    }
+  };
+
   const refreshGameMarketSettings = async (): Promise<void> => {
-    const [loadedGameMarketSettings, syncSummary] = await Promise.all([
+    const [loadedGameMarketSettings, syncSummary, pollingStatus] = await Promise.all([
       api.gamemarket.getSettings(),
-      api.gamemarket.getLastSyncSummary()
+      api.gamemarket.getLastSyncSummary(),
+      api.gamemarket.getPollingStatus()
     ]);
     setGameMarketSettings(loadedGameMarketSettings);
     setLastSyncSummary(syncSummary);
+    setGameMarketPollingStatus(pollingStatus);
   };
 
   const saveGameMarketSettings = async (): Promise<void> => {
@@ -1160,30 +1199,41 @@ export const SettingsPage = (): JSX.Element => {
       <Card className="xl:col-span-2">
         <CardHeader className="items-start">
           <div>
-            <CardTitle>Notificações</CardTitle>
-            <div className="mt-1 text-sm text-slate-400">Desktop local com fallback visual dentro do app.</div>
+            <CardTitle>Notificações Locais</CardTitle>
+            <div className="mt-1 text-sm text-slate-400">Alertas nativos do Windows, toast interno e som de nova venda.</div>
           </div>
-          <Button variant="primary" onClick={() => void testNotification()}>
-            <BellRing size={16} />
-            Enviar teste
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" onClick={() => void testNotification()}>
+              <BellRing size={16} />
+              Testar notificação
+            </Button>
+            <Button variant="secondary" onClick={() => void testSound()}>
+              <Volume2 size={16} />
+              Testar som
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="grid gap-4 md:grid-cols-3">
             <button
               className="focus-ring flex items-center justify-between rounded-lg border border-line bg-panelSoft p-4 text-left"
               type="button"
-              onClick={() => settings && void updateSettings({ desktopEnabled: !settings.desktopEnabled })}
+              onClick={() =>
+                settings &&
+                void updateSettings({
+                  localNotificationsEnabled: !settings.localNotificationsEnabled
+                })
+              }
             >
               <div>
                 <div className="flex items-center gap-2 text-sm font-semibold text-white">
                   <BellRing size={16} className="text-cyan" />
-                  Desktop
+                  Ativar notificações locais
                 </div>
                 <div className="mt-1 text-xs text-slate-500">Ativar notificações do sistema</div>
               </div>
-              <Badge tone={settings?.desktopEnabled ? "success" : "neutral"}>
-                {settings?.desktopEnabled ? "ativo" : "off"}
+              <Badge tone={settings?.localNotificationsEnabled ? "success" : "neutral"}>
+                {settings?.localNotificationsEnabled ? "ativo" : "off"}
               </Badge>
             </button>
 
@@ -1195,9 +1245,9 @@ export const SettingsPage = (): JSX.Element => {
               <div>
                 <div className="flex items-center gap-2 text-sm font-semibold text-white">
                   <Volume2 size={16} className="text-purple" />
-                  Som
+                  Tocar som em nova venda
                 </div>
-                <div className="mt-1 text-xs text-slate-500">Controla o modo silencioso</div>
+                <div className="mt-1 text-xs text-slate-500">Áudio curto emitido pelo renderer</div>
               </div>
               <Badge tone={settings?.soundEnabled ? "success" : "neutral"}>
                 {settings?.soundEnabled ? "ativo" : "off"}
@@ -1207,6 +1257,98 @@ export const SettingsPage = (): JSX.Element => {
             <div className="rounded-lg border border-line bg-panelSoft p-4">
               <div className="text-sm font-semibold text-white">Último teste</div>
               <div className="mt-2 text-xs text-slate-500">{notificationResult || "Sem teste nesta sessão"}</div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="space-y-2 rounded-lg border border-line bg-panelSoft p-4">
+              <span className="text-xs font-semibold text-slate-400">Volume do som</span>
+              <input
+                className="w-full accent-cyan"
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={settings?.soundVolume ?? 0.7}
+                onChange={(event) => void updateSettings({ soundVolume: Number(event.target.value) })}
+              />
+              <div className="text-xs text-slate-500">{Math.round((settings?.soundVolume ?? 0.7) * 100)}%</div>
+            </label>
+            <label className="flex items-center justify-between rounded-lg border border-line bg-panelSoft p-4">
+              <span className="text-sm font-semibold text-white">Mostrar mesmo minimizado</span>
+              <input
+                className="h-5 w-5 accent-cyan"
+                type="checkbox"
+                checked={settings?.showWhenMinimized ?? true}
+                onChange={(event) => void updateSettings({ showWhenMinimized: event.target.checked })}
+              />
+            </label>
+            <label className="flex items-center justify-between rounded-lg border border-line bg-panelSoft p-4">
+              <span className="text-sm font-semibold text-white">Ativar polling automático</span>
+              <input
+                className="h-5 w-5 accent-cyan"
+                type="checkbox"
+                checked={settings?.automaticPollingEnabled ?? true}
+                onChange={(event) => void updateSettings({ automaticPollingEnabled: event.target.checked })}
+              />
+            </label>
+            <label className="space-y-2 rounded-lg border border-line bg-panelSoft p-4">
+              <span className="text-xs font-semibold text-slate-400">Intervalo de polling em segundos</span>
+              <input
+                className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                type="number"
+                min={15}
+                max={3600}
+                value={settings?.pollingIntervalSeconds ?? 60}
+                onChange={(event) => void updateSettings({ pollingIntervalSeconds: Number(event.target.value) })}
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {localNotificationToggles.map(({ key, label }) => (
+              <label key={key} className="flex items-center justify-between gap-4 rounded-lg border border-line bg-panelSoft p-3">
+                <span className="text-sm font-semibold text-white">{label}</span>
+                <input
+                  className="h-5 w-5 accent-cyan"
+                  type="checkbox"
+                  checked={Boolean(settings?.[key])}
+                  onChange={(event) =>
+                    void updateSettings({ [key]: event.target.checked } as Partial<NotificationSettings>)
+                  }
+                />
+              </label>
+            ))}
+          </div>
+
+          <div className="grid gap-4 rounded-lg border border-line bg-panelSoft p-4 md:grid-cols-4">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Polling GameMarket</div>
+              <div className="mt-2 text-sm font-semibold text-white">
+                {gameMarketPollingStatus?.active ? "Ativo" : "Inativo"}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-500">Última verificação</div>
+              <div className="mt-2 text-sm text-slate-300">{formatDateTime(gameMarketPollingStatus?.finishedAt)}</div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-500">Próxima verificação</div>
+              <div className="mt-2 text-sm text-slate-300">{formatDateTime(gameMarketPollingStatus?.nextRunAt)}</div>
+            </div>
+            <div className="flex flex-col justify-between gap-3">
+              <div className="text-xs text-slate-500">
+                {gameMarketPollingStatus?.lastResult ?? "Sem verificação registrada."}
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={gameMarketBusy !== null || !gameMarketCanCallApi}
+                onClick={() => void pollGameMarketNow()}
+              >
+                <RefreshCw size={14} />
+                {gameMarketBusy === "syncing" ? "Verificando..." : "Verificar agora"}
+              </Button>
             </div>
           </div>
 

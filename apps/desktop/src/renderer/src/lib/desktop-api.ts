@@ -1,6 +1,8 @@
 import type { HzdKyxDesktopApi } from "../../../preload";
 import type {
+  AppNotificationListResult,
   GameMarketSettingsView,
+  GameMarketPollingStatus,
   WebhookServerSettingsView,
 } from "../../../shared/contracts";
 import { emptyProfitListResult } from "../../../shared/profit-analysis";
@@ -48,7 +50,26 @@ const fallbackApi: HzdKyxDesktopApi = {
     reason: "Notificações desktop exigem execução no Electron.",
   }),
   notifications: {
+    onCreated: () => () => undefined,
+    onOpenOrder: () => () => undefined,
     onFallback: () => () => undefined,
+  },
+  appNotifications: {
+    list: async (): Promise<AppNotificationListResult> => ({
+      items: [],
+      summary: {
+        total: 0,
+        unread: 0,
+        unreadNewSales: 0,
+        criticalUnread: 0,
+      },
+    }),
+    markRead: unavailable,
+    markAllRead: async () => ({ updated: 0 }),
+    testNotification: async () => ({
+      shown: false,
+      reason: "Notificações locais exigem execução no Electron.",
+    }),
   },
   auth: {
     getBootstrap: async () => ({
@@ -215,6 +236,14 @@ const fallbackApi: HzdKyxDesktopApi = {
       problemOrMediationOrders: 0,
       lowStockProducts: 0,
       outOfStockProducts: 0,
+      unreadNewSales: 0,
+      deliveredAwaitingRelease: 0,
+      gameMarketApiConfigured: false,
+      gameMarketPollingActive: false,
+      gameMarketLastCheckedAt: null,
+      gameMarketNextRunAt: null,
+      gameMarketLastPollingStatus: "not_configured",
+      gameMarketLastPollingMessage: null,
       latestEvents: [],
       salesByDay: [],
       profitByCategory: [],
@@ -224,12 +253,32 @@ const fallbackApi: HzdKyxDesktopApi = {
   settings: {
     getNotificationSettings: async () => ({
       desktopEnabled: true,
-      soundEnabled: false,
+      localNotificationsEnabled: true,
+      soundEnabled: true,
+      soundVolume: 0.7,
+      showWhenMinimized: true,
+      automaticPollingEnabled: true,
+      pollingIntervalSeconds: 60,
+      notifyNewSale: true,
+      notifyMediationProblem: true,
+      notifyOrderDelivered: true,
+      notifyOrderCompleted: true,
       enabledEventTypes: {},
     }),
     updateNotificationSettings: async (payload) => ({
-      desktopEnabled: payload.desktopEnabled ?? true,
-      soundEnabled: payload.soundEnabled ?? false,
+      desktopEnabled:
+        payload.localNotificationsEnabled ?? payload.desktopEnabled ?? true,
+      localNotificationsEnabled:
+        payload.localNotificationsEnabled ?? payload.desktopEnabled ?? true,
+      soundEnabled: payload.soundEnabled ?? true,
+      soundVolume: payload.soundVolume ?? 0.7,
+      showWhenMinimized: payload.showWhenMinimized ?? true,
+      automaticPollingEnabled: payload.automaticPollingEnabled ?? true,
+      pollingIntervalSeconds: payload.pollingIntervalSeconds ?? 60,
+      notifyNewSale: payload.notifyNewSale ?? true,
+      notifyMediationProblem: payload.notifyMediationProblem ?? true,
+      notifyOrderDelivered: payload.notifyOrderDelivered ?? true,
+      notifyOrderCompleted: payload.notifyOrderCompleted ?? true,
       enabledEventTypes: payload.enabledEventTypes ?? {},
     }),
   },
@@ -279,6 +328,32 @@ const fallbackApi: HzdKyxDesktopApi = {
       ordersNew: 0,
       ordersUpdated: 0,
       errors: ["Sync exige execução no Electron."],
+    }),
+    pollNow: async (): Promise<GameMarketPollingStatus> => ({
+      active: false,
+      running: false,
+      intervalSeconds: 60,
+      startedAt: null,
+      finishedAt: null,
+      status: "not_configured",
+      importedOrders: 0,
+      updatedOrders: 0,
+      errors: ["Polling exige execução no Electron."],
+      nextRunAt: null,
+      lastResult: "Polling exige execução no Electron.",
+    }),
+    getPollingStatus: async (): Promise<GameMarketPollingStatus> => ({
+      active: false,
+      running: false,
+      intervalSeconds: 60,
+      startedAt: null,
+      finishedAt: null,
+      status: "not_configured",
+      importedOrders: 0,
+      updatedOrders: 0,
+      errors: ["Polling exige execução no Electron."],
+      nextRunAt: null,
+      lastResult: "Polling exige execução no Electron.",
     }),
     getLastSyncSummary: async () => null,
   },
@@ -335,6 +410,10 @@ const mergeDesktopApi = (
   notifications: {
     ...fallbackApi.notifications,
     ...api?.notifications,
+  },
+  appNotifications: {
+    ...fallbackApi.appNotifications,
+    ...api?.appNotifications,
   },
   auth: {
     ...fallbackApi.auth,

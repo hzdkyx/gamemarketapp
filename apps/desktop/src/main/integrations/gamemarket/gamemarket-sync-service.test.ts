@@ -27,10 +27,18 @@ const state = vi.hoisted(() => ({
       game: string | null;
       unit_cost_cents: number;
       fee_percent: number;
+      active_variant_count: number;
     }
   >(),
   ordersByExternalId: new Map<string, SyncedOrderRow>(),
-  events: [] as Array<{ type: string; orderId?: string | null; rawPayload?: unknown }>
+  events: [] as Array<{ type: string; orderId?: string | null; rawPayload?: unknown }>,
+  notifications: [] as Array<{
+    type: string;
+    dedupeKey?: string | null;
+    message?: string;
+    playSound?: boolean;
+    metadata?: unknown;
+  }>
 }));
 
 const findOrderById = (id: string): SyncedOrderRow | undefined =>
@@ -82,6 +90,7 @@ vi.mock("../../database/database", () => ({
             status: OrderStatus;
             actionRequired: number;
             confirmedAt: string;
+            deliveredAt: string;
             completedAt: string;
           }) => {
             const order = findOrderById(params.id);
@@ -92,6 +101,9 @@ vi.mock("../../database/database", () => ({
               order.status = params.status;
               order.action_required = params.actionRequired;
               order.confirmed_at ??= params.confirmedAt;
+              if (params.status === "delivered") {
+                order.delivered_at ??= params.deliveredAt;
+              }
               if (params.status === "completed") {
                 order.completed_at ??= params.completedAt;
               }
@@ -156,6 +168,7 @@ vi.mock("../../database/database", () => ({
             status: OrderStatus;
             actionRequired: number;
             confirmedAt: string | null;
+            deliveredAt: string | null;
             completedAt: string | null;
           }) => {
             state.ordersByExternalId.set(params.externalOrderId, {
@@ -168,7 +181,7 @@ vi.mock("../../database/database", () => ({
               action_required: params.actionRequired,
               last_synced_at: params.lastSyncedAt,
               confirmed_at: params.confirmedAt,
-              delivered_at: null,
+              delivered_at: params.deliveredAt,
               completed_at: params.completedAt
             });
             return { changes: 1 };
@@ -187,6 +200,40 @@ vi.mock("../../services/event-service", () => ({
       state.events.push(input);
       return { id: `event-${state.events.length}`, ...input };
     }
+  }
+}));
+
+vi.mock("../../services/local-notification-service", () => ({
+  localNotificationService: {
+    notify: vi.fn(
+      (input: {
+        type: string;
+        dedupeKey?: string | null;
+        message?: string;
+        playSound?: boolean;
+        metadata?: unknown;
+      }) => {
+        state.notifications.push(input);
+        return {
+          created: true,
+          nativeShown: false,
+          notification: {
+            id: `notification-${state.notifications.length}`,
+            type: input.type,
+            severity: "info",
+            title: "Teste",
+            message: input.message ?? "",
+            orderId: null,
+            externalOrderId: null,
+            eventId: null,
+            dedupeKey: input.dedupeKey ?? null,
+            readAt: null,
+            createdAt: new Date(0).toISOString(),
+            metadataJson: null
+          }
+        };
+      }
+    )
   }
 }));
 
@@ -265,13 +312,15 @@ beforeEach(() => {
   state.productsByExternalId.clear();
   state.ordersByExternalId.clear();
   state.events.length = 0;
+  state.notifications.length = 0;
   state.productsByExternalId.set("15", {
     id: "product-15",
     name: "Produto GameMarket",
     category: "Contas",
     game: "GameMarket",
     unit_cost_cents: 0,
-    fee_percent: 13
+    fee_percent: 13,
+    active_variant_count: 0
   });
 });
 
@@ -287,6 +336,17 @@ describe("gameMarketSyncService order status preservation", () => {
     expect(imported?.status).toBe("payment_confirmed");
     expect(imported?.action_required).toBe(1);
     expect(imported?.confirmed_at).toBeTruthy();
+    expect(state.notifications).toHaveLength(1);
+    expect(state.notifications[0]).toMatchObject({
+      type: "new_sale",
+      dedupeKey: "sale:new:34831",
+      playSound: true
+    });
+
+    const repeated = await gameMarketSyncService.syncNow("admin-1");
+
+    expect(repeated.ordersNew).toBe(0);
+    expect(state.notifications).toHaveLength(1);
   });
 
   it("corrects GMK-ORD-34831 when it was completed early while GameMarket is still processing", async () => {
@@ -364,5 +424,23 @@ describe("gameMarketSyncService order status preservation", () => {
     expect(imported?.status).toBe("completed");
     expect(imported?.action_required).toBe(0);
     expect(imported?.completed_at).toBeTruthy();
+  });
+
+  it("marks imported sales as action required when an operational variant is not linked", async () => {
+    const product = state.productsByExternalId.get("15");
+    if (product) {
+      product.active_variant_count = 2;
+    }
+    state.remoteOrders.push(remoteOrder("completed"));
+
+    await gameMarketSyncService.syncNow("admin-1");
+
+    const imported = state.ordersByExternalId.get("34831");
+    expect(imported?.action_required).toBe(1);
+    expect(state.notifications[0]).toMatchObject({
+      type: "new_sale",
+      dedupeKey: "sale:new:34831"
+    });
+    expect(state.notifications[0]?.message).toContain("Variação: Variação não vinculada");
   });
 });

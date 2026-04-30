@@ -35,6 +35,18 @@ export const registerGameMarketIpc = (ipcMain: IpcMain): void => {
     return gameMarketService.syncNow(session.user.id);
   });
 
+  ipcMain.handle("gamemarket:pollNow", (_event, payload: unknown) => {
+    requirePermission("canManageSettings");
+    gamemarketEmptyInputSchema.parse(payload ?? {});
+    return gameMarketService.pollNow();
+  });
+
+  ipcMain.handle("gamemarket:getPollingStatus", (_event, payload: unknown) => {
+    requirePermission("canManageSettings");
+    gamemarketEmptyInputSchema.parse(payload ?? {});
+    return gameMarketService.getPollingStatus();
+  });
+
   ipcMain.handle("gamemarket:getLastSyncSummary", (_event, payload: unknown) => {
     requirePermission("canManageSettings");
     gamemarketEmptyInputSchema.parse(payload ?? {});

@@ -16,6 +16,7 @@ import {
   Unlink
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card";
@@ -447,6 +448,8 @@ const OrderForm = ({
 
 export const OrdersPage = (): JSX.Element => {
   const api = useMemo(() => getDesktopApi(), []);
+  const [searchParams] = useSearchParams();
+  const requestedOrderId = searchParams.get("orderId");
   const { session } = useAuth();
   const canEditOrders = session?.permissions.canEditOrders ?? false;
   const canExportCsv = session?.permissions.canExportCsv ?? false;
@@ -481,7 +484,11 @@ export const OrdersPage = (): JSX.Element => {
     try {
       const result = await api.orders.list(filters);
       setData(result);
-      if (!selected && result.items[0]) {
+      if (requestedOrderId && selected?.order.id !== requestedOrderId) {
+        setSelected(await api.orders.get(requestedOrderId));
+        return;
+      }
+      if ((!selected || !result.items.some((order) => order.id === selected.order.id)) && result.items[0]) {
         setSelected(await api.orders.get(result.items[0].id));
       }
     } catch (loadError) {
@@ -489,7 +496,7 @@ export const OrdersPage = (): JSX.Element => {
     } finally {
       setLoading(false);
     }
-  }, [api, filters, selected]);
+  }, [api, filters, requestedOrderId, selected]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {

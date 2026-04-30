@@ -1054,5 +1054,39 @@ export const runtimeMigrations: RuntimeMigration[] = [
 
       PRAGMA foreign_keys = ON;
     `
+  },
+  {
+    id: "0008_phase6_local_notifications_polling",
+    sql: `
+      CREATE TABLE IF NOT EXISTS app_notifications (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL CHECK (type IN (
+          'new_sale',
+          'mediation_problem',
+          'order_delivered',
+          'order_completed',
+          'internal_event',
+          'system_test'
+        )),
+        severity TEXT NOT NULL DEFAULT 'info' CHECK (severity IN ('info', 'success', 'warning', 'critical')),
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        order_id TEXT REFERENCES orders(id) ON DELETE SET NULL,
+        external_order_id TEXT,
+        event_id TEXT REFERENCES events(id) ON DELETE SET NULL,
+        dedupe_key TEXT,
+        read_at TEXT,
+        created_at TEXT NOT NULL,
+        metadata_json TEXT
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_app_notifications_dedupe
+        ON app_notifications(dedupe_key)
+        WHERE dedupe_key IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_app_notifications_created ON app_notifications(created_at);
+      CREATE INDEX IF NOT EXISTS idx_app_notifications_read ON app_notifications(read_at);
+      CREATE INDEX IF NOT EXISTS idx_app_notifications_order ON app_notifications(order_id);
+      CREATE INDEX IF NOT EXISTS idx_app_notifications_type ON app_notifications(type);
+    `
   }
 ];

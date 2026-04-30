@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   hashExternalPayload,
   isGameMarketCompletedStatus,
+  isGameMarketDeliveredStatus,
   isGameMarketProcessingStatus,
   mapGameMarketOrderStatus,
   mapGameMarketProductStatus,
@@ -49,6 +50,14 @@ describe("GameMarket mappers", () => {
     });
     expect(isGameMarketCompletedStatus("Pedido Concluído")).toBe(true);
     expect(isGameMarketProcessingStatus("processing")).toBe(true);
+  });
+
+  it("maps delivered as awaiting release without completing the order", () => {
+    expect(mapGameMarketOrderStatus("delivered")).toEqual({
+      status: "delivered",
+      actionRequired: false
+    });
+    expect(isGameMarketDeliveredStatus("Pedido Entregue")).toBe(true);
   });
 
   it.each(["delivered", "completed", "cancelled", "refunded"] as const)(

@@ -23,8 +23,25 @@ const defaultEnabledEventTypes = Object.fromEntries(
 
 export const defaultNotificationSettings: NotificationSettings = {
   desktopEnabled: true,
-  soundEnabled: false,
+  localNotificationsEnabled: true,
+  soundEnabled: true,
+  soundVolume: 0.7,
+  showWhenMinimized: true,
+  automaticPollingEnabled: true,
+  pollingIntervalSeconds: 60,
+  notifyNewSale: true,
+  notifyMediationProblem: true,
+  notifyOrderDelivered: true,
+  notifyOrderCompleted: true,
   enabledEventTypes: defaultEnabledEventTypes
+};
+
+const clampNumber = (value: unknown, fallback: number, min: number, max: number): number => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, value));
 };
 
 const parseSettings = (value: string | null | undefined): NotificationSettings => {
@@ -34,9 +51,37 @@ const parseSettings = (value: string | null | undefined): NotificationSettings =
 
   try {
     const parsed = JSON.parse(value) as Partial<NotificationSettings>;
+    const localNotificationsEnabled =
+      parsed.localNotificationsEnabled ?? parsed.desktopEnabled ?? defaultNotificationSettings.localNotificationsEnabled;
+
     return {
-      desktopEnabled: parsed.desktopEnabled ?? defaultNotificationSettings.desktopEnabled,
+      desktopEnabled: localNotificationsEnabled,
+      localNotificationsEnabled,
       soundEnabled: parsed.soundEnabled ?? defaultNotificationSettings.soundEnabled,
+      soundVolume: clampNumber(
+        parsed.soundVolume,
+        defaultNotificationSettings.soundVolume,
+        0,
+        1
+      ),
+      showWhenMinimized: parsed.showWhenMinimized ?? defaultNotificationSettings.showWhenMinimized,
+      automaticPollingEnabled:
+        parsed.automaticPollingEnabled ?? defaultNotificationSettings.automaticPollingEnabled,
+      pollingIntervalSeconds: Math.round(
+        clampNumber(
+          parsed.pollingIntervalSeconds,
+          defaultNotificationSettings.pollingIntervalSeconds,
+          15,
+          3600
+        )
+      ),
+      notifyNewSale: parsed.notifyNewSale ?? defaultNotificationSettings.notifyNewSale,
+      notifyMediationProblem:
+        parsed.notifyMediationProblem ?? defaultNotificationSettings.notifyMediationProblem,
+      notifyOrderDelivered:
+        parsed.notifyOrderDelivered ?? defaultNotificationSettings.notifyOrderDelivered,
+      notifyOrderCompleted:
+        parsed.notifyOrderCompleted ?? defaultNotificationSettings.notifyOrderCompleted,
       enabledEventTypes: {
         ...defaultNotificationSettings.enabledEventTypes,
         ...(parsed.enabledEventTypes ?? {})
@@ -59,9 +104,22 @@ export const settingsService = {
 
   updateNotificationSettings(input: NotificationSettingsUpdateInput): NotificationSettings {
     const current = this.getNotificationSettings();
+    const localNotificationsEnabled =
+      input.localNotificationsEnabled ?? input.desktopEnabled ?? current.localNotificationsEnabled;
     const updated: NotificationSettings = {
-      desktopEnabled: input.desktopEnabled ?? current.desktopEnabled,
+      desktopEnabled: localNotificationsEnabled,
+      localNotificationsEnabled,
       soundEnabled: input.soundEnabled ?? current.soundEnabled,
+      soundVolume: clampNumber(input.soundVolume, current.soundVolume, 0, 1),
+      showWhenMinimized: input.showWhenMinimized ?? current.showWhenMinimized,
+      automaticPollingEnabled: input.automaticPollingEnabled ?? current.automaticPollingEnabled,
+      pollingIntervalSeconds: Math.round(
+        clampNumber(input.pollingIntervalSeconds, current.pollingIntervalSeconds, 15, 3600)
+      ),
+      notifyNewSale: input.notifyNewSale ?? current.notifyNewSale,
+      notifyMediationProblem: input.notifyMediationProblem ?? current.notifyMediationProblem,
+      notifyOrderDelivered: input.notifyOrderDelivered ?? current.notifyOrderDelivered,
+      notifyOrderCompleted: input.notifyOrderCompleted ?? current.notifyOrderCompleted,
       enabledEventTypes: {
         ...current.enabledEventTypes,
         ...(input.enabledEventTypes ?? {})

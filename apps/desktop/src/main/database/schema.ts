@@ -289,6 +289,34 @@ export const webhookServerEventImports = sqliteTable("webhook_server_event_impor
   importedAt: text("imported_at").notNull()
 });
 
+export const appNotifications = sqliteTable("app_notifications", {
+  id: text("id").primaryKey(),
+  type: text("type", {
+    enum: [
+      "new_sale",
+      "mediation_problem",
+      "order_delivered",
+      "order_completed",
+      "internal_event",
+      "system_test"
+    ]
+  }).notNull(),
+  severity: text("severity", {
+    enum: ["info", "success", "warning", "critical"]
+  })
+    .notNull()
+    .default("info"),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  orderId: text("order_id").references(() => orders.id),
+  externalOrderId: text("external_order_id"),
+  eventId: text("event_id").references(() => events.id),
+  dedupeKey: text("dedupe_key"),
+  readAt: text("read_at"),
+  createdAt: text("created_at").notNull(),
+  metadataJson: text("metadata_json")
+});
+
 export const productRelations = relations(products, ({ many }) => ({
   variants: many(productVariants),
   inventoryItems: many(inventoryItems),

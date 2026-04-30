@@ -1,5 +1,6 @@
 import { getSqliteDatabase } from "../../database/database";
 import { eventService } from "../../services/event-service";
+import { localNotificationService } from "../../services/local-notification-service";
 import type {
   EventSeverity,
   EventType,
@@ -10,6 +11,7 @@ import type {
 import { WebhookServerClient } from "./webhook-server-client";
 import { webhookServerSettingsService } from "./webhook-server-settings-service";
 import { toWebhookServerSafeError } from "./webhook-server-errors";
+import { gameMarketSyncService } from "../gamemarket/gamemarket-sync-service";
 
 interface LocalEventMapping {
   type: EventType;
@@ -57,6 +59,14 @@ const mappingByRemoteType: Record<string, LocalEventMapping> = {
     severity: "success",
     title: "Pedido concluído na GameMarket",
     message: "PEDIDO CONCLUÍDO NA GAMEMARKET. O pedido pode ser tratado como liberado.",
+    actionRequired: false,
+    notificationCandidate: true
+  },
+  "gamemarket.order.delivered": {
+    type: "order.delivered",
+    severity: "success",
+    title: "Pedido entregue na GameMarket",
+    message: "PEDIDO ENTREGUE NA GAMEMARKET. Acompanhe a liberação.",
     actionRequired: false,
     notificationCandidate: true
   },
@@ -259,6 +269,16 @@ const completionRemoteTypes = new Set([
   "gamemarket.order.completed",
   "gamemarket.financial.funds_released"
 ]);
+const saleRemoteTypes = new Set([
+  "gamemarket.order.sale_confirmed",
+  "gamemarket.order.created"
+]);
+const deliveredRemoteTypes = new Set(["gamemarket.order.delivered"]);
+const problemRemoteTypes = new Set([
+  "gamemarket.mediation.opened",
+  "gamemarket.mediation.updated",
+  "gamemarket.financial.refund_started"
+]);
 
 const promoteOrderCompleted = (
   orderId: string | null,
@@ -306,6 +326,109 @@ const makeFailedSummary = (startedAt: string, error: string): WebhookServerSyncS
     notificationsTriggered: 0,
     errors: [error]
   };
+};
+
+const notifyRemoteOrderEvent = (input: {
+  remoteEvent: WebhookServerEventItem;
+  importedEventId: string;
+  orderId: string | null;
+  externalOrderId: string | null;
+}): boolean => {
+  const { remoteEvent, importedEventId, orderId, externalOrderId } = input;
+  const stableOrderRef = externalOrderId ?? orderId ?? remoteEvent.id;
+
+  if (saleRemoteTypes.has(remoteEvent.eventType)) {
+    const result = localNotificationService.notify({
+      type: "new_sale",
+      severity: orderId ? "success" : "warning",
+      title: "Nova venda na GameMarket",
+      message: [
+        `Pedido: ${externalOrderId ?? "não identificado"}`,
+        "Produto: sincronização oficial em andamento",
+        "Variação: Variação não vinculada",
+        "Valor: confirme no pedido importado",
+        "Lucro previsto: calcule após vincular variação/custo"
+      ].join("\n"),
+      orderId,
+      externalOrderId,
+      eventId: importedEventId,
+      dedupeKey: `sale:new:${stableOrderRef}`,
+      metadata: {
+        remoteEventId: remoteEvent.id,
+        eventType: remoteEvent.eventType,
+        externalOrderId,
+        actionRequired: true
+      },
+      playSound: true
+    });
+
+    return result.created;
+  }
+
+  if (deliveredRemoteTypes.has(remoteEvent.eventType)) {
+    const result = localNotificationService.notify({
+      type: "order_delivered",
+      severity: "success",
+      title: "Pedido entregue na GameMarket",
+      message: `Pedido ${externalOrderId ?? stableOrderRef} foi entregue e aguarda liberação.`,
+      orderId,
+      externalOrderId,
+      eventId: importedEventId,
+      dedupeKey: `order:delivered:${orderId ?? stableOrderRef}`,
+      metadata: {
+        remoteEventId: remoteEvent.id,
+        eventType: remoteEvent.eventType,
+        externalOrderId
+      },
+      playSound: false
+    });
+
+    return result.created;
+  }
+
+  if (completionRemoteTypes.has(remoteEvent.eventType)) {
+    const result = localNotificationService.notify({
+      type: "order_completed",
+      severity: "success",
+      title: "Pedido concluído/liberado na GameMarket",
+      message: `Pedido ${externalOrderId ?? stableOrderRef} foi concluído ou liberado pela GameMarket.`,
+      orderId,
+      externalOrderId,
+      eventId: importedEventId,
+      dedupeKey: `order:completed:${stableOrderRef}`,
+      metadata: {
+        remoteEventId: remoteEvent.id,
+        eventType: remoteEvent.eventType,
+        externalOrderId
+      },
+      playSound: false
+    });
+
+    return result.created;
+  }
+
+  if (problemRemoteTypes.has(remoteEvent.eventType)) {
+    const result = localNotificationService.notify({
+      type: "mediation_problem",
+      severity: "critical",
+      title: remoteEvent.title,
+      message: remoteEvent.message,
+      orderId,
+      externalOrderId,
+      eventId: importedEventId,
+      dedupeKey: `order:mediation:${stableOrderRef}:${remoteEvent.eventType}`,
+      metadata: {
+        remoteEventId: remoteEvent.id,
+        eventType: remoteEvent.eventType,
+        externalOrderId
+      },
+      playSound: false
+    });
+
+    return result.created;
+  }
+
+  return false;
 };
 
 export const webhookServerSyncService = {
@@ -361,7 +484,11 @@ export const webhookServerSyncService = {
 
           const detail = await client.getEvent(remoteEvent.id);
           const references = getExternalReferences(detail);
-          const orderId = findLocalOrderId(references.orderId);
+          let orderId = findLocalOrderId(references.orderId);
+          if (!orderId && references.orderId && saleRemoteTypes.has(remoteEvent.eventType)) {
+            await gameMarketSyncService.syncNow(actorUserId, { trigger: "webhook" });
+            orderId = findLocalOrderId(references.orderId);
+          }
           const productId = findLocalProductId(references.productId);
           const mapping = getMapping(remoteEvent);
           markOrderActionRequired(orderId, mapping.actionRequired);
@@ -394,7 +521,15 @@ export const webhookServerSyncService = {
           await client.ackEvent(remoteEvent.id);
           summary.eventsImported += 1;
           summary.eventsAcked += 1;
-          if (mapping.notificationCandidate) {
+          if (
+            mapping.notificationCandidate &&
+            notifyRemoteOrderEvent({
+              remoteEvent,
+              importedEventId: imported.id,
+              orderId,
+              externalOrderId: references.orderId
+            })
+          ) {
             summary.notificationsTriggered += 1;
           }
         } catch (error) {

@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type {
   CsvExportResult,
+  AppNotificationListInput,
+  AppNotificationListResult,
+  AppNotificationRecord,
   AuthBootstrap,
   AuthChangePasswordInput,
   AuthLoginInput,
@@ -12,6 +15,7 @@ import type {
   EventListResult,
   EventRecord,
   GameMarketConnectionTestResult,
+  GameMarketPollingStatus,
   GameMarketRevealTokenInput,
   GameMarketSettingsUpdateInput,
   GameMarketSettingsView,
@@ -74,6 +78,38 @@ const api = {
       reason?: string;
     }>,
   notifications: {
+    onCreated: (
+      handler: (payload: {
+        notification: AppNotificationRecord;
+        showToast: boolean;
+        playSound: boolean;
+        soundVolume: number;
+      }) => void,
+    ) => {
+      const listener = (
+        _event: IpcRendererEvent,
+        payload: {
+          notification: AppNotificationRecord;
+          showToast: boolean;
+          playSound: boolean;
+          soundVolume: number;
+        },
+      ): void => handler(payload);
+      ipcRenderer.on("notifications:created", listener);
+      return () => {
+        ipcRenderer.removeListener("notifications:created", listener);
+      };
+    },
+    onOpenOrder: (handler: (payload: { orderId: string }) => void) => {
+      const listener = (
+        _event: IpcRendererEvent,
+        payload: { orderId: string },
+      ): void => handler(payload);
+      ipcRenderer.on("notifications:open-order", listener);
+      return () => {
+        ipcRenderer.removeListener("notifications:open-order", listener);
+      };
+    },
     onFallback: (
       handler: (payload: {
         title: string;
@@ -94,6 +130,27 @@ const api = {
         ipcRenderer.removeListener("notifications:fallback", listener);
       };
     },
+  },
+  appNotifications: {
+    list: (payload?: AppNotificationListInput) =>
+      ipcRenderer.invoke(
+        "appNotifications:list",
+        payload,
+      ) as Promise<AppNotificationListResult>,
+    markRead: (id: string) =>
+      ipcRenderer.invoke(
+        "appNotifications:markRead",
+        { id },
+      ) as Promise<AppNotificationRecord>,
+    markAllRead: () =>
+      ipcRenderer.invoke("appNotifications:markAllRead") as Promise<{
+        updated: number;
+      }>,
+    testNotification: () =>
+      ipcRenderer.invoke("appNotifications:testNotification") as Promise<{
+        shown: boolean;
+        reason?: string;
+      }>,
   },
   auth: {
     getBootstrap: () =>
@@ -320,6 +377,16 @@ const api = {
         "gamemarket:syncNow",
         {},
       ) as Promise<GameMarketSyncSummary>,
+    pollNow: () =>
+      ipcRenderer.invoke(
+        "gamemarket:pollNow",
+        {},
+      ) as Promise<GameMarketPollingStatus>,
+    getPollingStatus: () =>
+      ipcRenderer.invoke(
+        "gamemarket:getPollingStatus",
+        {},
+      ) as Promise<GameMarketPollingStatus>,
     getLastSyncSummary: () =>
       ipcRenderer.invoke(
         "gamemarket:getLastSyncSummary",

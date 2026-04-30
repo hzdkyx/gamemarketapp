@@ -1,6 +1,7 @@
 import { BrowserWindow, app, ipcMain, shell } from "electron";
 import { join } from "node:path";
 import { initializeDatabase, getDatabaseStatus } from "./database/database";
+import { registerAppNotificationsIpc } from "./ipc/app-notifications-ipc";
 import { registerAuthIpc } from "./ipc/auth-ipc";
 import { registerDashboardIpc } from "./ipc/dashboard-ipc";
 import { registerEventsIpc } from "./ipc/events-ipc";
@@ -12,6 +13,7 @@ import { registerProductsIpc } from "./ipc/products-ipc";
 import { registerSettingsIpc } from "./ipc/settings-ipc";
 import { registerWebhookServerIpc } from "./ipc/webhook-server-ipc";
 import { webhookServerPollingService } from "./integrations/webhook-server/webhook-server-polling-service";
+import { gameMarketPollingService } from "./integrations/gamemarket/gamemarket-polling-service";
 import { logger } from "./logger";
 import {
   configureNotificationWindow,
@@ -19,6 +21,11 @@ import {
 } from "./services/notification-service";
 
 let mainWindow: BrowserWindow | undefined;
+const appUserModelId = "com.hzdk.gamemarket.manager";
+
+if (process.platform === "win32") {
+  app.setAppUserModelId(appUserModelId);
+}
 
 const createWindow = (): void => {
   mainWindow = new BrowserWindow({
@@ -63,6 +70,7 @@ const registerIpcHandlers = (): void => {
   registerProfitIpc(ipcMain);
   registerDashboardIpc(ipcMain);
   registerSettingsIpc(ipcMain);
+  registerAppNotificationsIpc(ipcMain);
   registerGameMarketIpc(ipcMain);
   registerWebhookServerIpc(ipcMain);
 
@@ -82,13 +90,13 @@ const registerIpcHandlers = (): void => {
 };
 
 app.whenReady().then(() => {
-  app.setAppUserModelId("br.com.hzdk.gamemarketmanager");
   registerIpcHandlers();
 
   try {
     const status = initializeDatabase();
     logger.info({ databasePath: status.path }, "SQLite initialized");
     webhookServerPollingService.refresh();
+    gameMarketPollingService.refresh();
   } catch (error) {
     logger.error({ error }, "Failed to initialize SQLite");
   }
@@ -104,6 +112,7 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   webhookServerPollingService.stop();
+  gameMarketPollingService.stop();
   if (process.platform !== "darwin") {
     app.quit();
   }

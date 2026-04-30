@@ -1,5 +1,6 @@
 import type {
   GameMarketConnectionTestResult,
+  GameMarketPollingStatus,
   GameMarketRevealTokenInput,
   GameMarketSettingsUpdateInput,
   GameMarketSettingsView,
@@ -9,6 +10,7 @@ import { eventService } from "../../services/event-service";
 import { GameMarketClient } from "./gamemarket-client";
 import { gameMarketSettingsService } from "./gamemarket-settings-service";
 import { GameMarketDocsMissingError, toGameMarketSafeError } from "./gamemarket-errors";
+import { gameMarketPollingService } from "./gamemarket-polling-service";
 import { gameMarketSyncService } from "./gamemarket-sync-service";
 
 const connectionTestEndpoint = "GET /api/v1/games";
@@ -20,6 +22,7 @@ export const gameMarketService = {
 
   updateSettings(input: GameMarketSettingsUpdateInput, actorUserId: string | null = null): GameMarketSettingsView {
     const settings = gameMarketSettingsService.updateSettings(input);
+    gameMarketPollingService.refresh();
     eventService.createInternal({
       source: "gamemarket_api",
       type: "integration.gamemarket.settings_updated",
@@ -135,6 +138,14 @@ export const gameMarketService = {
 
   syncNow(actorUserId: string | null = null): Promise<GameMarketSyncSummary> {
     return gameMarketSyncService.syncNow(actorUserId);
+  },
+
+  pollNow(): Promise<GameMarketPollingStatus> {
+    return gameMarketPollingService.runNow();
+  },
+
+  getPollingStatus(): GameMarketPollingStatus {
+    return gameMarketPollingService.getStatus();
   },
 
   getLastSyncSummary(): GameMarketSyncSummary | null {
