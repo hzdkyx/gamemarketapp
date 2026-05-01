@@ -79,6 +79,8 @@ export const cloudSyncPullQuerySchema = z
   })
   .strict();
 
+export const cloudSyncStatusQuerySchema = cloudSyncPullQuerySchema;
+
 export const cloudSyncEntityChangeSchema = z
   .object({
     entityType: cloudSyncEntityTypeSchema,
@@ -167,6 +169,12 @@ export interface CloudSyncConflictView {
   createdAt: string;
 }
 
+export interface CloudSyncWorkspaceStatus {
+  workspaceVersion: number;
+  lastUpdatedAt: string | null;
+  pendingServerChanges: number;
+}
+
 export type CloudRole = (typeof cloudRoleValues)[number];
 export type CloudUserStatus = (typeof cloudUserStatusValues)[number];
 export type CloudSyncEntityType = (typeof cloudSyncEntityTypeValues)[number];
@@ -177,3 +185,4 @@ export type CloudInviteUserInput = z.infer<typeof cloudInviteUserInputSchema>;
 export type CloudUpdateMemberInput = z.infer<typeof cloudUpdateMemberInputSchema>;
 export type CloudSyncPushInput = z.infer<typeof cloudSyncPushInputSchema>;
 export type CloudSyncEntityChange = z.infer<typeof cloudSyncEntityChangeSchema>;
+export type CloudSyncStatusQuery = z.infer<typeof cloudSyncStatusQuerySchema>;

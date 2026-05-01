@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { useEffect } from "react";
 import { AppShell } from "./components/layout/app-shell";
 import { AuthProvider, useAuth } from "./lib/auth-context";
+import { getDesktopApi } from "./lib/desktop-api";
 import {
   AuthLoadingPage,
   ChangePasswordPage,
@@ -14,6 +16,30 @@ import { OrdersPage } from "./pages/orders";
 import { ProfitPage } from "./pages/profit";
 import { ProductsPage } from "./pages/products";
 import { SettingsPage } from "./pages/settings";
+
+type StartupReadyMark = "login_rendered" | "initial_setup_rendered" | "authenticated_shell_rendered";
+
+const sentStartupMarks = new Set<StartupReadyMark>();
+
+const hideBootSplash = (): void => {
+  const bootSplash = document.getElementById("boot-splash");
+  if (!bootSplash) {
+    return;
+  }
+
+  bootSplash.classList.add("boot-hidden");
+  window.setTimeout(() => bootSplash.remove(), 180);
+};
+
+const markStartupReady = (name: StartupReadyMark): void => {
+  hideBootSplash();
+  if (sentStartupMarks.has(name)) {
+    return;
+  }
+
+  sentStartupMarks.add(name);
+  getDesktopApi().startup.markRendererReady(name);
+};
 
 const AuthenticatedRoutes = (): JSX.Element => {
   const { session } = useAuth();
@@ -61,7 +87,25 @@ const AuthenticatedRoutes = (): JSX.Element => {
 };
 
 const AppContent = (): JSX.Element => {
-  const { loading, hasAdmin } = useAuth();
+  const { loading, hasAdmin, session } = useAuth();
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+
+    if (!hasAdmin) {
+      markStartupReady("initial_setup_rendered");
+      return;
+    }
+
+    if (!session) {
+      markStartupReady("login_rendered");
+      return;
+    }
+
+    markStartupReady("authenticated_shell_rendered");
+  }, [hasAdmin, loading, session]);
 
   if (loading) {
     return <AuthLoadingPage />;

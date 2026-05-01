@@ -11,9 +11,93 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2307080d'/%3E%3Cpath d='M18 18h28v8H26v20h-8V18Zm20 20h8v8h-8v-8Zm-12-8h20v8H26v-8Z' fill='%2322d3ee'/%3E%3C/svg%3E"
     />
+    <style>
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 30% 18%, rgba(56, 189, 248, 0.2), transparent 34%),
+          linear-gradient(135deg, #07080d 0%, #0b1020 52%, #05060a 100%);
+        color: #f8fafc;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      #boot-splash .boot-brand {
+        display: grid;
+        justify-items: center;
+        gap: 12px;
+      }
+      #boot-splash .boot-mark {
+        width: 62px;
+        height: 62px;
+        display: grid;
+        place-items: center;
+        border-radius: 18px;
+        background: linear-gradient(135deg, rgba(34, 211, 238, 0.95), rgba(168, 85, 247, 0.88));
+        box-shadow: 0 22px 60px rgba(34, 211, 238, 0.22);
+        font-weight: 900;
+        color: #031018;
+        animation: boot-pulse 1.8s ease-in-out infinite;
+      }
+      #boot-splash h1 {
+        margin: 0;
+        font-size: 28px;
+        line-height: 1;
+        letter-spacing: 0;
+      }
+      #boot-splash p {
+        margin: 0;
+        color: #94a3b8;
+        font-size: 13px;
+      }
+      #boot-splash .boot-status {
+        position: absolute;
+        left: 34px;
+        right: 34px;
+        bottom: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        color: #cbd5e1;
+        font-size: 12px;
+      }
+      #boot-splash .boot-spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(148, 163, 184, 0.25);
+        border-top-color: #22d3ee;
+        border-radius: 999px;
+        animation: boot-spin 0.9s linear infinite;
+      }
+      #boot-splash.boot-hidden {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 160ms ease;
+      }
+      @keyframes boot-spin { to { transform: rotate(360deg); } }
+      @keyframes boot-pulse {
+        0%, 100% { transform: translateY(0); filter: brightness(1); }
+        50% { transform: translateY(-2px); filter: brightness(1.12); }
+      }
+    </style>
     <title>HzdKyx GameMarket Manager</title>
   </head>
   <body>
+    <div id="boot-splash" role="status" aria-live="polite">
+      <section class="boot-brand">
+        <div class="boot-mark">Hz</div>
+        <h1>HzdKyx</h1>
+        <p>GameMarket Manager</p>
+      </section>
+      <div class="boot-status">
+        <span class="boot-spinner" aria-hidden="true"></span>
+        <span>Inicializando aplicativo...</span>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

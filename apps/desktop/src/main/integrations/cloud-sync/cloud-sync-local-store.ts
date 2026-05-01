@@ -526,13 +526,14 @@ export const cloudSyncLocalStore = {
         }
 
         const localRow = getExistingRow(config, normalized.entity);
-        if (
-          localRow &&
-          isDirtyRow(localRow, config.updatedAtColumn) &&
-          Number(localRow.sync_revision ?? 0) < normalized.entity.version
-        ) {
-          insertConflict(config, localRow, normalized.entity);
-          conflicts += 1;
+        if (localRow && isDirtyRow(localRow, config.updatedAtColumn)) {
+          if (Number(localRow.sync_revision ?? 0) < normalized.entity.version) {
+            insertConflict(config, localRow, normalized.entity);
+            conflicts += 1;
+          } else {
+            ignored += 1;
+          }
+          continue;
         }
         upsertEntity(config, normalized.entity, syncedAt);
         applied += 1;

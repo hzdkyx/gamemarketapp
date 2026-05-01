@@ -1,6 +1,9 @@
 import type { DashboardSummary, OrderStatus } from "../../shared/contracts";
 import { gameMarketPollingService } from "../integrations/gamemarket/gamemarket-polling-service";
-import { gameMarketSettingsService } from "../integrations/gamemarket/gamemarket-settings-service";
+import {
+  gameMarketSettingsService,
+  isGameMarketConfigured
+} from "../integrations/gamemarket/gamemarket-settings-service";
 import { getSqliteDatabase } from "../database/database";
 import { appNotificationRepository } from "../repositories/app-notification-repository";
 import { eventRepository } from "../repositories/event-repository";
@@ -90,16 +93,25 @@ export const dashboardService = {
       )
       .get() as { low_stock: number | null; out_of_stock: number | null };
 
-    const deliveredRow = db
+    const waitingReleaseRow = db
       .prepare(
         `
-          SELECT COUNT(*) AS delivered_awaiting_release
+          SELECT
+            COUNT(*) AS waiting_release_count,
+            SUM(sale_price_cents) AS waiting_release_gross_cents,
+            SUM(net_value_cents) AS waiting_release_net_cents,
+            SUM(profit_cents) AS waiting_release_profit_cents
           FROM orders
           WHERE status = 'delivered'
             AND completed_at IS NULL
         `
       )
-      .get() as { delivered_awaiting_release: number | null };
+      .get() as {
+      waiting_release_count: number | null;
+      waiting_release_gross_cents: number | null;
+      waiting_release_net_cents: number | null;
+      waiting_release_profit_cents: number | null;
+    };
 
     const dayStart = new Date();
     dayStart.setUTCDate(dayStart.getUTCDate() - 6);
@@ -174,9 +186,12 @@ export const dashboardService = {
       lowStockProducts: stockRow.low_stock ?? 0,
       outOfStockProducts: stockRow.out_of_stock ?? 0,
       unreadNewSales: notificationSummary.unreadNewSales,
-      deliveredAwaitingRelease: deliveredRow.delivered_awaiting_release ?? 0,
-      gameMarketApiConfigured:
-        gameMarketSettings.hasToken && gameMarketSettings.documentation.status === "available",
+      deliveredAwaitingRelease: waitingReleaseRow.waiting_release_count ?? 0,
+      waitingReleaseCount: waitingReleaseRow.waiting_release_count ?? 0,
+      waitingReleaseGross: centsToMoney(waitingReleaseRow.waiting_release_gross_cents),
+      waitingReleaseNet: centsToMoney(waitingReleaseRow.waiting_release_net_cents),
+      waitingReleaseProfit: centsToMoney(waitingReleaseRow.waiting_release_profit_cents),
+      gameMarketApiConfigured: isGameMarketConfigured(gameMarketSettings),
       gameMarketPollingActive: pollingStatus.active,
       gameMarketLastCheckedAt: pollingStatus.finishedAt ?? gameMarketSettings.lastSyncAt,
       gameMarketNextRunAt: pollingStatus.nextRunAt,

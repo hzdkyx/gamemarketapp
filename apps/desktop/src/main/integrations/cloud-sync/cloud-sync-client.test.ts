@@ -81,3 +81,39 @@ describe("CloudSyncClient.push", () => {
     expect(result.applied).toHaveLength(1);
   });
 });
+
+describe("CloudSyncClient.status", () => {
+  it("requests lightweight workspace status with the last pull cursor", async () => {
+    let requestedUrl = "";
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      requestedUrl = String(url);
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          workspaceId: "workspace-1",
+          workspaceVersion: 7,
+          lastUpdatedAt: "2026-05-01T12:00:00.000Z",
+          pendingServerChanges: 0,
+          serverTime: "2026-05-01T12:01:00.000Z"
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      );
+    });
+    const client = new CloudSyncClient({
+      baseUrl: "https://cloud.example.test",
+      sessionToken: "session-token",
+      fetchImpl: fetchImpl as typeof fetch
+    });
+
+    const result = await client.status("workspace-1", "2026-05-01T11:59:00.000Z");
+
+    expect(requestedUrl).toContain("/api/sync/status?");
+    expect(requestedUrl).toContain("workspaceId=workspace-1");
+    expect(requestedUrl).toContain("since=2026-05-01T11%3A59%3A00.000Z");
+    expect(result.pendingServerChanges).toBe(0);
+    expect(result.workspaceVersion).toBe(7);
+  });
+});

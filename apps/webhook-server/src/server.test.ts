@@ -360,6 +360,40 @@ describe("webhook server", () => {
     expect(pull.json().entities[0].payload).toMatchObject({ name: "Produto sincronizado" });
   });
 
+  it("returns lightweight cloud sync status without payload data", async () => {
+    const bootstrap = await app.inject({
+      method: "POST",
+      url: "/api/auth/bootstrap-owner",
+      payload: ownerPayload,
+    });
+    const owner = bootstrap.json() as CloudBootstrapBody;
+    const workspaceId = owner.workspaces[0]!.id;
+
+    await app.inject({
+      method: "POST",
+      url: "/api/sync/push",
+      headers: cloudAuth(owner.token),
+      payload: pushProductPayload(workspaceId, "Produto com status leve"),
+    });
+
+    const status = await app.inject({
+      method: "GET",
+      url: `/api/sync/status?workspaceId=${workspaceId}&since=2000-01-01T00:00:00.000Z`,
+      headers: cloudAuth(owner.token),
+    });
+
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      ok: true,
+      workspaceId,
+      workspaceVersion: 1,
+      pendingServerChanges: 1,
+    });
+    expect(status.json().serverTime).toBeTruthy();
+    expect(status.body).not.toContain("Produto com status leve");
+    expect(status.body).not.toContain("entities");
+  });
+
   it("accepts empty sync pushes and returns entities as an array", async () => {
     const bootstrap = await app.inject({
       method: "POST",

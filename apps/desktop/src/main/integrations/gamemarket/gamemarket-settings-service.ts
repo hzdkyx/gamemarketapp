@@ -167,9 +167,30 @@ const getSavedToken = (): string | null => {
 
 const normalizeConnectionStatus = (
   status: GameMarketSettingsView["connectionStatus"],
-  hasToken: boolean
+  configured: boolean
 ): GameMarketSettingsView["connectionStatus"] =>
-  status === "docs_missing" ? (hasToken ? "configured" : "not_configured") : status;
+  status === "docs_missing" || (status === "configured" && !configured)
+    ? configured
+      ? "configured"
+      : "not_configured"
+    : status;
+
+export const isGameMarketApiBaseUrlValid = (baseUrl: string | null | undefined): boolean => {
+  if (!baseUrl?.trim()) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(baseUrl.trim());
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+};
+
+export const isGameMarketConfigured = (
+  settings: Pick<GameMarketSettingsView, "apiBaseUrl" | "hasToken">
+): boolean => settings.hasToken && isGameMarketApiBaseUrlValid(settings.apiBaseUrl);
 
 export const getGameMarketDocumentationStatus = (): GameMarketDocumentationStatus => {
   const docsDirectory = findUp("docs/gamemarket-api");
@@ -223,16 +244,18 @@ export const gameMarketSettingsService = {
     const envBaseUrl = readEnvLocalValue(envBaseUrlNames);
     const tokenSource = savedToken ? "saved" : envToken ? "env" : "none";
     const hasToken = Boolean(savedToken || envToken);
+    const apiBaseUrl = readSetting(keys.baseUrl, envBaseUrl ?? defaultBaseUrl);
+    const configured = isGameMarketConfigured({ apiBaseUrl, hasToken });
     const connectionStatus = normalizeConnectionStatus(
       readSetting<GameMarketSettingsView["connectionStatus"]>(
         keys.lastConnectionStatus,
-        hasToken ? "configured" : "not_configured"
+        configured ? "configured" : "not_configured"
       ),
-      hasToken
+      configured
     );
 
     return {
-      apiBaseUrl: readSetting(keys.baseUrl, envBaseUrl ?? defaultBaseUrl),
+      apiBaseUrl,
       integrationName: readSetting(keys.integrationName, defaultIntegrationName),
       environment: readSetting<GameMarketEnvironment>(keys.environment, "production"),
       hasToken,
@@ -274,7 +297,7 @@ export const gameMarketSettingsService = {
     }
 
     const settings = this.getSettings();
-    writeSetting(keys.lastConnectionStatus, settings.hasToken ? "configured" : "not_configured");
+    writeSetting(keys.lastConnectionStatus, isGameMarketConfigured(settings) ? "configured" : "not_configured");
 
     return this.getSettings();
   },

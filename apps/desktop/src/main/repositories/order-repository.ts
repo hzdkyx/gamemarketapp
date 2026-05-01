@@ -398,6 +398,7 @@ export const orderRepository = {
           notes = @notes,
           created_by_user_id = @createdByUserId,
           updated_by_user_id = @updatedByUserId,
+          sync_status = 'pending',
           updated_at = @updatedAt,
           confirmed_at = @confirmedAt,
           delivered_at = @deliveredAt,

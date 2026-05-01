@@ -269,4 +269,67 @@ describe("cloudSyncLocalStore.applyRemote", () => {
     expect(stored?.value_json).toBe(JSON.stringify("local-encrypted-token"));
     expect(stored?.is_secret).toBe(1);
   });
+
+  it("records a conflict and keeps dirty local settings instead of overwriting them", () => {
+    rowsFor("settings").push({
+      key: "ui_density",
+      value_json: JSON.stringify("local-compact"),
+      is_secret: 0,
+      updated_at: "2026-05-01T12:05:00.000Z",
+      last_cloud_synced_at: "2026-05-01T12:00:00.000Z",
+      sync_revision: 1,
+      sync_status: "pending"
+    });
+
+    const result = cloudSyncLocalStore.applyRemote(
+      [
+        remoteSetting({
+          payload: {
+            key: "ui_density",
+            value_json: JSON.stringify("remote-comfortable"),
+            updated_at: "2026-05-01T12:03:00.000Z"
+          },
+          version: 2
+        })
+      ],
+      now
+    );
+    const stored = rowsFor("settings").find((row) => row.key === "ui_density");
+
+    expect(result).toEqual({ applied: 0, conflicts: 1, ignored: 0 });
+    expect(state.conflicts).toHaveLength(1);
+    expect(stored?.value_json).toBe(JSON.stringify("local-compact"));
+    expect(stored?.sync_status).toBe("pending");
+  });
+
+  it("ignores stale remote rows when the local row has a newer pending edit", () => {
+    rowsFor("settings").push({
+      key: "ui_density",
+      value_json: JSON.stringify("local-newer"),
+      is_secret: 0,
+      updated_at: "2026-05-01T12:05:00.000Z",
+      last_cloud_synced_at: "2026-05-01T12:00:00.000Z",
+      sync_revision: 2,
+      sync_status: "pending"
+    });
+
+    const result = cloudSyncLocalStore.applyRemote(
+      [
+        remoteSetting({
+          payload: {
+            key: "ui_density",
+            value_json: JSON.stringify("remote-stale"),
+            updated_at: "2026-05-01T12:03:00.000Z"
+          },
+          version: 1
+        })
+      ],
+      now
+    );
+    const stored = rowsFor("settings").find((row) => row.key === "ui_density");
+
+    expect(result).toEqual({ applied: 0, conflicts: 0, ignored: 1 });
+    expect(state.conflicts).toHaveLength(0);
+    expect(stored?.value_json).toBe(JSON.stringify("local-newer"));
+  });
 });

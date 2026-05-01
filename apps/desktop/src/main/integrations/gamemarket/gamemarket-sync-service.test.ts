@@ -239,9 +239,12 @@ vi.mock("../../services/local-notification-service", () => ({
 }));
 
 vi.mock("./gamemarket-settings-service", () => ({
+  isGameMarketConfigured: (settings: { apiBaseUrl?: string; hasToken?: boolean }) =>
+    Boolean(settings.apiBaseUrl && settings.hasToken !== false),
   gameMarketSettingsService: {
     getSettings: () => ({
       apiBaseUrl: "https://gamemarket.com.br",
+      hasToken: true,
       documentation: {
         status: state.documentationStatus,
         missing: []

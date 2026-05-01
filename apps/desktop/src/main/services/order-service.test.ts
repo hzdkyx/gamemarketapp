@@ -104,6 +104,18 @@ vi.mock("../database/database", () => ({
     transaction: <T>(fn: () => T) => () => fn(),
     prepare: (sql: string) => ({
       get: () => {
+        if (sql.includes("waiting_release_count")) {
+          const waitingReleaseOrders = [...state.orders.values()].filter(
+            (order) => order.status === "delivered" && !order.completedAt
+          );
+          return {
+            waiting_release_count: waitingReleaseOrders.length,
+            waiting_release_gross_cents: moneyToCents(waitingReleaseOrders.reduce((total, order) => total + order.salePrice, 0)),
+            waiting_release_net_cents: moneyToCents(waitingReleaseOrders.reduce((total, order) => total + order.netValue, 0)),
+            waiting_release_profit_cents: moneyToCents(waitingReleaseOrders.reduce((total, order) => total + order.profit, 0))
+          };
+        }
+
         if (sql.includes("low_stock")) {
           const productsWithVariants = new Set(
             [...state.productVariants.values()]

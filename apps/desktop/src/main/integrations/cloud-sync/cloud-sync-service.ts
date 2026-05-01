@@ -10,7 +10,7 @@ import type {
   CloudWorkspaceMemberView
 } from "../../../shared/contracts";
 import { logger } from "../../logger";
-import { CloudSyncClient } from "./cloud-sync-client";
+import { CloudSyncClient, type CloudSyncStatusResponse } from "./cloud-sync-client";
 import { cloudSyncLocalStore } from "./cloud-sync-local-store";
 import { cloudSyncSettingsService } from "./cloud-sync-settings-service";
 
@@ -45,6 +45,23 @@ const requireCloudReady = (): { settings: CloudSyncSettingsView; workspaceId: st
     throw new Error("Selecione um workspace.");
   }
   return { settings, workspaceId: settings.workspaceId };
+};
+
+const getWorkspaceStatusOrNull = async (
+  client: CloudSyncClient,
+  workspaceId: string,
+  since: string | null
+): Promise<CloudSyncStatusResponse | null> => {
+  try {
+    return await client.status(workspaceId, since);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("Cloud sync HTTP 404") || message.includes("Cloud sync HTTP 405")) {
+      return null;
+    }
+
+    throw error;
+  }
 };
 
 const finishSummary = (
@@ -137,6 +154,7 @@ export const cloudSyncService = {
     try {
       const { workspaceId } = requireCloudReady();
       workspaceIdForLog = workspaceId;
+      cloudSyncSettingsService.markStatus("syncing", null);
       const collection = cloudSyncLocalStore.collectChanges(true);
       const changes = collection.changes;
       collected = changes.length;
@@ -217,6 +235,7 @@ export const cloudSyncService = {
     const startedAt = new Date().toISOString();
     try {
       const { workspaceId } = requireCloudReady();
+      cloudSyncSettingsService.markStatus("syncing", null);
       const pulled = await getClient().bootstrap(workspaceId);
       const applied = cloudSyncLocalStore.applyRemote(pulled.entities, pulled.serverTime);
       const summary = finishSummary(startedAt, {
@@ -265,6 +284,7 @@ export const cloudSyncService = {
       const { settings, workspaceId } = requireCloudReady();
       workspaceIdForLog = workspaceId;
       const client = getClient();
+      cloudSyncSettingsService.markStatus("syncing", null);
       const collection = cloudSyncLocalStore.collectChanges(false);
       const changes = collection.changes;
       collected = changes.length;
@@ -279,18 +299,23 @@ export const cloudSyncService = {
         },
         "cloudSync syncNow started"
       );
+      const workspaceStatus = await getWorkspaceStatusOrNull(client, workspaceId, settings.lastPullAt);
       const pushed = changes.length > 0 ? await client.push(workspaceId, changes) : null;
       if (pushed) {
         cloudSyncLocalStore.markPushed(pushed.applied, pushed.serverTime);
         cloudSyncLocalStore.markConflicts(pushed.conflicts);
       }
-      const pulled = await client.pull(workspaceId, settings.lastPullAt);
-      const applied = cloudSyncLocalStore.applyRemote(pulled.entities, pulled.serverTime);
+      const shouldPull = !workspaceStatus || workspaceStatus.pendingServerChanges > 0;
+      const pulled = shouldPull ? await client.pull(workspaceId, settings.lastPullAt) : null;
+      const applied = pulled
+        ? cloudSyncLocalStore.applyRemote(pulled.entities, pulled.serverTime)
+        : { applied: 0, conflicts: 0, ignored: 0 };
       const conflictCount = (pushed?.conflicts.length ?? 0) + applied.conflicts;
+      const syncServerTime = pulled?.serverTime ?? pushed?.serverTime ?? workspaceStatus?.serverTime ?? new Date().toISOString();
       const summary = finishSummary(startedAt, {
         status: conflictCount > 0 ? "conflict" : "synced",
         pushed: changes.length,
-        pulled: pulled.entities.length,
+        pulled: pulled?.entities.length ?? 0,
         applied: (pushed?.applied.length ?? 0) + applied.applied,
         conflicts: conflictCount,
         collected,
@@ -300,8 +325,8 @@ export const cloudSyncService = {
       });
       cloudSyncSettingsService.markSyncResult({
         status: conflictCount > 0 ? "conflict" : "synced",
-        lastSyncAt: pulled.serverTime,
-        lastPullAt: pulled.serverTime,
+        lastSyncAt: syncServerTime,
+        lastPullAt: pulled?.serverTime ?? workspaceStatus?.serverTime ?? null,
         lastPushAt: pushed?.serverTime ?? null,
         summary
       });

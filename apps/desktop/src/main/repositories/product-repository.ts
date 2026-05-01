@@ -481,6 +481,7 @@ export const productRepository = {
           last_synced_at = @lastSyncedAt,
           created_by_user_id = @createdByUserId,
           updated_by_user_id = @updatedByUserId,
+          sync_status = 'pending',
           updated_at = @updatedAt
         WHERE id = @id
       `,

@@ -16,6 +16,7 @@ vi.mock("../../services/event-service", () => ({
 }));
 
 vi.mock("./gamemarket-settings-service", () => ({
+  isGameMarketConfigured: () => true,
   gameMarketSettingsService: {
     getSettings: () => ({
       apiBaseUrl: "https://gamemarket.com.br",

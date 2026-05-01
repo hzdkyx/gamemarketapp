@@ -43,5 +43,16 @@ describe("profit page wiring", () => {
     expect(productsPage).toContain("Lucro méd");
     expect(productsPage).toContain("Lucro máx");
     expect(productsPage).toContain("custo pendente");
+    expect(productsPage).toContain("Este produto possui variações");
+    expect(productsPage).toContain("Aplicar custo/preço às variações");
+    expect(productsPage).toContain("Aplicar automaticamente nesta variação");
+    expect(productsPage).toContain("Edite a variação para alterar lucro real");
+  });
+
+  it("keeps pending-cost profit warnings visible in the Lucro page", () => {
+    const page = readSource("profit.tsx");
+
+    expect(page).toContain("Edite a variação para alterar lucro real");
+    expect(page).toContain("lucro usa custo 0");
   });
 });

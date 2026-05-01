@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import {
   cloudSyncPullQuerySchema,
   cloudSyncPushInputSchema,
+  cloudSyncStatusQuerySchema,
   type CloudRole,
   type CloudSyncEntityChange,
   type CloudSyncEntityType,
@@ -78,6 +79,21 @@ export const registerCloudSyncRoutes = (app: FastifyInstance, cloud: CloudStorag
       ok: true,
       workspaceId,
       entities,
+      serverTime: new Date().toISOString(),
+    };
+  });
+
+  app.get("/api/sync/status", async (request) => {
+    const session = await requireCloudSession(request, cloud);
+    const query = cloudSyncStatusQuerySchema.parse(request.query);
+    const workspaceId = await resolveWorkspaceId(cloud, session.user.id, query.workspaceId);
+    await requireCloudWorkspace(request, cloud, workspaceId, "read");
+    const status = await cloud.getSyncStatus(workspaceId, query.since);
+
+    return {
+      ok: true,
+      workspaceId,
+      ...status,
       serverTime: new Date().toISOString(),
     };
   });

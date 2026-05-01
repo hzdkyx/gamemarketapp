@@ -13,9 +13,9 @@ const state = vi.hoisted(() => ({
     workspaceRole: "owner" as const,
     autoSyncEnabled: false,
     syncIntervalSeconds: 300,
-    lastSyncAt: null,
-    lastPullAt: null,
-    lastPushAt: null,
+    lastSyncAt: null as string | null,
+    lastPullAt: null as string | null,
+    lastPushAt: null as string | null,
     lastError: null,
     pendingChanges: 0,
     conflictCount: 0
@@ -51,6 +51,14 @@ const state = vi.hoisted(() => ({
   },
   pushCalls: [] as Array<{ workspaceId: string; changes: unknown[] }>,
   pullCalls: [] as Array<{ workspaceId: string; since: string | null }>,
+  statusCalls: [] as Array<{ workspaceId: string; since: string | null }>,
+  statusResponse: {
+    workspaceId: "workspace-existing-1",
+    workspaceVersion: 0,
+    lastUpdatedAt: null as string | null,
+    pendingServerChanges: 1,
+    serverTime: "2026-05-01T12:00:00.000Z"
+  },
   bootstrapOwnerCalls: 0,
   markSyncResults: [] as unknown[]
 }));
@@ -59,6 +67,7 @@ vi.mock("./cloud-sync-settings-service", () => ({
   cloudSyncSettingsService: {
     getSettings: () => state.settings,
     getTokenForRequest: () => "session-token",
+    markStatus: vi.fn(),
     markSyncResult: (input: unknown) => {
       state.markSyncResults.push(input);
     }
@@ -98,6 +107,15 @@ vi.mock("./cloud-sync-client", () => ({
       };
     }
 
+    async status(workspaceId: string, since?: string | null): Promise<unknown> {
+      state.statusCalls.push({ workspaceId, since: since ?? null });
+      return {
+        ok: true,
+        ...state.statusResponse,
+        workspaceId
+      };
+    }
+
     async bootstrapOwner(): Promise<unknown> {
       state.bootstrapOwnerCalls += 1;
       return {};
@@ -112,7 +130,10 @@ beforeEach(() => {
     ...state.settings,
     mode: "cloud",
     hasSession: true,
-    workspaceId: "workspace-existing-1"
+    workspaceId: "workspace-existing-1",
+    lastPullAt: null,
+    lastPushAt: null,
+    lastSyncAt: null
   };
   state.collection = {
     changes: [],
@@ -121,6 +142,14 @@ beforeEach(() => {
   };
   state.pushCalls = [];
   state.pullCalls = [];
+  state.statusCalls = [];
+  state.statusResponse = {
+    workspaceId: "workspace-existing-1",
+    workspaceVersion: 0,
+    lastUpdatedAt: null,
+    pendingServerChanges: 1,
+    serverTime: "2026-05-01T12:00:00.000Z"
+  };
   state.remoteEntities = [];
   state.applyRemoteResult = {
     applied: 0,
@@ -164,6 +193,7 @@ describe("cloudSyncService.publishLocalData", () => {
 describe("cloudSyncService.syncNow", () => {
   it("finishes cleanly for an already populated workspace with no pending changes", async () => {
     state.collection.ignored = 0;
+    state.statusResponse.pendingServerChanges = 0;
 
     const summary = await cloudSyncService.syncNow();
 
@@ -178,7 +208,30 @@ describe("cloudSyncService.syncNow", () => {
       errors: []
     });
     expect(state.pushCalls).toEqual([]);
-    expect(state.pullCalls).toEqual([{ workspaceId: "workspace-existing-1", since: null }]);
+    expect(state.statusCalls).toEqual([{ workspaceId: "workspace-existing-1", since: null }]);
+    expect(state.pullCalls).toEqual([]);
+  });
+
+  it("uses the lightweight status check to avoid payload pulls when the server has no new changes", async () => {
+    state.settings = {
+      ...state.settings,
+      lastPullAt: "2026-05-01T11:55:00.000Z"
+    };
+    state.statusResponse = {
+      workspaceId: "workspace-existing-1",
+      workspaceVersion: 4,
+      lastUpdatedAt: "2026-05-01T11:50:00.000Z",
+      pendingServerChanges: 0,
+      serverTime: "2026-05-01T12:00:00.000Z"
+    };
+
+    const summary = await cloudSyncService.syncNow();
+
+    expect(summary.pulled).toBe(0);
+    expect(state.pullCalls).toEqual([]);
+    expect(state.markSyncResults.at(-1)).toMatchObject({
+      lastPullAt: "2026-05-01T12:00:00.000Z"
+    });
   });
 
   it("includes safely ignored remote settings in the sync summary", async () => {

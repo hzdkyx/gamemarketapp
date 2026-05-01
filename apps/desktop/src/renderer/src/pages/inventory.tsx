@@ -16,7 +16,6 @@ import {
   TriangleAlert
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card";
@@ -32,11 +31,20 @@ import type {
   InventoryRecord,
   InventorySecretField,
   InventoryStatus,
+  InventoryUpdateData,
   OperationalStockRecord,
   OperationalStockState,
-  InventoryUpdateData
+  ProductStatus,
+  ProductUpdateData,
+  ProductVariantStatus,
+  ProductVariantUpdateData
 } from "../../../shared/contracts";
-import { inventorySecretFieldValues, inventoryStatusValues } from "../../../shared/contracts";
+import {
+  inventorySecretFieldValues,
+  inventoryStatusValues,
+  productStatusValues,
+  productVariantStatusValues
+} from "../../../shared/contracts";
 
 type BadgeTone = "success" | "warning" | "danger" | "purple" | "neutral" | "cyan";
 
@@ -57,6 +65,17 @@ interface InventoryFormState {
   soldAt: string;
   deliveredAt: string;
   orderId: string;
+}
+
+interface OperationalStockFormState {
+  salePrice: string;
+  unitCost: string;
+  stockCurrent: string;
+  stockMin: string;
+  supplierName: string;
+  supplierUrl: string;
+  status: ProductStatus | ProductVariantStatus;
+  needsReview: boolean;
 }
 
 type InventoryView = "operational" | "variations" | "protected";
@@ -153,6 +172,8 @@ const parseNumber = (value: string): number => {
   return normalized.length > 0 ? Number(normalized) : 0;
 };
 
+const parseInteger = (value: string): number => Math.max(0, Math.trunc(parseNumber(value)));
+
 const toNullable = (value: string): string | null => {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
@@ -175,6 +196,17 @@ const itemToForm = (item: InventoryRecord): InventoryFormState => ({
   soldAt: item.soldAt?.slice(0, 10) ?? "",
   deliveredAt: item.deliveredAt?.slice(0, 10) ?? "",
   orderId: item.orderId ?? ""
+});
+
+const operationalItemToForm = (item: OperationalStockRecord): OperationalStockFormState => ({
+  salePrice: String(item.salePrice),
+  unitCost: String(item.unitCost),
+  stockCurrent: String(item.stockCurrent),
+  stockMin: String(item.stockMin),
+  supplierName: item.supplierName ?? "",
+  supplierUrl: item.supplierUrl ?? "",
+  status: item.status,
+  needsReview: item.needsReview
 });
 
 const formToCreatePayload = (form: InventoryFormState): InventoryCreateInput => ({
@@ -472,6 +504,171 @@ const InventoryForm = ({
   );
 };
 
+const OperationalStockForm = ({
+  item,
+  form,
+  setForm,
+  onClose,
+  onSubmit,
+  saving,
+  error
+}: {
+  item: OperationalStockRecord;
+  form: OperationalStockFormState;
+  setForm: (form: OperationalStockFormState) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+  saving: boolean;
+  error: string | null;
+}): JSX.Element => {
+  const isVariant = item.scope === "variant";
+  const statusValues = isVariant ? productVariantStatusValues : productStatusValues;
+  const update = <K extends keyof OperationalStockFormState>(key: K, value: OperationalStockFormState[K]): void => {
+    setForm({ ...form, [key]: value });
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end bg-black/60">
+      <div className="h-full w-full max-w-3xl overflow-y-auto border-l border-line bg-background shadow-premium">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-background/95 px-6 py-5">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">Editar estoque operacional</div>
+            <h2 className="mt-1 text-xl font-bold text-white">{isVariant ? item.productVariantName : item.productName}</h2>
+            <div className="mt-1 text-sm text-slate-400">
+              {isVariant
+                ? "Esta linha atualiza a variação que aparece no estoque e no lucro real."
+                : "Esta linha atualiza o produto pai sem variação ativa."}
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="ghost" onClick={onClose} type="button">
+              Cancelar
+            </Button>
+            <Button variant="primary" onClick={onSubmit} disabled={saving} type="button">
+              {saving ? "Salvando..." : "Salvar estoque"}
+            </Button>
+          </div>
+        </div>
+
+        <div className="space-y-5 p-6">
+          {error && <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">{error}</div>}
+
+          <div className="rounded-md border border-line bg-panelSoft p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Contexto</div>
+            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+              <div>
+                <div className="text-xs text-slate-500">Produto pai</div>
+                <div className="mt-1 font-semibold text-white">{item.productName}</div>
+                <div className="mt-1 font-mono text-xs text-slate-500">{item.productInternalCode}</div>
+              </div>
+              <div>
+                <div className="text-xs text-slate-500">Variação</div>
+                <div className="mt-1 font-semibold text-cyan">{item.productVariantName ?? "Produto pai sem variação"}</div>
+                <div className="mt-1 font-mono text-xs text-slate-500">{item.productVariantCode ?? item.productId}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-4">
+            <label className="space-y-2">
+              <span className="text-xs font-semibold text-slate-400">Preço de venda</span>
+              <input
+                className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.salePrice}
+                onChange={(event) => update("salePrice", event.target.value)}
+              />
+            </label>
+            <label className="space-y-2">
+              <span className="text-xs font-semibold text-slate-400">Custo unitário</span>
+              <input
+                className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.unitCost}
+                onChange={(event) => update("unitCost", event.target.value)}
+              />
+            </label>
+            <label className="space-y-2">
+              <span className="text-xs font-semibold text-slate-400">Estoque atual</span>
+              <input
+                className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                type="number"
+                min="0"
+                step="1"
+                value={form.stockCurrent}
+                onChange={(event) => update("stockCurrent", event.target.value)}
+              />
+            </label>
+            <label className="space-y-2">
+              <span className="text-xs font-semibold text-slate-400">Estoque mínimo</span>
+              <input
+                className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                type="number"
+                min="0"
+                step="1"
+                value={form.stockMin}
+                onChange={(event) => update("stockMin", event.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-xs font-semibold text-slate-400">Fornecedor da variação</span>
+              <input
+                className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                value={form.supplierName}
+                onChange={(event) => update("supplierName", event.target.value)}
+                placeholder={isVariant ? "Fornecedor operacional" : "Fornecedor ou ID interno"}
+              />
+            </label>
+            <label className="space-y-2">
+              <span className="text-xs font-semibold text-slate-400">URL do fornecedor</span>
+              <input
+                className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                value={form.supplierUrl}
+                onChange={(event) => update("supplierUrl", event.target.value)}
+                disabled={!isVariant}
+                placeholder={isVariant ? "https://..." : "Apenas em variações"}
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <label className="space-y-2">
+              <span className="text-xs font-semibold text-slate-400">Status</span>
+              <select
+                className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                value={form.status}
+                onChange={(event) => update("status", event.target.value as ProductStatus | ProductVariantStatus)}
+              >
+                {statusValues.map((status) => (
+                  <option key={status} value={status}>
+                    {operationalStatusLabels[status]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-3 rounded-md border border-line bg-panel px-3 py-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={form.needsReview}
+                disabled={!isVariant}
+                onChange={(event) => update("needsReview", event.target.checked)}
+              />
+              Needs review da variação
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const SecretPanel = ({
   item,
   values,
@@ -544,6 +741,7 @@ export const InventoryPage = (): JSX.Element => {
   const api = useMemo(() => getDesktopApi(), []);
   const { session } = useAuth();
   const canEditInventory = session?.permissions.canEditInventory ?? false;
+  const canEditProducts = session?.permissions.canEditProducts ?? false;
   const canExportCsv = session?.permissions.canExportCsv ?? false;
   const canRevealSecrets = session?.permissions.canRevealSecrets ?? false;
   const [filters, setFilters] = useState<InventoryListInput>(defaultFilters);
@@ -587,6 +785,9 @@ export const InventoryPage = (): JSX.Element => {
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [operationalItem, setOperationalItem] = useState<OperationalStockRecord | null>(null);
+  const [operationalForm, setOperationalForm] = useState<OperationalStockFormState | null>(null);
+  const [operationalSaving, setOperationalSaving] = useState(false);
   const [secretItem, setSecretItem] = useState<InventoryRecord | null>(null);
   const [secretValues, setSecretValues] = useState<Partial<Record<InventorySecretField, string>>>({});
 
@@ -627,6 +828,68 @@ export const InventoryPage = (): JSX.Element => {
     setForm(null);
     setEditingId(null);
     setError(null);
+  };
+
+  const openOperationalEdit = (item: OperationalStockRecord): void => {
+    setOperationalItem(item);
+    setOperationalForm(operationalItemToForm(item));
+    setError(null);
+  };
+
+  const closeOperationalForm = (): void => {
+    setOperationalItem(null);
+    setOperationalForm(null);
+    setError(null);
+  };
+
+  const saveOperationalStock = async (): Promise<void> => {
+    if (!operationalItem || !operationalForm) {
+      return;
+    }
+
+    setOperationalSaving(true);
+    setError(null);
+
+    try {
+      if (operationalItem.scope === "variant") {
+        const variantPayload: ProductVariantUpdateData = {
+          salePrice: parseNumber(operationalForm.salePrice),
+          unitCost: parseNumber(operationalForm.unitCost),
+          stockCurrent: parseInteger(operationalForm.stockCurrent),
+          stockMin: parseInteger(operationalForm.stockMin),
+          supplierName: toNullable(operationalForm.supplierName),
+          supplierUrl: toNullable(operationalForm.supplierUrl),
+          status: operationalForm.status as ProductVariantStatus,
+          needsReview: operationalForm.needsReview
+        };
+
+        await api.productVariants.update({
+          id: operationalItem.productVariantId ?? operationalItem.id,
+          data: variantPayload
+        });
+      } else {
+        const productPayload: ProductUpdateData = {
+          salePrice: parseNumber(operationalForm.salePrice),
+          unitCost: parseNumber(operationalForm.unitCost),
+          stockCurrent: parseInteger(operationalForm.stockCurrent),
+          stockMin: parseInteger(operationalForm.stockMin),
+          supplierId: toNullable(operationalForm.supplierName),
+          status: operationalForm.status as ProductStatus
+        };
+
+        await api.products.update({
+          id: operationalItem.productId,
+          data: productPayload
+        });
+      }
+
+      closeOperationalForm();
+      await loadInventory();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Falha ao salvar estoque operacional.");
+    } finally {
+      setOperationalSaving(false);
+    }
   };
 
   const saveInventory = async (): Promise<void> => {
@@ -967,15 +1230,14 @@ export const InventoryPage = (): JSX.Element => {
                       <Td className="max-w-[180px] truncate">{item.supplierName ?? "-"}</Td>
                       <Td>
                         <div className="flex items-center gap-1">
-                          <Button size="icon" variant="ghost" title="Abrir produtos" asChild>
-                            <Link to="/products">
-                              <Edit3 size={15} />
-                            </Link>
-                          </Button>
-                          <Button size="icon" variant="ghost" title="Gerenciar variações" asChild>
-                            <Link to="/products">
-                              <Layers3 size={15} />
-                            </Link>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            title="Editar estoque operacional"
+                            disabled={!canEditProducts}
+                            onClick={() => openOperationalEdit(item)}
+                          >
+                            <Edit3 size={15} />
                           </Button>
                         </div>
                       </Td>
@@ -1109,6 +1371,18 @@ export const InventoryPage = (): JSX.Element => {
           onClose={closeForm}
           onSubmit={() => void saveInventory()}
           saving={saving}
+          error={error}
+        />
+      )}
+
+      {operationalItem && operationalForm && (
+        <OperationalStockForm
+          item={operationalItem}
+          form={operationalForm}
+          setForm={setOperationalForm}
+          onClose={closeOperationalForm}
+          onSubmit={() => void saveOperationalStock()}
+          saving={operationalSaving}
           error={error}
         />
       )}

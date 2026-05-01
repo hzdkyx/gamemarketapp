@@ -91,12 +91,30 @@ export const registerCloudSyncIpc = (ipcMain: IpcMain): void => {
   ipcMain.handle("cloudSync:syncNow", (_event, payload: unknown) => {
     requireSession();
     cloudSyncEmptyInputSchema.parse(payload ?? {});
-    return cloudSyncService.syncNow();
+    return cloudSyncPollingService.runManual() ?? cloudSyncService.syncNow();
   });
 
   ipcMain.handle("cloudSync:getLastSyncSummary", (_event, payload: unknown) => {
     requireSession();
     cloudSyncEmptyInputSchema.parse(payload ?? {});
     return cloudSyncService.getLastSyncSummary();
+  });
+
+  ipcMain.handle("cloudSync:getAutoSyncStatus", (_event, payload: unknown) => {
+    requireSession();
+    cloudSyncEmptyInputSchema.parse(payload ?? {});
+    return cloudSyncPollingService.getStatus();
+  });
+
+  ipcMain.handle("cloudSync:pauseAutoSync", (_event, payload: unknown) => {
+    requireSession();
+    cloudSyncEmptyInputSchema.parse(payload ?? {});
+    return cloudSyncPollingService.pause();
+  });
+
+  ipcMain.handle("cloudSync:resumeAutoSync", (_event, payload: unknown) => {
+    requireSession();
+    cloudSyncEmptyInputSchema.parse(payload ?? {});
+    return cloudSyncPollingService.resume();
   });
 };

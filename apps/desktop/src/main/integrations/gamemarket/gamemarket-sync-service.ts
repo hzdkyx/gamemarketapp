@@ -18,7 +18,7 @@ import {
   mapGameMarketProductStatus,
   shouldApplyGameMarketOrderStatus
 } from "./gamemarket-mappers";
-import { gameMarketSettingsService } from "./gamemarket-settings-service";
+import { gameMarketSettingsService, isGameMarketConfigured } from "./gamemarket-settings-service";
 import { toGameMarketSafeError } from "./gamemarket-errors";
 
 const pageLimit = 100;
@@ -852,8 +852,8 @@ export const gameMarketSyncService = {
     try {
       const settings = gameMarketSettingsService.getSettings();
       const token = gameMarketSettingsService.getTokenForRequest();
-      if (!token) {
-        throw new Error("Token GameMarket não configurado.");
+      if (!token || !isGameMarketConfigured(settings)) {
+        throw new Error("API Base URL ou token GameMarket não configurados.");
       }
 
       const client = new GameMarketClient({

@@ -300,6 +300,7 @@ export const productVariantRepository = {
             source = @source,
             needs_review = @needsReview,
             manually_edited_at = @manuallyEditedAt,
+            sync_status = 'pending',
             updated_at = @updatedAt
           WHERE id = @id
         `

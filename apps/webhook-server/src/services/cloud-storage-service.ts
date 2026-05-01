@@ -10,6 +10,7 @@ import type {
   CloudSyncEntityChange,
   CloudSyncEntityType,
   CloudSyncEntityView,
+  CloudSyncWorkspaceStatus,
   CloudUpdateMemberInput,
   CloudUserStatus,
   CloudUserView,
@@ -57,6 +58,7 @@ export interface CloudStorageService {
   inviteUser(workspaceId: string, input: CloudInviteUserInput, passwordHash: string): Promise<CloudWorkspaceMemberView>;
   updateWorkspaceMember(workspaceId: string, input: CloudUpdateMemberInput): Promise<CloudWorkspaceMemberView | null>;
   listSyncEntities(workspaceId: string, since?: string): Promise<CloudSyncEntityView[]>;
+  getSyncStatus(workspaceId: string, since?: string): Promise<CloudSyncWorkspaceStatus>;
   upsertSyncChanges(
     workspaceId: string,
     userId: string,
@@ -549,6 +551,36 @@ export class PostgresCloudStorage implements CloudStorageService {
     return result.rows.map(mapSyncEntity);
   }
 
+  async getSyncStatus(workspaceId: string, since?: string): Promise<CloudSyncWorkspaceStatus> {
+    const result = await this.pool.query<{
+      workspace_version: number | string | null;
+      last_updated_at: string | null;
+      pending_server_changes: number | string | null;
+    }>(
+      `
+        SELECT
+          COALESCE(MAX(version), 0) AS workspace_version,
+          MAX(updated_at) AS last_updated_at,
+          SUM(
+            CASE
+              WHEN $2::timestamptz IS NULL OR updated_at > $2::timestamptz THEN 1
+              ELSE 0
+            END
+          ) AS pending_server_changes
+        FROM cloud_sync_entities
+        WHERE workspace_id = $1
+      `,
+      [workspaceId, since ?? null],
+    );
+    const row = result.rows[0];
+
+    return {
+      workspaceVersion: Number(row?.workspace_version ?? 0),
+      lastUpdatedAt: row?.last_updated_at ?? null,
+      pendingServerChanges: Number(row?.pending_server_changes ?? 0),
+    };
+  }
+
   async upsertSyncChanges(
     workspaceId: string,
     userId: string,
@@ -912,6 +944,22 @@ export class InMemoryCloudStorage implements CloudStorageService {
       .filter((entity) => entity.workspaceId === workspaceId)
       .filter((entity) => !since || entity.updatedAt > since)
       .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt) || left.cloudId.localeCompare(right.cloudId));
+  }
+
+  async getSyncStatus(workspaceId: string, since?: string): Promise<CloudSyncWorkspaceStatus> {
+    const entities = [...this.syncEntities.values()].filter((entity) => entity.workspaceId === workspaceId);
+    const lastUpdatedAt = entities.reduce<string | null>(
+      (latest, entity) => (!latest || entity.updatedAt > latest ? entity.updatedAt : latest),
+      null,
+    );
+    const workspaceVersion = entities.reduce((version, entity) => Math.max(version, entity.version), 0);
+    const pendingServerChanges = entities.filter((entity) => !since || entity.updatedAt > since).length;
+
+    return {
+      workspaceVersion,
+      lastUpdatedAt,
+      pendingServerChanges,
+    };
   }
 
   async upsertSyncChanges(

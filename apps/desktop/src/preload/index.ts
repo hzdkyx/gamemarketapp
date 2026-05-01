@@ -10,6 +10,7 @@ import type {
   AuthSession,
   AuthSetupAdminInput,
   CloudSyncBootstrapOwnerInput,
+  CloudSyncAutoSyncStatus,
   CloudSyncInviteUserInput,
   CloudSyncLoginInput,
   CloudSyncSettingsUpdateInput,
@@ -85,6 +86,11 @@ const api = {
       shown: boolean;
       reason?: string;
     }>,
+  startup: {
+    markRendererReady: (name: "login_rendered" | "initial_setup_rendered" | "authenticated_shell_rendered") => {
+      ipcRenderer.send("startup:renderer-mark", { name });
+    },
+  },
   notifications: {
     onCreated: (
       handler: (payload: {
@@ -469,6 +475,12 @@ const api = {
       ipcRenderer.invoke("cloudSync:syncNow", {}) as Promise<CloudSyncSummary>,
     getLastSyncSummary: () =>
       ipcRenderer.invoke("cloudSync:getLastSyncSummary", {}) as Promise<CloudSyncSummary | null>,
+    getAutoSyncStatus: () =>
+      ipcRenderer.invoke("cloudSync:getAutoSyncStatus", {}) as Promise<CloudSyncAutoSyncStatus>,
+    pauseAutoSync: () =>
+      ipcRenderer.invoke("cloudSync:pauseAutoSync", {}) as Promise<CloudSyncAutoSyncStatus>,
+    resumeAutoSync: () =>
+      ipcRenderer.invoke("cloudSync:resumeAutoSync", {}) as Promise<CloudSyncAutoSyncStatus>,
   },
 };
 

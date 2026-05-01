@@ -638,6 +638,11 @@ export const ProfitPage = (): JSX.Element => {
                         <Badge tone="warning">custo pendente</Badge>
                       )}
                     </div>
+                    {row.pendingCost && (
+                      <div className="mt-1 max-w-[220px] text-xs text-amber-300">
+                        Edite a variação para alterar lucro real; enquanto estiver pendente, o lucro usa custo 0.
+                      </div>
+                    )}
                   </Td>
                   <Td>
                     <div>{row.game ?? row.productCategory}</div>

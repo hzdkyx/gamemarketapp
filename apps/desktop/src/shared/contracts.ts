@@ -1,5 +1,6 @@
 import { GAMEMARKET_FEE_PERCENT } from "@hzdk/shared";
 import { z } from "zod";
+import { CLOUD_SYNC_MIN_INTERVAL_SECONDS } from "./cloud-sync-intervals";
 
 export const productStatusValues = [
   "active",
@@ -769,7 +770,12 @@ export const cloudSyncSettingsUpdateInputSchema = z
     mode: cloudSyncModeSchema.optional(),
     workspaceId: nullableTextSchema,
     autoSyncEnabled: z.boolean().optional(),
-    syncIntervalSeconds: z.number().int().min(60).max(86_400).optional(),
+    syncIntervalSeconds: z
+      .number()
+      .int()
+      .min(CLOUD_SYNC_MIN_INTERVAL_SECONDS)
+      .max(86_400)
+      .optional(),
     clearSession: z.boolean().optional(),
   })
   .strict();
@@ -1500,6 +1506,10 @@ export interface DashboardSummary {
   outOfStockProducts: number;
   unreadNewSales: number;
   deliveredAwaitingRelease: number;
+  waitingReleaseCount: number;
+  waitingReleaseGross: number;
+  waitingReleaseNet: number;
+  waitingReleaseProfit: number;
   gameMarketApiConfigured: boolean;
   gameMarketPollingActive: boolean;
   gameMarketLastCheckedAt: string | null;
@@ -1700,6 +1710,32 @@ export interface CloudSyncSettingsView {
   lastError: string | null;
   pendingChanges: number;
   conflictCount: number;
+}
+
+export interface CloudSyncAutoSyncStatus {
+  active: boolean;
+  paused: boolean;
+  running: boolean;
+  intervalSeconds: number;
+  minIntervalSeconds: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  nextRunAt: string | null;
+  status:
+    | "idle"
+    | "scheduled"
+    | "checking"
+    | "pushing"
+    | "pulling"
+    | "synced"
+    | "failed"
+    | "paused"
+    | "disabled"
+    | "not_configured";
+  lastResult: string | null;
+  pendingChanges: number;
+  failureCount: number;
+  backoffSeconds: number | null;
 }
 
 export interface CloudSyncEntityView {

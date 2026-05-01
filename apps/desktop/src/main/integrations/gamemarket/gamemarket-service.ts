@@ -8,7 +8,7 @@ import type {
 } from "../../../shared/contracts";
 import { eventService } from "../../services/event-service";
 import { GameMarketClient } from "./gamemarket-client";
-import { gameMarketSettingsService } from "./gamemarket-settings-service";
+import { gameMarketSettingsService, isGameMarketConfigured } from "./gamemarket-settings-service";
 import { toGameMarketSafeError } from "./gamemarket-errors";
 import { gameMarketPollingService } from "./gamemarket-polling-service";
 import { gameMarketSyncService } from "./gamemarket-sync-service";
@@ -72,8 +72,8 @@ export const gameMarketService = {
 
     try {
       const token = gameMarketSettingsService.getTokenForRequest();
-      if (!token) {
-        throw new Error("Token GameMarket não configurado.");
+      if (!token || !isGameMarketConfigured(settings)) {
+        throw new Error("API Base URL ou token GameMarket não configurados.");
       }
 
       const client = new GameMarketClient({

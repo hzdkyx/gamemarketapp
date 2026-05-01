@@ -45,6 +45,42 @@ describe("profit analysis rules", () => {
     expect(row.minimumPrice).toBe(45.98);
   });
 
+  it("calculates the Genshin variation profit from the variation cost", () => {
+    const row = makeProfitAnalysisRow(
+      source({
+        productName:
+          "CONTAS GENSHIN IMPACT | REROLL AR55+ | GEMAS E DESEJOS | AMÉRICA",
+        variantName: "REROLL AR55+",
+        salePrice: 149.9,
+        unitCost: 99.9,
+        feePercent: 13,
+      }),
+    );
+
+    expect(row.salePrice).toBe(149.9);
+    expect(row.netValue).toBe(130.41);
+    expect(row.profit).toBe(30.51);
+    expect(row.marginPercent).toBeCloseTo(0.204, 3);
+    expect(row.pendingCost).toBe(false);
+  });
+
+  it("keeps pending cost explicit when a variation cost is zero", () => {
+    const row = makeProfitAnalysisRow(
+      source({
+        productName:
+          "CONTAS GENSHIN IMPACT | REROLL AR55+ | GEMAS E DESEJOS | AMÉRICA",
+        variantName: "REROLL AR55+",
+        salePrice: 149.9,
+        unitCost: 0,
+        feePercent: 13,
+      }),
+    );
+
+    expect(row.netValue).toBe(130.41);
+    expect(row.profit).toBe(130.41);
+    expect(row.pendingCost).toBe(true);
+  });
+
   it("does not duplicate parent product profit when variants exist", () => {
     const rows = [
       makeProfitAnalysisRow(

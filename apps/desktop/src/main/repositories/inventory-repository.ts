@@ -533,6 +533,7 @@ export const inventoryRepository = {
           order_id = @orderId,
           created_by_user_id = @createdByUserId,
           updated_by_user_id = @updatedByUserId,
+          sync_status = 'pending',
           updated_at = @updatedAt
         WHERE id = @id
       `

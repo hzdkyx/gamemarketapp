@@ -6,8 +6,10 @@ import type {
   CloudUserView,
   CloudWorkspaceView
 } from "../../../shared/contracts";
+import { normalizeCloudSyncIntervalSeconds } from "../../../shared/cloud-sync-intervals";
 import { getSqliteDatabase } from "../../database/database";
 import { decryptLocalSecret, encryptLocalSecret } from "../../security/secrets";
+import { isSensitiveSettingKey } from "./sync-sanitizer";
 
 const defaultBackendUrl = "http://localhost:3001";
 
@@ -82,23 +84,44 @@ const countRows = (sql: string): number => {
   return row?.total ?? 0;
 };
 
-const countPendingChanges = (): number =>
-  [
-    "products",
-    "product_variants",
-    "inventory_items",
-    "orders",
-    "events",
-    "app_notifications",
-    "settings"
-  ].reduce(
-    (total, table) =>
-      total +
-      countRows(
-        `SELECT COUNT(*) AS total FROM ${table} WHERE COALESCE(sync_status, 'pending') != 'synced' AND (deleted_at IS NULL OR deleted_at != '')`
-      ),
-    0
+const dirtyWhere = (updatedAtColumn = "updated_at"): string =>
+  `(
+    COALESCE(sync_status, 'pending') != 'synced'
+    OR last_cloud_synced_at IS NULL
+    OR (${updatedAtColumn} IS NOT NULL AND last_cloud_synced_at IS NOT NULL AND ${updatedAtColumn} > last_cloud_synced_at)
+  )`;
+
+const countPendingRows = (table: string, updatedAtColumn = "updated_at"): number =>
+  countRows(
+    `SELECT COUNT(*) AS total FROM ${table} WHERE ${dirtyWhere(updatedAtColumn)} AND (deleted_at IS NULL OR deleted_at != '')`
   );
+
+const countPendingSettings = (): number => {
+  const rows = getSqliteDatabase()
+    .prepare(
+      `
+        SELECT key
+        FROM settings
+        WHERE ${dirtyWhere()}
+          AND is_secret = 0
+          AND key NOT LIKE 'cloud_sync_%'
+          AND key NOT LIKE 'webhook_server_%'
+          AND key NOT LIKE 'gamemarket_%'
+      `
+    )
+    .all() as Array<{ key: string }>;
+
+  return rows.filter((row) => !isSensitiveSettingKey(row.key)).length;
+};
+
+const countPendingChanges = (): number =>
+  countPendingRows("products") +
+  countPendingRows("product_variants") +
+  countPendingRows("inventory_items") +
+  countPendingRows("orders") +
+  countPendingRows("events", "created_at") +
+  countPendingRows("app_notifications", "created_at") +
+  countPendingSettings();
 
 export const cloudSyncSettingsService = {
   getSettings(): CloudSyncSettingsView {
@@ -119,8 +142,8 @@ export const cloudSyncSettingsService = {
       workspaceId,
       workspaceName: workspace?.name ?? null,
       workspaceRole: workspace?.role ?? null,
-      autoSyncEnabled: readSetting(keys.autoSyncEnabled, false),
-      syncIntervalSeconds: readSetting(keys.syncIntervalSeconds, 300),
+      autoSyncEnabled: readSetting(keys.autoSyncEnabled, true),
+      syncIntervalSeconds: normalizeCloudSyncIntervalSeconds(readSetting(keys.syncIntervalSeconds, 30)),
       lastSyncAt: readSetting<string | null>(keys.lastSyncAt, null),
       lastPullAt: readSetting<string | null>(keys.lastPullAt, null),
       lastPushAt: readSetting<string | null>(keys.lastPushAt, null),
@@ -148,7 +171,7 @@ export const cloudSyncSettingsService = {
       writeSetting(keys.autoSyncEnabled, input.autoSyncEnabled);
     }
     if (input.syncIntervalSeconds !== undefined) {
-      writeSetting(keys.syncIntervalSeconds, input.syncIntervalSeconds);
+      writeSetting(keys.syncIntervalSeconds, normalizeCloudSyncIntervalSeconds(input.syncIntervalSeconds));
     }
     if (input.clearSession) {
       deleteSetting(keys.sessionTokenEncrypted);

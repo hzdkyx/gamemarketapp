@@ -43,6 +43,10 @@ const emptySummary: DashboardSummary = {
   outOfStockProducts: 0,
   unreadNewSales: 0,
   deliveredAwaitingRelease: 0,
+  waitingReleaseCount: 0,
+  waitingReleaseGross: 0,
+  waitingReleaseNet: 0,
+  waitingReleaseProfit: 0,
   gameMarketApiConfigured: false,
   gameMarketPollingActive: false,
   gameMarketLastCheckedAt: null,
@@ -186,7 +190,7 @@ export const DashboardPage = (): JSX.Element => {
         </div>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div className="grid gap-4 xl:grid-cols-3 2xl:grid-cols-6">
         <MetricCard
           label="Novas vendas não vistas"
           value={String(summary.unreadNewSales)}
@@ -196,10 +200,31 @@ export const DashboardPage = (): JSX.Element => {
         />
         <MetricCard
           label="Entregues aguardando liberação"
-          value={String(summary.deliveredAwaitingRelease)}
-          helper="Delivered não concluído automaticamente"
+          value={String(summary.waitingReleaseCount)}
+          helper="Delivered sem completed"
           icon={<PackageX size={18} />}
           tone="warning"
+        />
+        <MetricCard
+          label="Bruto aguardando liberação"
+          value={formatCurrencyBRL(summary.waitingReleaseGross)}
+          helper="Independente do mês atual"
+          icon={<CircleDollarSign size={18} />}
+          tone="success"
+        />
+        <MetricCard
+          label="A receber / aguardando liberação"
+          value={formatCurrencyBRL(summary.waitingReleaseNet)}
+          helper="Líquido dos delivered pendentes"
+          icon={<ArrowUpRight size={18} />}
+          tone="cyan"
+        />
+        <MetricCard
+          label="Lucro previsto a liberar"
+          value={formatCurrencyBRL(summary.waitingReleaseProfit)}
+          helper="Lucro dos delivered pendentes"
+          icon={<TrendingUp size={18} />}
+          tone="success"
         />
         <Card className="min-h-[132px]">
           <CardContent className="flex h-full flex-col justify-between">
@@ -240,28 +265,28 @@ export const DashboardPage = (): JSX.Element => {
           tone="cyan"
         />
         <MetricCard
-          label="Vendas mês"
+          label="Vendas mês atual"
           value={String(summary.salesMonth)}
           helper="Mês atual"
           icon={<ReceiptText size={18} />}
           tone="purple"
         />
         <MetricCard
-          label="Bruto mês"
+          label="Bruto mês atual"
           value={formatCurrencyBRL(summary.grossRevenueMonth)}
           helper="Antes da taxa"
           icon={<CircleDollarSign size={18} />}
           tone="success"
         />
         <MetricCard
-          label="Líquido mês"
+          label="Líquido mês atual"
           value={formatCurrencyBRL(summary.netRevenueMonth)}
           helper="Estimado com 87%"
           icon={<ArrowUpRight size={18} />}
           tone="cyan"
         />
         <MetricCard
-          label="Lucro mês"
+          label="Lucro mês atual"
           value={formatCurrencyBRL(summary.estimatedProfitMonth)}
           helper="Snapshot dos pedidos"
           icon={<TrendingUp size={18} />}

@@ -40,7 +40,9 @@ vi.mock("../../security/secrets", () => ({
   decryptLocalSecret: (encryptedValue: string) => state.secrets.get(encryptedValue) ?? ""
 }));
 
-const { gameMarketSettingsService, maskGameMarketToken } = await import("./gamemarket-settings-service");
+const { gameMarketSettingsService, isGameMarketConfigured, maskGameMarketToken } = await import(
+  "./gamemarket-settings-service"
+);
 
 beforeEach(() => {
   state.settings.clear();
@@ -96,6 +98,7 @@ describe("GameMarket settings service", () => {
 
       expect(settings.documentation.status).toBe("missing");
       expect(settings.connectionStatus).toBe("configured");
+      expect(isGameMarketConfigured(settings)).toBe(true);
       expect(settings.tokenMasked).toBe("test••••••••3456");
       expect(gameMarketSettingsService.revealToken()).toBe("test-token-secret-123456");
     } finally {
@@ -119,5 +122,26 @@ describe("GameMarket settings service", () => {
     expect(settings.connectionStatus).toBe("configured");
     expect(state.settings.get("gamemarket_api_token_encrypted")?.value_json).toBe(storedToken);
     expect(settings.tokenMasked).toBe("test••••••••3456");
+  });
+
+  it("requires valid base URL and a secure token to be configured", () => {
+    expect(
+      isGameMarketConfigured({
+        apiBaseUrl: "https://gamemarket.com.br",
+        hasToken: true
+      })
+    ).toBe(true);
+    expect(
+      isGameMarketConfigured({
+        apiBaseUrl: "not-a-url",
+        hasToken: true
+      })
+    ).toBe(false);
+    expect(
+      isGameMarketConfigured({
+        apiBaseUrl: "https://gamemarket.com.br",
+        hasToken: false
+      })
+    ).toBe(false);
   });
 });

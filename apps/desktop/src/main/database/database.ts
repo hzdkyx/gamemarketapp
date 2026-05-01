@@ -5,6 +5,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { runtimeMigrations } from "./migrations";
 import * as schema from "./schema";
+import { startupProfiler } from "../startup-profiler";
 
 export interface DatabaseStatus {
   path: string;
@@ -23,6 +24,7 @@ const getDatabasePath = (): string => {
 };
 
 const runMigrations = (connection: Database.Database): string[] => {
+  startupProfiler.mark("migrations_start");
   connection.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       id TEXT PRIMARY KEY,
@@ -50,16 +52,27 @@ const runMigrations = (connection: Database.Database): string[] => {
     }
   }
 
-  return [...applied, ...newlyApplied];
+  const appliedMigrations = [...applied, ...newlyApplied];
+  startupProfiler.mark("migrations_end", {
+    total: appliedMigrations.length,
+    newlyApplied: newlyApplied.length
+  });
+  return appliedMigrations;
 };
 
 export const initializeDatabase = (): DatabaseStatus => {
+  startupProfiler.mark("database_init_start");
   if (sqlite && orm) {
-    return {
+    const status = {
       path: databasePath,
       connected: true,
       appliedMigrations: runMigrations(sqlite)
     };
+    startupProfiler.mark("database_init_end", {
+      connected: true,
+      migrations: status.appliedMigrations.length
+    });
+    return status;
   }
 
   databasePath = getDatabasePath();
@@ -69,11 +82,16 @@ export const initializeDatabase = (): DatabaseStatus => {
   const appliedMigrations = runMigrations(sqlite);
   orm = drizzle(sqlite, { schema });
 
-  return {
+  const status = {
     path: databasePath,
     connected: true,
     appliedMigrations
   };
+  startupProfiler.mark("database_init_end", {
+    connected: true,
+    migrations: appliedMigrations.length
+  });
+  return status;
 };
 
 export const getDatabase = (): BetterSQLite3Database<typeof schema> => {

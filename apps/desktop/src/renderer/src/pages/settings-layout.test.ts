@@ -29,9 +29,9 @@ describe("settings page scroll layout", () => {
   it("keeps GameMarket documentation as an informational warning, not an API-call blocker", () => {
     const settingsPage = readSource("settings.tsx");
 
-    expect(settingsPage).toContain(
-      "const gameMarketCanCallApi = Boolean(gameMarketSettings?.apiBaseUrl && gameMarketSettings.hasToken);"
-    );
+    expect(settingsPage).toContain("const gameMarketCanCallApi = Boolean(");
+    expect(settingsPage).toContain("gameMarketSettings?.hasToken && isHttpUrl(gameMarketSettings.apiBaseUrl)");
+    expect(settingsPage).toContain("GameMarket API configurada; documentação local ausente apenas como aviso.");
     expect(settingsPage).not.toContain('documentation.status === "available" && Boolean(gameMarketSettings.hasToken)');
   });
 

@@ -37,6 +37,7 @@ import type {
   ProductListResult,
   ProductRecord,
   ProductStatus,
+  ProductVariantUpdateData,
 } from "../../../shared/contracts";
 import {
   deliveryTypeValues,
@@ -284,6 +285,11 @@ const VariantProfitCell = ({
         <span className="text-slate-500">
           {formatPercent(summary.averageMarginPercent)} margem média
         </span>
+        {summary.pendingCostCount > 0 && (
+          <span className="text-amber-300">
+            Edite a variação para alterar lucro real; enquanto estiver pendente, o lucro usa custo 0.
+          </span>
+        )}
       </div>
     </div>
   );
@@ -295,7 +301,10 @@ const ProductForm = ({
   setForm,
   onClose,
   onSubmit,
+  onApplyToVariants,
   saving,
+  applyingVariants,
+  variantCount,
   error,
 }: {
   mode: "create" | "edit" | "duplicate";
@@ -303,7 +312,10 @@ const ProductForm = ({
   setForm: (form: ProductFormState) => void;
   onClose: () => void;
   onSubmit: () => void;
+  onApplyToVariants: () => void;
   saving: boolean;
+  applyingVariants: boolean;
+  variantCount: number;
   error: string | null;
 }): JSX.Element => {
   const financials = useMemo(
@@ -503,6 +515,27 @@ const ProductForm = ({
             </div>
           </div>
 
+          {mode === "edit" && variantCount > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-amber-200">
+              <span>
+                Este produto possui variações. O lucro real é calculado pelas variações. Edite os custos nas variações ou aplique estes valores às variações.
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                type="button"
+                onClick={onApplyToVariants}
+                disabled={applyingVariants}
+              >
+                {applyingVariants
+                  ? "Aplicando..."
+                  : variantCount === 1
+                    ? "Aplicar automaticamente nesta variação"
+                    : "Aplicar custo/preço às variações"}
+              </Button>
+            </div>
+          )}
+
           <div className="grid gap-4 lg:grid-cols-4">
             <label className="space-y-2">
               <span className="text-xs font-semibold text-slate-400">
@@ -658,6 +691,10 @@ export const ProductsPage = (): JSX.Element => {
     null,
   );
   const [saving, setSaving] = useState(false);
+  const [applyingVariants, setApplyingVariants] = useState(false);
+  const editingProduct = editingId
+    ? (data.items.find((product) => product.id === editingId) ?? null)
+    : null;
 
   const loadProducts = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -738,6 +775,56 @@ export const ProductsPage = (): JSX.Element => {
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  const applyParentPricingToVariants = async (): Promise<void> => {
+    if (!form || !editingId || !editingProduct) {
+      return;
+    }
+
+    setApplyingVariants(true);
+    setError(null);
+
+    try {
+      const result = await api.productVariants.listByProduct(editingId);
+      const variants = result.items.filter((variant) => variant.status !== "archived");
+      if (variants.length === 0) {
+        setError("Nenhuma variação ativa encontrada para aplicar custo/preço.");
+        return;
+      }
+
+      if (
+        variants.length > 1 &&
+        !window.confirm(`Aplicar preço, custo e taxa do produto pai em ${variants.length} variações ativas?`)
+      ) {
+        return;
+      }
+
+      const payload: ProductVariantUpdateData = {
+        salePrice: parseNumber(form.salePrice),
+        unitCost: parseNumber(form.unitCost),
+        feePercent: parseNumber(form.feePercent) || 13,
+      };
+
+      await Promise.all(
+        variants.map((variant) =>
+          api.productVariants.update({
+            id: variant.id,
+            data: payload,
+          }),
+        ),
+      );
+
+      await loadProducts();
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Falha ao aplicar custo/preço às variações.",
+      );
+    } finally {
+      setApplyingVariants(false);
     }
   };
 
@@ -1106,7 +1193,10 @@ export const ProductsPage = (): JSX.Element => {
           setForm={setForm}
           onClose={closeForm}
           onSubmit={() => void saveProduct()}
+          onApplyToVariants={() => void applyParentPricingToVariants()}
           saving={saving}
+          applyingVariants={applyingVariants}
+          variantCount={editingProduct?.variantCount ?? 0}
           error={error}
         />
       )}

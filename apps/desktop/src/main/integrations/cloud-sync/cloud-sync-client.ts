@@ -44,6 +44,14 @@ export interface CloudSyncPullResponse {
   serverTime: string;
 }
 
+export interface CloudSyncStatusResponse {
+  workspaceId: string;
+  workspaceVersion: number;
+  lastUpdatedAt: string | null;
+  pendingServerChanges: number;
+  serverTime: string;
+}
+
 export interface CloudSyncPushResponse extends CloudSyncPullResponse {
   applied: CloudSyncEntityView[];
   conflicts: Array<{
@@ -122,6 +130,15 @@ const pullResponseSchema = z.object({
   ok: z.literal(true),
   workspaceId: z.string(),
   entities: z.array(syncEntitySchema),
+  serverTime: z.string()
+});
+
+const statusResponseSchema = z.object({
+  ok: z.literal(true),
+  workspaceId: z.string(),
+  workspaceVersion: z.number().int().nonnegative(),
+  lastUpdatedAt: z.string().nullable(),
+  pendingServerChanges: z.number().int().nonnegative(),
   serverTime: z.string()
 });
 
@@ -286,6 +303,16 @@ export class CloudSyncClient {
     return pullResponseSchema.parse(
       await this.request(`/api/sync/pull?${params.toString()}`, { method: "GET" })
     ) as CloudSyncPullResponse;
+  }
+
+  async status(workspaceId: string, since?: string | null): Promise<CloudSyncStatusResponse> {
+    const params = new URLSearchParams({ workspaceId });
+    if (since) {
+      params.set("since", since);
+    }
+    return statusResponseSchema.parse(
+      await this.request(`/api/sync/status?${params.toString()}`, { method: "GET" })
+    ) as CloudSyncStatusResponse;
   }
 
   async push(workspaceId: string, changes: CloudSyncChange[]): Promise<CloudSyncPushResponse> {

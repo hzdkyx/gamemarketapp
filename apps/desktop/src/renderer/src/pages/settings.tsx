@@ -10,6 +10,8 @@ import {
   KeyRound,
   Link2,
   LockKeyhole,
+  Pause,
+  Play,
   RefreshCw,
   Save,
   Server,
@@ -26,6 +28,7 @@ import { getDesktopApi } from "@renderer/lib/desktop-api";
 import { playSaleAlertSound } from "@renderer/lib/notification-sound";
 import type {
   EventType,
+  CloudSyncAutoSyncStatus,
   CloudRole,
   CloudSyncSettingsView,
   CloudSyncSummary,
@@ -42,6 +45,11 @@ import type {
   WebhookServerSyncSummary
 } from "../../../shared/contracts";
 import { eventTypeValues } from "../../../shared/contracts";
+import {
+  CLOUD_SYNC_INTERVAL_OPTIONS_SECONDS,
+  CLOUD_SYNC_MIN_INTERVAL_SECONDS,
+  normalizeCloudSyncIntervalSeconds
+} from "../../../shared/cloud-sync-intervals";
 
 interface DatabaseStatus {
   path: string;
@@ -193,6 +201,48 @@ const isUserLocked = (user: UserRecord): boolean =>
 
 const formatDateTime = (value: string | null | undefined): string =>
   value ? new Date(value).toLocaleString("pt-BR") : "-";
+
+const isHttpUrl = (value: string | null | undefined): boolean => {
+  if (!value?.trim()) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+};
+
+const cloudSyncPresetValues = [...CLOUD_SYNC_INTERVAL_OPTIONS_SECONDS];
+
+const formatRelativeSyncTime = (value: string | null | undefined): string => {
+  if (!value) {
+    return "-";
+  }
+
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 60) {
+    return `há ${seconds}s`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  return `há ${minutes}min`;
+};
+
+const cloudRuntimeStatusLabel: Record<CloudSyncAutoSyncStatus["status"], string> = {
+  idle: "Aguardando",
+  scheduled: "Sincronização agendada",
+  checking: "Verificando alterações",
+  pushing: "Enviando alterações",
+  pulling: "Baixando alterações",
+  synced: "Sincronizado agora",
+  failed: "Erro de sync",
+  paused: "Sync pausado",
+  disabled: "Sync automático desativado",
+  not_configured: "Sem sessão cloud"
+};
 
 type LocalNotificationToggleKey =
   | "notifyNewSale"
@@ -349,8 +399,10 @@ export const SettingsPage = (): JSX.Element => {
     mode: "local",
     workspaceId: "",
     autoSyncEnabled: false,
-    syncIntervalSeconds: 300
+    syncIntervalSeconds: 30
   });
+  const [cloudSyncCustomInterval, setCloudSyncCustomInterval] = useState(false);
+  const [cloudAutoSyncStatus, setCloudAutoSyncStatus] = useState<CloudSyncAutoSyncStatus | null>(null);
   const [cloudLoginForm, setCloudLoginForm] = useState<CloudLoginFormState>({
     identifier: "",
     password: ""
@@ -371,7 +423,17 @@ export const SettingsPage = (): JSX.Element => {
   });
   const [cloudMembers, setCloudMembers] = useState<CloudWorkspaceMemberView[]>([]);
   const [cloudBusy, setCloudBusy] = useState<
-    "saving" | "testing" | "login" | "owner" | "syncing" | "publishing" | "downloading" | "inviting" | null
+    | "saving"
+    | "testing"
+    | "login"
+    | "owner"
+    | "syncing"
+    | "publishing"
+    | "downloading"
+    | "inviting"
+    | "pausing"
+    | "resuming"
+    | null
   >(null);
   const [cloudResult, setCloudResult] = useState("");
   const [cloudSyncSummary, setCloudSyncSummary] = useState<CloudSyncSummary | null>(null);
@@ -402,9 +464,10 @@ export const SettingsPage = (): JSX.Element => {
         api.webhookServer.getSettings(),
         api.webhookServer.getLastSyncSummary()
       ]);
-      const [loadedCloudSyncSettings, loadedCloudSyncSummary] = await Promise.all([
+      const [loadedCloudSyncSettings, loadedCloudSyncSummary, loadedCloudAutoSyncStatus] = await Promise.all([
         api.cloudSync.getSettings(),
-        api.cloudSync.getLastSyncSummary()
+        api.cloudSync.getLastSyncSummary(),
+        api.cloudSync.getAutoSyncStatus()
       ]);
       setDatabaseStatus(dbStatus);
       setAppMeta(meta);
@@ -434,6 +497,8 @@ export const SettingsPage = (): JSX.Element => {
         syncIntervalSeconds: loadedCloudSyncSettings.syncIntervalSeconds
       });
       setCloudSyncSummary(loadedCloudSyncSummary);
+      setCloudAutoSyncStatus(loadedCloudAutoSyncStatus);
+      setCloudSyncCustomInterval(!cloudSyncPresetValues.includes(loadedCloudSyncSettings.syncIntervalSeconds as 10 | 30 | 60 | 300));
       if (loadedCloudSyncSettings.workspaceRole === "owner" || loadedCloudSyncSettings.workspaceRole === "admin") {
         try {
           setCloudMembers(await api.cloudSync.listMembers());
@@ -706,9 +771,10 @@ export const SettingsPage = (): JSX.Element => {
   };
 
   const refreshCloudSyncSettings = async (): Promise<void> => {
-    const [loadedCloudSyncSettings, loadedCloudSummary] = await Promise.all([
+    const [loadedCloudSyncSettings, loadedCloudSummary, loadedCloudAutoSyncStatus] = await Promise.all([
       api.cloudSync.getSettings(),
-      api.cloudSync.getLastSyncSummary()
+      api.cloudSync.getLastSyncSummary(),
+      api.cloudSync.getAutoSyncStatus()
     ]);
     setCloudSyncSettings(loadedCloudSyncSettings);
     setCloudSyncSummary(loadedCloudSummary);
@@ -719,6 +785,8 @@ export const SettingsPage = (): JSX.Element => {
       autoSyncEnabled: loadedCloudSyncSettings.autoSyncEnabled,
       syncIntervalSeconds: loadedCloudSyncSettings.syncIntervalSeconds
     });
+    setCloudAutoSyncStatus(loadedCloudAutoSyncStatus);
+    setCloudSyncCustomInterval(!cloudSyncPresetValues.includes(loadedCloudSyncSettings.syncIntervalSeconds as 10 | 30 | 60 | 300));
 
     if (loadedCloudSyncSettings.workspaceRole === "owner" || loadedCloudSyncSettings.workspaceRole === "admin") {
       try {
@@ -742,7 +810,7 @@ export const SettingsPage = (): JSX.Element => {
         mode: cloudSyncForm.mode,
         workspaceId: cloudSyncForm.workspaceId || null,
         autoSyncEnabled: cloudSyncForm.autoSyncEnabled,
-        syncIntervalSeconds: cloudSyncForm.syncIntervalSeconds
+        syncIntervalSeconds: normalizeCloudSyncIntervalSeconds(cloudSyncForm.syncIntervalSeconds)
       });
       setCloudSyncSettings(updated);
       setCloudResult("Configuração cloud salva.");
@@ -857,6 +925,40 @@ export const SettingsPage = (): JSX.Element => {
       await refreshCloudSyncSettings();
     } catch (syncError) {
       setCloudResult(syncError instanceof Error ? syncError.message : "Falha ao sincronizar workspace.");
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const pauseCloudAutoSync = async (): Promise<void> => {
+    setCloudBusy("pausing");
+    setCloudResult("");
+    setError(null);
+
+    try {
+      const status = await api.cloudSync.pauseAutoSync();
+      setCloudAutoSyncStatus(status);
+      setCloudResult("Sync automático pausado.");
+      await refreshCloudSyncSettings();
+    } catch (pauseError) {
+      setCloudResult(pauseError instanceof Error ? pauseError.message : "Falha ao pausar sync.");
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const resumeCloudAutoSync = async (): Promise<void> => {
+    setCloudBusy("resuming");
+    setCloudResult("");
+    setError(null);
+
+    try {
+      const status = await api.cloudSync.resumeAutoSync();
+      setCloudAutoSyncStatus(status);
+      setCloudResult("Sync automático retomado.");
+      await refreshCloudSyncSettings();
+    } catch (resumeError) {
+      setCloudResult(resumeError instanceof Error ? resumeError.message : "Falha ao retomar sync.");
     } finally {
       setCloudBusy(null);
     }
@@ -1038,7 +1140,9 @@ export const SettingsPage = (): JSX.Element => {
     }
   };
 
-  const gameMarketCanCallApi = Boolean(gameMarketSettings?.apiBaseUrl && gameMarketSettings.hasToken);
+  const gameMarketCanCallApi = Boolean(
+    gameMarketSettings?.hasToken && isHttpUrl(gameMarketSettings.apiBaseUrl)
+  );
   const gameMarketStatus =
     gameMarketBusy === "testing"
       ? "connecting"
@@ -1056,6 +1160,19 @@ export const SettingsPage = (): JSX.Element => {
     cloudBusy === "syncing" || cloudBusy === "publishing" || cloudBusy === "downloading" || cloudBusy === "testing"
       ? "syncing"
       : cloudSyncSettings?.connectionStatus ?? "not_configured";
+  const cloudRuntimeMessage =
+    cloudAutoSyncStatus?.lastResult ||
+    (cloudSyncSettings?.lastSyncAt
+      ? `Sincronizado ${formatRelativeSyncTime(cloudSyncSettings.lastSyncAt)}`
+      : "Sem sincronização automática registrada.");
+  const cloudRuntimeLabel = cloudAutoSyncStatus
+    ? cloudRuntimeStatusLabel[cloudAutoSyncStatus.status]
+    : cloudStatusLabel[cloudStatus];
+  const cloudIntervalPreset = cloudSyncCustomInterval
+    ? "custom"
+    : cloudSyncPresetValues.includes(cloudSyncForm.syncIntervalSeconds as 10 | 30 | 60 | 300)
+      ? String(cloudSyncForm.syncIntervalSeconds)
+      : "custom";
   const cloudCanUseWorkspace = Boolean(
     cloudSyncSettings?.hasSession && (cloudSyncForm.workspaceId || cloudSyncSettings?.workspaceId)
   );
@@ -1158,14 +1275,17 @@ export const SettingsPage = (): JSX.Element => {
           <Badge tone={cloudStatusTone(cloudStatus)}>{cloudStatusLabel[cloudStatus]}</Badge>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             <div className="rounded-lg border border-line bg-panelSoft p-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-white">
                 <Cloud size={16} className="text-cyan" />
-                Modo
+                Status atual
               </div>
               <div className="mt-2 text-sm text-slate-400">
-                {cloudSyncSettings?.mode === "cloud" ? "Nuvem" : "Local"}
+                {cloudRuntimeLabel}
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                {cloudRuntimeMessage}
               </div>
             </div>
             <div className="rounded-lg border border-line bg-panelSoft p-4">
@@ -1187,10 +1307,28 @@ export const SettingsPage = (): JSX.Element => {
               </div>
             </div>
             <div className="rounded-lg border border-line bg-panelSoft p-4">
-              <div className="text-sm font-semibold text-white">Última sincronização</div>
+              <div className="text-sm font-semibold text-white">Última sync</div>
               <div className="mt-2 text-sm text-slate-400">{formatDateTime(cloudSyncSettings?.lastSyncAt)}</div>
               <div className="mt-1 text-xs text-slate-500">
-                {cloudSyncSettings?.pendingChanges ?? 0} pendente(s), {cloudSyncSettings?.conflictCount ?? 0} conflito(s)
+                {cloudSyncSettings?.lastSyncAt ? formatRelativeSyncTime(cloudSyncSettings.lastSyncAt) : "Sem registro"}
+              </div>
+            </div>
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="text-sm font-semibold text-white">Próxima sync</div>
+              <div className="mt-2 text-sm text-slate-400">{formatDateTime(cloudAutoSyncStatus?.nextRunAt)}</div>
+              <div className="mt-1 text-xs text-slate-500">
+                {cloudAutoSyncStatus?.backoffSeconds
+                  ? `Backoff ${cloudAutoSyncStatus.backoffSeconds}s`
+                  : `${cloudAutoSyncStatus?.intervalSeconds ?? cloudSyncForm.syncIntervalSeconds}s configurado(s)`}
+              </div>
+            </div>
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="text-sm font-semibold text-white">Pendências</div>
+              <div className="mt-2 text-sm text-slate-400">
+                {cloudAutoSyncStatus?.pendingChanges ?? cloudSyncSettings?.pendingChanges ?? 0} alteração(ões)
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                {cloudSyncSettings?.conflictCount ?? 0} conflito(s)
               </div>
             </div>
           </div>
@@ -1230,17 +1368,43 @@ export const SettingsPage = (): JSX.Element => {
               </label>
               <label className="space-y-2">
                 <span className="text-xs font-semibold text-slate-400">Intervalo automático</span>
-                <input
+                <select
                   className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
-                  type="number"
-                  min={60}
-                  max={86400}
-                  value={cloudSyncForm.syncIntervalSeconds}
-                  onChange={(event) =>
-                    setCloudSyncForm({ ...cloudSyncForm, syncIntervalSeconds: Number(event.target.value) })
-                  }
-                />
+                  value={cloudIntervalPreset}
+                  onChange={(event) => {
+                    if (event.target.value === "custom") {
+                      setCloudSyncCustomInterval(true);
+                      return;
+                    }
+                    setCloudSyncCustomInterval(false);
+                    setCloudSyncForm({ ...cloudSyncForm, syncIntervalSeconds: Number(event.target.value) });
+                  }}
+                >
+                  <option value="10">10 segundos</option>
+                  <option value="30">30 segundos</option>
+                  <option value="60">1 minuto</option>
+                  <option value="300">5 minutos</option>
+                  <option value="custom">personalizado</option>
+                </select>
               </label>
+              {cloudSyncCustomInterval && (
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">Intervalo customizado em segundos</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    type="number"
+                    min={CLOUD_SYNC_MIN_INTERVAL_SECONDS}
+                    max={86400}
+                    value={cloudSyncForm.syncIntervalSeconds}
+                    onChange={(event) =>
+                      setCloudSyncForm({
+                        ...cloudSyncForm,
+                        syncIntervalSeconds: normalizeCloudSyncIntervalSeconds(Number(event.target.value))
+                      })
+                    }
+                  />
+                </label>
+              )}
               <label className="space-y-2 xl:col-span-2">
                 <span className="text-xs font-semibold text-slate-400">Workspace atual</span>
                 <select
@@ -1374,6 +1538,22 @@ export const SettingsPage = (): JSX.Element => {
             <Button variant="secondary" disabled={cloudBusy !== null || !cloudCanUseWorkspace} onClick={() => void syncCloudNow()}>
               <RefreshCw size={16} />
               {cloudBusy === "syncing" ? "Sincronizando..." : "Sincronizar agora"}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={cloudBusy !== null || !cloudCanUseWorkspace || cloudAutoSyncStatus?.paused === true}
+              onClick={() => void pauseCloudAutoSync()}
+            >
+              <Pause size={16} />
+              {cloudBusy === "pausing" ? "Pausando..." : "Pausar sync"}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={cloudBusy !== null || !cloudCanUseWorkspace || cloudAutoSyncStatus?.paused === false}
+              onClick={() => void resumeCloudAutoSync()}
+            >
+              <Play size={16} />
+              {cloudBusy === "resuming" ? "Retomando..." : "Retomar sync"}
             </Button>
             <Button variant="secondary" disabled={cloudBusy !== null || !cloudCanUseWorkspace} onClick={() => void downloadCloudWorkspace()}>
               <DownloadCloud size={16} />
@@ -1643,7 +1823,9 @@ export const SettingsPage = (): JSX.Element => {
                 Documentação
               </div>
               <div className="mt-2 text-sm text-slate-400">
-                {gameMarketSettings?.documentation.message ?? "Carregando documentação."}
+                {gameMarketCanCallApi && gameMarketSettings?.documentation.status !== "available"
+                  ? "GameMarket API configurada; documentação local ausente apenas como aviso."
+                  : gameMarketSettings?.documentation.message ?? "Carregando documentação."}
               </div>
               <div className="mt-2 text-xs text-slate-500">
                 {(gameMarketSettings?.documentation.files.length ?? 0) > 0

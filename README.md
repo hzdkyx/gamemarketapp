@@ -69,6 +69,8 @@ npm run dist
 
 Depois de instalar pelo Setup, abra o app pelo atalho **HzdKyx GameMarket Manager** no menu iniciar ou na área de trabalho. Esses atalhos apontam para o `.exe` do Electron e não dependem de CMD.
 
+O Portable pode demorar mais para inicializar dependendo do Windows, SmartScreen, antivírus e extração interna do executável. O Setup instalado tende a abrir mais rápido porque já fica extraído no disco. O app funciona nos dois formatos e exibe uma splash nativa imediatamente enquanto banco local, migrações e interface são preparados.
+
 Para usar em outro PC, envie o instalador `HzdKyx GameMarket Manager Setup 0.1.0.exe`. O `start-app.bat` continua existindo apenas como atalho local de desenvolvimento.
 
 Se o SQLite nativo falhar após troca de versão do Electron ou Node:
@@ -178,6 +180,12 @@ Diferenças:
 - `npm run start:production`: abre `release/win-unpacked/HzdKyx GameMarket Manager.exe` para teste local do build empacotado.
 - `npm run dist`: gera artefatos Windows para uso normal.
 - Setup ou Portable `.exe`: caminho correto para uso final sem CMD.
+
+## Sincronização cloud automática
+
+Quando o modo cloud tem sessão e workspace ativos, o app agenda sync inicial em background depois que a janela principal aparece. O intervalo padrão é 30 segundos, com mínimo seguro de 10 segundos. A tela **Conta e Sincronização** permite 10s, 30s, 1min, 5min ou valor customizado validado.
+
+O cloud sync é separado do polling da GameMarket API. Alterações locais em produtos, variações, estoque operacional e pedidos ficam pendentes e disparam uma tentativa automática em poucos segundos. Se o backend falhar, o app aplica backoff de 10s, 30s, 60s e 120s sem travar a UI.
 
 ## Produtos
 

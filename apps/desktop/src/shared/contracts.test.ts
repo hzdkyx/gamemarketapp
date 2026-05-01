@@ -281,12 +281,14 @@ describe("Cloud sync contracts", () => {
       mode: "local",
       workspaceId: null,
       autoSyncEnabled: false,
-      syncIntervalSeconds: 300,
+      syncIntervalSeconds: 10,
     });
 
     expect(parsed.mode).toBe("local");
     expect(parsed.workspaceId).toBeNull();
     expect(parsed.autoSyncEnabled).toBe(false);
+    expect(parsed.syncIntervalSeconds).toBe(10);
+    expect(() => cloudSyncSettingsUpdateInputSchema.parse({ syncIntervalSeconds: 9 })).toThrow();
   });
 
   it("validates cloud login and collaborator creation without exposing raw token contracts", () => {

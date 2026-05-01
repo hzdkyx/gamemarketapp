@@ -9,9 +9,15 @@ import {
 } from "../../shared/contracts";
 import { authService } from "../services/auth-service";
 import { userService } from "../services/user-service";
+import { startupProfiler } from "../startup-profiler";
 
 export const registerAuthIpc = (ipcMain: IpcMain): void => {
-  ipcMain.handle("auth:getBootstrap", () => authService.getBootstrap());
+  ipcMain.handle("auth:getBootstrap", () => {
+    startupProfiler.mark("auth_check_start", { source: "bootstrap" });
+    const bootstrap = authService.getBootstrap();
+    startupProfiler.mark("auth_check_end", { source: "bootstrap", hasAdmin: bootstrap.hasAdmin });
+    return bootstrap;
+  });
 
   ipcMain.handle("auth:setupAdmin", (_event, payload: unknown) =>
     authService.setupAdmin(authSetupAdminInputSchema.parse(payload))
@@ -23,7 +29,12 @@ export const registerAuthIpc = (ipcMain: IpcMain): void => {
 
   ipcMain.handle("auth:logout", () => authService.logout());
 
-  ipcMain.handle("auth:getSession", () => authService.getSession());
+  ipcMain.handle("auth:getSession", () => {
+    startupProfiler.mark("auth_check_start", { source: "session" });
+    const session = authService.getSession();
+    startupProfiler.mark("auth_check_end", { source: "session", hasSession: Boolean(session) });
+    return session;
+  });
 
   ipcMain.handle("auth:changeOwnPassword", (_event, payload: unknown) =>
     authService.changeOwnPassword(authChangePasswordInputSchema.parse(payload))

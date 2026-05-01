@@ -10,6 +10,7 @@ import {
 import { inventoryService } from "../services/inventory-service";
 import { canAccessInventory } from "../services/auth-permissions";
 import { requirePermission, requireSession } from "../services/auth-session";
+import { cloudSyncPollingService } from "../integrations/cloud-sync/cloud-sync-polling-service";
 
 const requireInventoryAccess = () => {
   const session = requireSession();
@@ -33,19 +34,24 @@ export const registerInventoryIpc = (ipcMain: IpcMain): void => {
 
   ipcMain.handle("inventory:create", (_event, payload: unknown) => {
     const session = requirePermission("canEditInventory");
-    return inventoryService.create(inventoryCreateInputSchema.parse(payload), session.user.id);
+    const result = inventoryService.create(inventoryCreateInputSchema.parse(payload), session.user.id);
+    cloudSyncPollingService.notifyLocalChange();
+    return result;
   });
 
   ipcMain.handle("inventory:update", (_event, payload: unknown) => {
     const session = requirePermission("canEditInventory");
     const parsed = inventoryUpdateInputSchema.parse(payload);
-    return inventoryService.update(parsed.id, parsed.data, session.user.id);
+    const result = inventoryService.update(parsed.id, parsed.data, session.user.id);
+    cloudSyncPollingService.notifyLocalChange();
+    return result;
   });
 
   ipcMain.handle("inventory:delete", (_event, payload: unknown) => {
     requirePermission("canEditInventory");
     const parsed = inventoryDeleteInputSchema.parse(payload);
     inventoryService.delete(parsed.id);
+    cloudSyncPollingService.notifyLocalChange();
     return { deleted: true };
   });
 
