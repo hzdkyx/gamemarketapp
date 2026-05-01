@@ -19,7 +19,8 @@ import {
   UploadCloud,
   UserPlus,
   UsersRound,
-  Volume2
+  Volume2,
+  type LucideIcon
 } from "lucide-react";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
@@ -363,8 +364,20 @@ const cloudStatusTone = (
   return "neutral";
 };
 
+type SettingsSectionId = "users" | "cloud" | "system" | "gamemarket" | "webhook" | "notifications";
+
+const settingsSections: Array<{ id: SettingsSectionId; panelId: string; label: string; icon: LucideIcon }> = [
+  { id: "users", panelId: "settings-users", label: "Usuários e Acesso", icon: UsersRound },
+  { id: "cloud", panelId: "settings-cloud", label: "Conta e Sync", icon: Cloud },
+  { id: "system", panelId: "settings-system", label: "Sistema", icon: Database },
+  { id: "gamemarket", panelId: "settings-gamemarket", label: "GameMarket API", icon: ShieldCheck },
+  { id: "webhook", panelId: "settings-webhook", label: "Webhook Server", icon: Server },
+  { id: "notifications", panelId: "settings-notifications", label: "Notificações", icon: BellRing }
+];
+
 export const SettingsPage = (): JSX.Element => {
   const api = useMemo(() => getDesktopApi(), []);
+  const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>("users");
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus | null>(null);
   const [appMeta, setAppMeta] = useState<AppMeta | null>(null);
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
@@ -551,8 +564,8 @@ export const SettingsPage = (): JSX.Element => {
   };
 
   const testSound = async (): Promise<void> => {
-    const played = await playSaleAlertSound(settings?.soundVolume ?? 0.7);
-    setNotificationResult(played ? "Som de teste reproduzido." : "Som indisponível nesta execução.");
+    const result = await playSaleAlertSound(settings?.soundVolume ?? 0.7);
+    setNotificationResult(result.message);
   };
 
   const pollGameMarketNow = async (): Promise<void> => {
@@ -1180,10 +1193,36 @@ export const SettingsPage = (): JSX.Element => {
     cloudSyncSettings?.workspaceRole === "owner" || cloudSyncSettings?.workspaceRole === "admin";
 
   return (
-    <div className="grid gap-6 pb-10 xl:grid-cols-2">
+    <div className="space-y-6">
+      <nav className="sticky top-0 z-20 rounded-lg border border-line/80 bg-background/[0.86] p-2 shadow-premium backdrop-blur">
+        <div className="flex flex-wrap gap-2">
+          {settingsSections.map((section) => {
+            const Icon = section.icon;
+            const isActive = activeSettingsSection === section.id;
+            return (
+              <Button
+                key={section.id}
+                type="button"
+                size="sm"
+                variant={isActive ? "primary" : "secondary"}
+                aria-controls={section.panelId}
+                aria-pressed={isActive}
+                onClick={() => setActiveSettingsSection(section.id)}
+                className={isActive ? "shadow-glowCyan" : "text-slate-300"}
+              >
+                <Icon size={14} />
+                {section.label}
+              </Button>
+            );
+          })}
+        </div>
+      </nav>
+
+      <div className="grid gap-6 pb-10 xl:grid-cols-2">
       {error && <div className="xl:col-span-2 rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">{error}</div>}
 
-      <Card className="xl:col-span-2">
+      {activeSettingsSection === "users" && (
+      <Card id="settings-users" className="scroll-mt-28 xl:col-span-2">
         <CardHeader className="items-start">
           <div>
             <CardTitle>Usuários e Acesso</CardTitle>
@@ -1265,14 +1304,18 @@ export const SettingsPage = (): JSX.Element => {
           </div>
         </CardContent>
       </Card>
+      )}
 
-      <Card className="xl:col-span-2">
+      {activeSettingsSection === "cloud" && (
+      <Card id="settings-cloud" className="scroll-mt-28 xl:col-span-2">
         <CardHeader className="items-start">
           <div>
             <CardTitle>Conta e Sincronização</CardTitle>
             <div className="mt-1 text-sm text-slate-400">Workspace cloud compartilhado para operação em mais de um desktop.</div>
           </div>
-          <Badge tone={cloudStatusTone(cloudStatus)}>{cloudStatusLabel[cloudStatus]}</Badge>
+          <Badge tone={cloudStatusTone(cloudStatus)} className={cloudBusy ? "status-pulse" : undefined}>
+            {cloudStatusLabel[cloudStatus]}
+          </Badge>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
@@ -1754,8 +1797,10 @@ export const SettingsPage = (): JSX.Element => {
           )}
         </CardContent>
       </Card>
+      )}
 
-      <Card>
+      {activeSettingsSection === "system" && (
+      <Card id="settings-system" className="scroll-mt-28 xl:col-span-2">
         <CardHeader>
           <CardTitle>Sistema</CardTitle>
           <Badge tone={databaseStatus?.connected ? "success" : "warning"}>
@@ -1797,11 +1842,13 @@ export const SettingsPage = (): JSX.Element => {
           </div>
         </CardContent>
       </Card>
+      )}
 
-      <Card>
+      {activeSettingsSection === "gamemarket" && (
+      <Card id="settings-gamemarket" className="scroll-mt-28 xl:col-span-2">
         <CardHeader>
           <CardTitle>GameMarket API</CardTitle>
-          <Badge tone={gameMarketStatusTone(gameMarketStatus)}>
+          <Badge tone={gameMarketStatusTone(gameMarketStatus)} className={gameMarketBusy ? "status-pulse" : undefined}>
             {gameMarketStatusLabel[gameMarketStatus]}
           </Badge>
         </CardHeader>
@@ -1989,11 +2036,13 @@ export const SettingsPage = (): JSX.Element => {
           </div>
         </CardContent>
       </Card>
+      )}
 
-      <Card>
+      {activeSettingsSection === "webhook" && (
+      <Card id="settings-webhook" className="scroll-mt-28 xl:col-span-2">
         <CardHeader>
           <CardTitle>Webhook Server / Tempo Real</CardTitle>
-          <Badge tone={webhookServerStatusTone(webhookServerStatus)}>
+          <Badge tone={webhookServerStatusTone(webhookServerStatus)} className={webhookServerBusy ? "status-pulse" : undefined}>
             {webhookServerStatusLabel[webhookServerStatus]}
           </Badge>
         </CardHeader>
@@ -2181,8 +2230,10 @@ export const SettingsPage = (): JSX.Element => {
           </div>
         </CardContent>
       </Card>
+      )}
 
-      <Card className="xl:col-span-2">
+      {activeSettingsSection === "notifications" && (
+      <Card id="settings-notifications" className="scroll-mt-28 xl:col-span-2">
         <CardHeader className="items-start">
           <div>
             <CardTitle>Notificações Locais</CardTitle>
@@ -2356,10 +2407,13 @@ export const SettingsPage = (): JSX.Element => {
           </div>
         </CardContent>
       </Card>
+      )}
+
+      </div>
 
       {userForm && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-6">
-          <div className="w-full max-w-2xl rounded-lg border border-line bg-background shadow-premium">
+          <div className="modal-panel w-full max-w-2xl rounded-lg border border-line bg-background shadow-premium">
             <div className="flex items-center justify-between border-b border-line p-5">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">
@@ -2466,7 +2520,7 @@ export const SettingsPage = (): JSX.Element => {
 
       {resetPasswordUser && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-6">
-          <div className="w-full max-w-md rounded-lg border border-line bg-background shadow-premium">
+          <div className="modal-panel w-full max-w-md rounded-lg border border-line bg-background shadow-premium">
             <div className="border-b border-line p-5">
               <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">Resetar senha</div>
               <h2 className="mt-1 text-lg font-bold text-white">{resetPasswordUser.name}</h2>

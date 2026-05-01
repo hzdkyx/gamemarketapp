@@ -14,6 +14,10 @@ describe("inventory operational stock editing", () => {
     expect(source).toContain("api.productVariants.update");
     expect(source).toContain("api.products.update");
     expect(source).toContain("productVariantId ?? operationalItem.id");
+    expect(source).toContain("createPortal(");
+    expect(source).toContain("document.body");
+    expect(source).toContain("firstInputRef.current?.focus()");
+    expect(source).toContain("operationalEditTriggerRef");
     expect(source).not.toContain('title="Abrir produtos"');
     expect(source).not.toContain("<Link to=\"/products\"");
   });

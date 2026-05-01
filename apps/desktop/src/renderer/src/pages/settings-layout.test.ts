@@ -14,13 +14,20 @@ describe("settings page scroll layout", () => {
 
     expect(appShell).toContain('className="flex min-h-0 min-w-0 flex-col"');
     expect(appShell).toContain('className="min-h-0 flex-1 overflow-hidden"');
-    expect(appShell).toContain('className="h-full min-h-0 overflow-y-auto px-8 py-6"');
+    expect(appShell).toContain('className="page-transition h-full min-h-0 overflow-y-auto px-8 py-6"');
   });
 
-  it("keeps the lower settings sections inside the scrollable content", () => {
+  it("uses internal section tabs instead of HashRouter-breaking anchors", () => {
     const settingsPage = readSource("settings.tsx");
 
     expect(settingsPage).toContain('className="grid gap-6 pb-10 xl:grid-cols-2"');
+    expect(settingsPage).toContain('useState<SettingsSectionId>("users")');
+    expect(settingsPage).toContain("onClick={() => setActiveSettingsSection(section.id)}");
+    expect(settingsPage).toContain("aria-pressed={isActive}");
+    expect(settingsPage).not.toContain('href={`#${section.id}`}');
+    expect(settingsPage).toContain('activeSettingsSection === "cloud"');
+    expect(settingsPage).toContain('activeSettingsSection === "gamemarket"');
+    expect(settingsPage).toContain('activeSettingsSection === "notifications"');
     expect(settingsPage).toContain("<CardTitle>Conta e Sincronização</CardTitle>");
     expect(settingsPage).toContain("<CardTitle>Webhook Server / Tempo Real</CardTitle>");
     expect(settingsPage).toContain("<CardTitle>Notificações Locais</CardTitle>");

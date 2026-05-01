@@ -315,7 +315,7 @@ export const ProductVariantsPanel = ({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
-      <div className="h-full w-full max-w-7xl overflow-y-auto border-l border-line bg-background shadow-premium">
+      <div className="drawer-panel h-full w-full max-w-7xl overflow-y-auto border-l border-line bg-background shadow-premium">
         <div className="sticky top-0 z-20 flex items-start justify-between gap-4 border-b border-line bg-background/95 px-6 py-5">
           <div className="min-w-0">
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">

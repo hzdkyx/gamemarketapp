@@ -20,6 +20,7 @@ import { useSearchParams } from "react-router-dom";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card";
+import { MetricCard as Metric } from "@renderer/components/ui/metric-card";
 import { Table, Td, Th } from "@renderer/components/ui/table";
 import { useAuth } from "@renderer/lib/auth-context";
 import { downloadCsv } from "@renderer/lib/csv";
@@ -178,41 +179,6 @@ const formToCreatePayload = (form: OrderFormState): OrderCreateInput => {
   return payload;
 };
 
-const Metric = ({
-  label,
-  value,
-  helper,
-  tone = "cyan"
-}: {
-  label: string;
-  value: string;
-  helper: string;
-  tone?: BadgeTone;
-}): JSX.Element => {
-  const toneClass: Record<BadgeTone, string> = {
-    success: "border-success/25 bg-success/10 text-emerald-300",
-    warning: "border-warning/25 bg-warning/10 text-amber-300",
-    danger: "border-danger/25 bg-danger/10 text-red-300",
-    purple: "border-purple/25 bg-purple/10 text-violet-200",
-    neutral: "border-slate-600/60 bg-slate-800/50 text-slate-200",
-    cyan: "border-cyan/25 bg-cyan/10 text-cyan"
-  };
-
-  return (
-    <Card className="min-h-[126px]">
-      <CardContent className="flex h-full flex-col justify-between">
-        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</div>
-        <div>
-          <div className={`inline-flex rounded-md border px-2.5 py-1 text-2xl font-bold ${toneClass[tone]}`}>
-            {value}
-          </div>
-          <div className="mt-3 text-xs text-slate-400">{helper}</div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
-
 const OrderForm = ({
   mode,
   form,
@@ -251,7 +217,7 @@ const OrderForm = ({
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/60">
-      <div className="h-full w-full max-w-4xl overflow-y-auto border-l border-line bg-background shadow-premium">
+      <div className="drawer-panel h-full w-full max-w-4xl overflow-y-auto border-l border-line bg-background shadow-premium">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-background/95 px-6 py-5">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">
@@ -913,16 +879,28 @@ export const OrdersPage = (): JSX.Element => {
                       <span className="font-mono text-xs text-slate-300">{selected.order.externalStatus ?? "-"}</span>
                     </div>
                     <div className="flex justify-between gap-3">
-                      <span className="text-slate-500">Líquido</span>
-                      <span className="font-semibold text-cyan">{formatCurrencyBRL(selected.order.netValue)}</span>
-                    </div>
-                    <div className="flex justify-between gap-3">
                       <span className="text-slate-500">Estoque</span>
                       <span className="font-mono text-xs text-slate-300">{selected.order.inventoryCode ?? "-"}</span>
                     </div>
                   </div>
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    <div className="rounded-md border border-line bg-panel px-3 py-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Bruto</div>
+                      <div className="mt-1 text-sm font-semibold text-white">{formatCurrencyBRL(selected.order.salePrice)}</div>
+                    </div>
+                    <div className="rounded-md border border-cyan/25 bg-cyan/10 px-3 py-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cyan/80">Líquido</div>
+                      <div className="mt-1 text-sm font-semibold text-cyan">{formatCurrencyBRL(selected.order.netValue)}</div>
+                    </div>
+                    <div className="rounded-md border border-success/25 bg-success/10 px-3 py-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-300/80">Lucro</div>
+                      <div className={selected.order.profit >= 0 ? "mt-1 text-sm font-semibold text-emerald-300" : "mt-1 text-sm font-semibold text-red-300"}>
+                        {formatCurrencyBRL(selected.order.profit)}
+                      </div>
+                    </div>
+                  </div>
                   {selected.order.status === "delivered" && (
-                    <div className="mt-4 rounded-md border border-cyan/25 bg-cyan/10 p-3 text-sm text-cyan">
+                    <div className="mt-4 rounded-md border border-cyan/25 bg-cyan/10 p-3 text-sm text-cyan shadow-glowCyan">
                       <div className="font-semibold">Entregue — aguardando garantia/liberação</div>
                       <div className="mt-1 text-xs leading-5 text-slate-300">
                         A GameMarket pode levar até 7 dias para liberar/concluir o pedido. Status GameMarket:

@@ -15,10 +15,12 @@ import {
   Trash2,
   TriangleAlert
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card";
+import { MetricCard as Metric } from "@renderer/components/ui/metric-card";
 import { Table, Td, Th } from "@renderer/components/ui/table";
 import { useAuth } from "@renderer/lib/auth-context";
 import { downloadCsv } from "@renderer/lib/csv";
@@ -228,41 +230,6 @@ const formToCreatePayload = (form: InventoryFormState): InventoryCreateInput => 
   orderId: toNullable(form.orderId)
 });
 
-const Metric = ({
-  label,
-  value,
-  helper,
-  tone = "cyan"
-}: {
-  label: string;
-  value: string;
-  helper: string;
-  tone?: BadgeTone;
-}): JSX.Element => {
-  const toneClass: Record<BadgeTone, string> = {
-    success: "border-success/25 bg-success/10 text-emerald-300",
-    warning: "border-warning/25 bg-warning/10 text-amber-300",
-    danger: "border-danger/25 bg-danger/10 text-red-300",
-    purple: "border-purple/25 bg-purple/10 text-violet-200",
-    neutral: "border-slate-600/60 bg-slate-800/50 text-slate-200",
-    cyan: "border-cyan/25 bg-cyan/10 text-cyan"
-  };
-
-  return (
-    <Card className="min-h-[126px]">
-      <CardContent className="flex h-full flex-col justify-between">
-        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</div>
-        <div>
-          <div className={`inline-flex rounded-md border px-2.5 py-1 text-2xl font-bold ${toneClass[tone]}`}>
-            {value}
-          </div>
-          <div className="mt-3 text-xs text-slate-400">{helper}</div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
-
 const InventoryForm = ({
   mode,
   form,
@@ -284,6 +251,7 @@ const InventoryForm = ({
   saving: boolean;
   error: string | null;
 }): JSX.Element => {
+  const firstInputRef = useRef<HTMLInputElement>(null);
   const update = <K extends keyof InventoryFormState>(key: K, value: InventoryFormState[K]): void => {
     setForm({ ...form, [key]: value });
   };
@@ -291,9 +259,17 @@ const InventoryForm = ({
     (variant) => variant.productId === form.productId && variant.status !== "archived"
   );
 
-  return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-black/60">
-      <div className="h-full w-full max-w-4xl overflow-y-auto border-l border-line bg-background shadow-premium">
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      firstInputRef.current?.focus();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [mode]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
+      <div className="drawer-panel h-full w-full max-w-4xl overflow-y-auto border-l border-line bg-background shadow-premium">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-background/95 px-6 py-5">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">
@@ -318,6 +294,7 @@ const InventoryForm = ({
             <label className="space-y-2">
               <span className="text-xs font-semibold text-slate-400">ID interno</span>
               <input
+                ref={firstInputRef}
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 value={form.inventoryCode}
                 onChange={(event) => update("inventoryCode", event.target.value)}
@@ -500,7 +477,8 @@ const InventoryForm = ({
           </label>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
@@ -523,13 +501,22 @@ const OperationalStockForm = ({
 }): JSX.Element => {
   const isVariant = item.scope === "variant";
   const statusValues = isVariant ? productVariantStatusValues : productStatusValues;
+  const firstInputRef = useRef<HTMLInputElement>(null);
   const update = <K extends keyof OperationalStockFormState>(key: K, value: OperationalStockFormState[K]): void => {
     setForm({ ...form, [key]: value });
   };
 
-  return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-black/60">
-      <div className="h-full w-full max-w-3xl overflow-y-auto border-l border-line bg-background shadow-premium">
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      firstInputRef.current?.focus();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [item.id]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
+      <div className="drawer-panel h-full w-full max-w-3xl overflow-y-auto border-l border-line bg-background shadow-premium">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-background/95 px-6 py-5">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">Editar estoque operacional</div>
@@ -573,6 +560,7 @@ const OperationalStockForm = ({
             <label className="space-y-2">
               <span className="text-xs font-semibold text-slate-400">Preço de venda</span>
               <input
+                ref={firstInputRef}
                 className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                 type="number"
                 min="0"
@@ -665,7 +653,8 @@ const OperationalStockForm = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
@@ -690,9 +679,9 @@ const SecretPanel = ({
     accessNotes: item.hasAccessNotes
   };
 
-  return (
-    <div className="fixed inset-0 z-40 grid place-items-center bg-black/60 p-6">
-      <div className="w-full max-w-2xl rounded-lg border border-line bg-background shadow-premium">
+  return createPortal(
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-6">
+      <div className="modal-panel w-full max-w-2xl rounded-lg border border-line bg-background shadow-premium">
         <div className="flex items-start justify-between gap-4 border-b border-line p-5">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">Revelação controlada</div>
@@ -733,7 +722,8 @@ const SecretPanel = ({
           })}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
@@ -790,6 +780,7 @@ export const InventoryPage = (): JSX.Element => {
   const [operationalSaving, setOperationalSaving] = useState(false);
   const [secretItem, setSecretItem] = useState<InventoryRecord | null>(null);
   const [secretValues, setSecretValues] = useState<Partial<Record<InventorySecretField, string>>>({});
+  const operationalEditTriggerRef = useRef<HTMLElement | null>(null);
 
   const loadInventory = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -831,6 +822,7 @@ export const InventoryPage = (): JSX.Element => {
   };
 
   const openOperationalEdit = (item: OperationalStockRecord): void => {
+    operationalEditTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setOperationalItem(item);
     setOperationalForm(operationalItemToForm(item));
     setError(null);
@@ -840,6 +832,10 @@ export const InventoryPage = (): JSX.Element => {
     setOperationalItem(null);
     setOperationalForm(null);
     setError(null);
+    const elementToRestore = operationalEditTriggerRef.current;
+    window.setTimeout(() => {
+      elementToRestore?.focus();
+    }, 0);
   };
 
   const saveOperationalStock = async (): Promise<void> => {

@@ -28,6 +28,8 @@ import {
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card";
+import { EmptyState } from "@renderer/components/ui/empty-state";
+import { MetricCard } from "@renderer/components/ui/metric-card";
 import { getDesktopApi } from "@renderer/lib/desktop-api";
 import type { DashboardSummary, EventSeverity, OrderStatus } from "../../../shared/contracts";
 
@@ -80,48 +82,7 @@ const severityTone = (severity: EventSeverity): "neutral" | "success" | "warning
   return "neutral";
 };
 
-interface MetricCardProps {
-  label: string;
-  value: string;
-  helper: string;
-  icon: JSX.Element;
-  tone?: "cyan" | "purple" | "success" | "warning" | "danger";
-}
-
-const toneClass: Record<NonNullable<MetricCardProps["tone"]>, string> = {
-  cyan: "text-cyan bg-cyan/10 border-cyan/25",
-  purple: "text-violet-300 bg-purple/10 border-purple/25",
-  success: "text-emerald-300 bg-success/10 border-success/25",
-  warning: "text-amber-300 bg-warning/10 border-warning/25",
-  danger: "text-red-300 bg-danger/10 border-danger/25"
-};
-
-const pieColors = ["#22d3ee", "#8b5cf6", "#22c55e", "#f59e0b", "#ef4444", "#3b82f6"];
-
-const MetricCard = ({ label, value, helper, icon, tone = "cyan" }: MetricCardProps): JSX.Element => (
-  <Card className="min-h-[132px]">
-    <CardContent className="flex h-full flex-col justify-between">
-      <div className="flex items-start justify-between gap-4">
-        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</div>
-        <div className={`rounded-md border p-2 ${toneClass[tone]}`}>{icon}</div>
-      </div>
-      <div>
-        <div className="mt-5 text-2xl font-bold text-white">{value}</div>
-        <div className="mt-1 text-xs font-medium text-slate-400">{helper}</div>
-      </div>
-    </CardContent>
-  </Card>
-);
-
-const EmptyState = ({ label }: { label: string }): JSX.Element => (
-  <div className="grid h-full min-h-[260px] place-items-center rounded-lg border border-dashed border-line bg-panelSoft text-center">
-    <div>
-      <TrendingUp className="mx-auto text-slate-600" size={34} />
-      <div className="mt-3 font-semibold text-white">{label}</div>
-      <div className="mt-1 text-sm text-slate-400">Crie pedidos e eventos para popular este painel.</div>
-    </div>
-  </div>
-);
+const pieColors = ["#27d7f2", "#8b5cf6", "#25d366", "#f6b73c", "#ff4d5e", "#4f8bff"];
 
 export const DashboardPage = (): JSX.Element => {
   const api = useMemo(() => getDesktopApi(), []);
@@ -171,10 +132,14 @@ export const DashboardPage = (): JSX.Element => {
 
   return (
     <div className="space-y-6">
-      {error && <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">{error}</div>}
+      {error && (
+        <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200 shadow-[0_0_24px_rgba(255,77,94,0.08)]">
+          {error}
+        </div>
+      )}
 
       {(!summary.gameMarketApiConfigured || !summary.gameMarketPollingActive) && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 p-4 shadow-insetPanel">
           <div>
             <div className="text-sm font-semibold text-amber-200">Atenção GameMarket</div>
             <div className="mt-1 text-sm text-slate-300">
@@ -184,7 +149,7 @@ export const DashboardPage = (): JSX.Element => {
             </div>
           </div>
           <Button variant="secondary" disabled={pollingBusy} onClick={() => void checkGameMarketNow()}>
-            <RefreshCw size={16} />
+            <RefreshCw size={16} className={pollingBusy ? "motion-safe:animate-spin" : undefined} />
             {pollingBusy ? "Verificando..." : "Verificar agora"}
           </Button>
         </div>
@@ -197,6 +162,7 @@ export const DashboardPage = (): JSX.Element => {
           helper="Notificações locais pendentes"
           icon={<BellRing size={18} />}
           tone="cyan"
+          loading={loading}
         />
         <MetricCard
           label="Entregues aguardando liberação"
@@ -204,6 +170,7 @@ export const DashboardPage = (): JSX.Element => {
           helper="Delivered sem completed"
           icon={<PackageX size={18} />}
           tone="warning"
+          loading={loading}
         />
         <MetricCard
           label="Bruto aguardando liberação"
@@ -211,6 +178,7 @@ export const DashboardPage = (): JSX.Element => {
           helper="Independente do mês atual"
           icon={<CircleDollarSign size={18} />}
           tone="success"
+          loading={loading}
         />
         <MetricCard
           label="A receber / aguardando liberação"
@@ -218,6 +186,7 @@ export const DashboardPage = (): JSX.Element => {
           helper="Líquido dos delivered pendentes"
           icon={<ArrowUpRight size={18} />}
           tone="cyan"
+          loading={loading}
         />
         <MetricCard
           label="Lucro previsto a liberar"
@@ -225,14 +194,19 @@ export const DashboardPage = (): JSX.Element => {
           helper="Lucro dos delivered pendentes"
           icon={<TrendingUp size={18} />}
           tone="success"
+          loading={loading}
         />
-        <Card className="min-h-[132px]">
+        <Card className="min-h-[128px] overflow-hidden">
+          <div className="h-px bg-gradient-to-r from-cyan/50 via-cyan/20 to-transparent" />
           <CardContent className="flex h-full flex-col justify-between">
             <div className="flex items-start justify-between gap-4">
               <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                 Última verificação GameMarket
               </div>
-              <Badge tone={summary.gameMarketPollingActive ? "success" : "warning"}>
+              <Badge
+                tone={summary.gameMarketPollingActive ? "success" : "warning"}
+                className={pollingBusy ? "status-pulse" : undefined}
+              >
                 {summary.gameMarketPollingActive ? "ativo" : "inativo"}
               </Badge>
             </div>
@@ -248,7 +222,7 @@ export const DashboardPage = (): JSX.Element => {
                   : summary.gameMarketLastPollingMessage ?? summary.gameMarketLastPollingStatus}
               </div>
               <Button className="mt-3" size="sm" variant="secondary" disabled={pollingBusy} onClick={() => void checkGameMarketNow()}>
-                <RefreshCw size={14} />
+                <RefreshCw size={14} className={pollingBusy ? "motion-safe:animate-spin" : undefined} />
                 {pollingBusy ? "Verificando..." : "Verificar agora"}
               </Button>
             </div>
@@ -263,6 +237,7 @@ export const DashboardPage = (): JSX.Element => {
           helper={loading ? "Carregando SQLite" : "Pedidos confirmados ou finalizados"}
           icon={<TrendingUp size={18} />}
           tone="cyan"
+          loading={loading}
         />
         <MetricCard
           label="Vendas mês atual"
@@ -270,6 +245,7 @@ export const DashboardPage = (): JSX.Element => {
           helper="Mês atual"
           icon={<ReceiptText size={18} />}
           tone="purple"
+          loading={loading}
         />
         <MetricCard
           label="Bruto mês atual"
@@ -277,6 +253,7 @@ export const DashboardPage = (): JSX.Element => {
           helper="Antes da taxa"
           icon={<CircleDollarSign size={18} />}
           tone="success"
+          loading={loading}
         />
         <MetricCard
           label="Líquido mês atual"
@@ -284,6 +261,7 @@ export const DashboardPage = (): JSX.Element => {
           helper="Estimado com 87%"
           icon={<ArrowUpRight size={18} />}
           tone="cyan"
+          loading={loading}
         />
         <MetricCard
           label="Lucro mês atual"
@@ -291,6 +269,7 @@ export const DashboardPage = (): JSX.Element => {
           helper="Snapshot dos pedidos"
           icon={<TrendingUp size={18} />}
           tone="success"
+          loading={loading}
         />
         <MetricCard
           label="Ação pendente"
@@ -298,6 +277,7 @@ export const DashboardPage = (): JSX.Element => {
           helper="Entrega, mediação ou revisão"
           icon={<AlertTriangle size={18} />}
           tone="warning"
+          loading={loading}
         />
         <MetricCard
           label="Mediação/problema"
@@ -305,6 +285,7 @@ export const DashboardPage = (): JSX.Element => {
           helper="Pedidos destacados"
           icon={<TriangleAlert size={18} />}
           tone="danger"
+          loading={loading}
         />
         <MetricCard
           label="Estoque baixo"
@@ -312,6 +293,7 @@ export const DashboardPage = (): JSX.Element => {
           helper="Produtos/variações operacionais"
           icon={<PackageX size={18} />}
           tone="warning"
+          loading={loading}
         />
         <MetricCard
           label="Sem estoque"
@@ -319,6 +301,7 @@ export const DashboardPage = (): JSX.Element => {
           helper="Produtos/variações operacionais"
           icon={<PackageX size={18} />}
           tone="danger"
+          loading={loading}
         />
       </div>
 
@@ -333,13 +316,13 @@ export const DashboardPage = (): JSX.Element => {
               {hasSalesChart ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={summary.salesByDay} margin={{ left: 4, right: 12, top: 12, bottom: 0 }}>
-                    <CartesianGrid stroke="#252b3a" vertical={false} />
+                    <CartesianGrid stroke="#202a3a" vertical={false} />
                     <XAxis dataKey="day" stroke="#94a3b8" tickLine={false} axisLine={false} />
                     <YAxis stroke="#94a3b8" tickLine={false} axisLine={false} />
                     <Tooltip
                       contentStyle={{
-                        background: "#10131d",
-                        border: "1px solid #252b3a",
+                        background: "#0b1018",
+                        border: "1px solid #202a3a",
                         borderRadius: 8,
                         color: "#e2e8f0"
                       }}
@@ -347,12 +330,17 @@ export const DashboardPage = (): JSX.Element => {
                         name === "orders" ? [String(value), "Pedidos"] : [formatCurrencyBRL(Number(value)), String(name)]
                       }
                     />
-                    <Bar dataKey="gross" fill="#22d3ee" radius={[6, 6, 0, 0]} opacity={0.72} />
+                    <Bar dataKey="gross" fill="#27d7f2" radius={[6, 6, 0, 0]} opacity={0.72} />
                     <Line type="monotone" dataKey="profit" stroke="#8b5cf6" strokeWidth={3} dot={false} />
                   </ComposedChart>
                 </ResponsiveContainer>
               ) : (
-                <EmptyState label="Sem vendas recentes" />
+                <EmptyState
+                  title="Sem vendas recentes"
+                  helper="Crie pedidos e eventos para popular este painel."
+                  icon={<TrendingUp size={24} />}
+                  className="h-full min-h-[260px]"
+                />
               )}
             </div>
           </CardContent>
@@ -395,13 +383,13 @@ export const DashboardPage = (): JSX.Element => {
               {hasCategoryChart ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={summary.profitByCategory} margin={{ left: 4, right: 12, top: 12, bottom: 0 }}>
-                    <CartesianGrid stroke="#252b3a" vertical={false} />
+                    <CartesianGrid stroke="#202a3a" vertical={false} />
                     <XAxis dataKey="category" stroke="#94a3b8" tickLine={false} axisLine={false} />
                     <YAxis stroke="#94a3b8" tickLine={false} axisLine={false} />
                     <Tooltip
                       contentStyle={{
-                        background: "#10131d",
-                        border: "1px solid #252b3a",
+                        background: "#0b1018",
+                        border: "1px solid #202a3a",
                         borderRadius: 8,
                         color: "#e2e8f0"
                       }}
@@ -411,7 +399,12 @@ export const DashboardPage = (): JSX.Element => {
                   </ComposedChart>
                 </ResponsiveContainer>
               ) : (
-                <EmptyState label="Sem lucro por categoria" />
+                <EmptyState
+                  title="Sem lucro por categoria"
+                  helper="Crie pedidos e eventos para popular este painel."
+                  icon={<TrendingUp size={24} />}
+                  className="h-full min-h-[260px]"
+                />
               )}
             </div>
           </CardContent>
@@ -441,13 +434,13 @@ export const DashboardPage = (): JSX.Element => {
                       paddingAngle={2}
                     >
                       {summary.statusBreakdown.map((row, index) => (
-                        <Cell key={row.status} fill={pieColors[index % pieColors.length] ?? "#22d3ee"} />
+                        <Cell key={row.status} fill={pieColors[index % pieColors.length] ?? "#27d7f2"} />
                       ))}
                     </Pie>
                     <Tooltip
                       contentStyle={{
-                        background: "#10131d",
-                        border: "1px solid #252b3a",
+                        background: "#0b1018",
+                        border: "1px solid #202a3a",
                         borderRadius: 8,
                         color: "#e2e8f0"
                       }}
@@ -455,7 +448,12 @@ export const DashboardPage = (): JSX.Element => {
                   </PieChart>
                 </ResponsiveContainer>
               ) : (
-                <EmptyState label="Sem pedidos para status" />
+                <EmptyState
+                  title="Sem pedidos para status"
+                  helper="Crie pedidos e eventos para popular este painel."
+                  icon={<ReceiptText size={24} />}
+                  className="h-full min-h-[260px]"
+                />
               )}
             </div>
           </CardContent>

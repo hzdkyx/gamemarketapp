@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card";
+import { MetricCard as Metric } from "@renderer/components/ui/metric-card";
 import { Table, Td, Th } from "@renderer/components/ui/table";
 import { useAuth } from "@renderer/lib/auth-context";
 import { downloadCsv } from "@renderer/lib/csv";
@@ -27,41 +28,6 @@ const defaultFilters: EventListInput = {
   read: "all",
   dateFrom: null,
   dateTo: null
-};
-
-const Metric = ({
-  label,
-  value,
-  helper,
-  tone = "cyan"
-}: {
-  label: string;
-  value: string;
-  helper: string;
-  tone?: BadgeTone;
-}): JSX.Element => {
-  const toneClass: Record<BadgeTone, string> = {
-    success: "border-success/25 bg-success/10 text-emerald-300",
-    warning: "border-warning/25 bg-warning/10 text-amber-300",
-    danger: "border-danger/25 bg-danger/10 text-red-300",
-    purple: "border-purple/25 bg-purple/10 text-violet-200",
-    neutral: "border-slate-600/60 bg-slate-800/50 text-slate-200",
-    cyan: "border-cyan/25 bg-cyan/10 text-cyan"
-  };
-
-  return (
-    <Card className="min-h-[126px]">
-      <CardContent className="flex h-full flex-col justify-between">
-        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</div>
-        <div>
-          <div className={`inline-flex rounded-md border px-2.5 py-1 text-2xl font-bold ${toneClass[tone]}`}>
-            {value}
-          </div>
-          <div className="mt-3 text-xs text-slate-400">{helper}</div>
-        </div>
-      </CardContent>
-    </Card>
-  );
 };
 
 export const EventsPage = (): JSX.Element => {

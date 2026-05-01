@@ -15,10 +15,10 @@ const AuthFrame = ({
   helper: string;
   children: ReactNode;
 }): JSX.Element => (
-  <div className="grid min-h-screen place-items-center bg-background px-6 py-10 text-slate-100">
+  <div className="premium-grid grid min-h-screen place-items-center bg-background px-6 py-10 text-slate-100">
     <div className="w-full max-w-md">
       <div className="mb-7 flex items-center gap-3">
-        <div className="grid h-12 w-12 place-items-center rounded-lg border border-cyan/30 bg-cyan/10 text-cyan">
+        <div className="grid h-12 w-12 place-items-center rounded-lg border border-cyan/30 bg-cyan/10 text-cyan shadow-glowCyan">
           <ShieldCheck size={24} />
         </div>
         <div>
@@ -27,11 +27,14 @@ const AuthFrame = ({
         </div>
       </div>
 
-      <div className="rounded-lg border border-line bg-panel/95 p-6 shadow-premium">
+      <div className="premium-surface overflow-hidden rounded-lg">
+        <div className="h-px bg-gradient-to-r from-cyan/60 via-purple/35 to-transparent" />
+        <div className="p-6">
         <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan">{eyebrow}</div>
         <h1 className="mt-2 text-2xl font-bold text-white">{title}</h1>
         <p className="mt-2 text-sm leading-6 text-slate-400">{helper}</p>
         <div className="mt-6">{children}</div>
+        </div>
       </div>
     </div>
   </div>
@@ -53,7 +56,7 @@ const Field = ({
   <label className="block space-y-2">
     <span className="text-xs font-semibold text-slate-400">{label}</span>
     <input
-      className="focus-ring h-11 w-full rounded-md border border-line bg-panelSoft px-3 text-sm text-white"
+      className="premium-control h-11 w-full px-3"
       type={type}
       value={value}
       autoComplete={autoComplete}
@@ -98,7 +101,7 @@ export const LoginPage = (): JSX.Element => {
           autoComplete="current-password"
           onChange={setPassword}
         />
-        {error && <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">{error}</div>}
+        {error && <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200 shadow-[0_0_24px_rgba(255,77,94,0.08)]">{error}</div>}
         <Button className="w-full" variant="primary" type="submit" disabled={submitting}>
           <LockKeyhole size={16} />
           {submitting ? "Entrando..." : "Entrar"}
@@ -154,7 +157,7 @@ export const InitialSetupPage = (): JSX.Element => {
           autoComplete="new-password"
           onChange={setConfirmPassword}
         />
-        {error && <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">{error}</div>}
+        {error && <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200 shadow-[0_0_24px_rgba(255,77,94,0.08)]">{error}</div>}
         <Button className="w-full" variant="primary" type="submit" disabled={submitting}>
           <ShieldCheck size={16} />
           {submitting ? "Criando..." : "Criar admin"}
@@ -214,7 +217,7 @@ export const ChangePasswordPage = (): JSX.Element => {
           autoComplete="new-password"
           onChange={setConfirmPassword}
         />
-        {error && <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200">{error}</div>}
+        {error && <div className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-red-200 shadow-[0_0_24px_rgba(255,77,94,0.08)]">{error}</div>}
         <Button className="w-full" variant="primary" type="submit" disabled={submitting}>
           <KeyRound size={16} />
           {submitting ? "Salvando..." : "Salvar senha"}
@@ -225,8 +228,9 @@ export const ChangePasswordPage = (): JSX.Element => {
 };
 
 export const AuthLoadingPage = (): JSX.Element => (
-  <div className="grid min-h-screen place-items-center bg-background text-slate-300">
-    <div className="rounded-lg border border-line bg-panel px-5 py-4 text-sm font-semibold">
+  <div className="premium-grid grid min-h-screen place-items-center bg-background text-slate-300">
+    <div className="premium-surface rounded-lg px-5 py-4 text-sm font-semibold">
+      <span className="status-pulse mr-2 inline-block h-2 w-2 rounded-full bg-cyan" />
       Carregando acesso local...
     </div>
   </div>

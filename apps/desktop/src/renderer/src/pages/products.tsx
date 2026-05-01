@@ -25,6 +25,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@renderer/components/ui/card";
+import { MetricCard as Metric } from "@renderer/components/ui/metric-card";
 import { Table, Td, Th } from "@renderer/components/ui/table";
 import { ProductVariantsPanel } from "@renderer/components/products/product-variants-panel";
 import { useAuth } from "@renderer/lib/auth-context";
@@ -169,45 +170,6 @@ const formToPayload = (form: ProductFormState): ProductCreateInput => ({
   notes: toNullable(form.notes),
 });
 
-const Metric = ({
-  label,
-  value,
-  helper,
-  tone = "cyan",
-}: {
-  label: string;
-  value: string;
-  helper: string;
-  tone?: BadgeTone;
-}): JSX.Element => {
-  const toneClass: Record<BadgeTone, string> = {
-    success: "border-success/25 bg-success/10 text-emerald-300",
-    warning: "border-warning/25 bg-warning/10 text-amber-300",
-    danger: "border-danger/25 bg-danger/10 text-red-300",
-    purple: "border-purple/25 bg-purple/10 text-violet-200",
-    neutral: "border-slate-600/60 bg-slate-800/50 text-slate-200",
-    cyan: "border-cyan/25 bg-cyan/10 text-cyan",
-  };
-
-  return (
-    <Card className="min-h-[126px]">
-      <CardContent className="flex h-full flex-col justify-between">
-        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-          {label}
-        </div>
-        <div>
-          <div
-            className={`inline-flex rounded-md border px-2.5 py-1 text-2xl font-bold ${toneClass[tone]}`}
-          >
-            {value}
-          </div>
-          <div className="mt-3 text-xs text-slate-400">{helper}</div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
-
 const VariantProfitCell = ({
   product,
 }: {
@@ -344,7 +306,7 @@ const ProductForm = ({
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/60">
-      <div className="h-full w-full max-w-4xl overflow-y-auto border-l border-line bg-background shadow-premium">
+      <div className="drawer-panel h-full w-full max-w-4xl overflow-y-auto border-l border-line bg-background shadow-premium">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-background/95 px-6 py-5">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">

@@ -147,11 +147,11 @@ export const AppShell = (): JSX.Element => {
   };
 
   return (
-    <div className="grid h-screen grid-cols-[260px_1fr] bg-background text-slate-100">
-      <aside className="flex min-h-0 flex-col border-r border-line bg-slate-950/75">
-        <div className="border-b border-line p-5">
+    <div className="premium-grid grid h-screen grid-cols-[268px_1fr] bg-background text-slate-100">
+      <aside className="flex min-h-0 flex-col border-r border-line/80 bg-slate-950/[0.82] shadow-[10px_0_46px_rgba(0,0,0,0.24)]">
+        <div className="border-b border-line/80 p-5">
           <div className="flex items-center gap-3">
-            <div className="grid h-11 w-11 place-items-center rounded-lg border border-cyan/30 bg-cyan/10 text-cyan">
+            <div className="grid h-11 w-11 place-items-center rounded-lg border border-cyan/30 bg-cyan/10 text-cyan shadow-glowCyan">
               <ShieldCheck size={22} />
             </div>
             <div>
@@ -173,26 +173,36 @@ export const AppShell = (): JSX.Element => {
               end={item.path === "/"}
               className={({ isActive }) =>
                 cn(
-                  "focus-ring flex h-11 items-center gap-3 rounded-md px-3 text-sm font-semibold transition",
+                  "focus-ring group relative flex h-11 items-center gap-3 overflow-hidden rounded-md px-3 text-sm font-semibold motion-safe:transition-all motion-safe:duration-200",
                   isActive
-                    ? "bg-cyan/12 text-cyan ring-1 ring-cyan/25"
-                    : "text-slate-400 hover:bg-slate-900 hover:text-slate-100",
+                    ? "bg-cyan/10 text-cyan ring-1 ring-cyan/25 shadow-glowCyan"
+                    : "text-slate-400 hover:bg-slate-900/80 hover:text-slate-100",
                 )
               }
             >
-              <item.icon size={18} />
-              <span className="min-w-0 flex-1 truncate">{item.label}</span>
-              {navBadge(item.path) > 0 && (
-                <span className="rounded-full bg-cyan px-2 py-0.5 text-[11px] font-bold text-slate-950">
-                  {navBadge(item.path)}
-                </span>
+              {({ isActive }) => (
+                <>
+                  <span
+                    className={cn(
+                      "absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-r bg-cyan transition-opacity",
+                      isActive ? "opacity-100" : "opacity-0 group-hover:opacity-50",
+                    )}
+                  />
+                  <item.icon size={18} />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  {navBadge(item.path) > 0 && (
+                    <span className="status-pulse rounded-full bg-cyan px-2 py-0.5 text-[11px] font-bold text-slate-950">
+                      {navBadge(item.path)}
+                    </span>
+                  )}
+                </>
               )}
             </NavLink>
           ))}
         </nav>
 
-        <div className="border-t border-line p-4">
-          <div className="rounded-lg border border-line bg-panelSoft p-3">
+        <div className="border-t border-line/80 p-4">
+          <div className="rounded-lg border border-line/80 bg-panelSoft/75 p-3 shadow-insetPanel">
             <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300">
               <Activity size={14} />
               Base local ativa
@@ -205,7 +215,7 @@ export const AppShell = (): JSX.Element => {
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-col">
-        <header className="flex h-20 shrink-0 items-center justify-between border-b border-line bg-background/95 px-8">
+        <header className="flex h-20 shrink-0 items-center justify-between border-b border-line/80 bg-background/[0.92] px-8 shadow-[0_12px_46px_rgba(0,0,0,0.18)] backdrop-blur">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan">
               {current.eyebrow}
@@ -215,11 +225,11 @@ export const AppShell = (): JSX.Element => {
             </h1>
           </div>
           <div className="flex items-center gap-3 text-sm">
-            <div className="rounded-md border border-line bg-panel px-3 py-2 text-slate-300">
+            <div className="rounded-md border border-line/80 bg-panel/90 px-3 py-2 text-slate-300 shadow-insetPanel">
               Taxa GameMarket{" "}
               <span className="font-semibold text-white">13%</span>
             </div>
-            <div className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 font-semibold text-emerald-300">
+            <div className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 font-semibold text-emerald-300 shadow-glowGreen">
               Líquido 87%
             </div>
             <Button
@@ -236,7 +246,7 @@ export const AppShell = (): JSX.Element => {
                 </span>
               )}
             </Button>
-            <div className="flex items-center gap-3 rounded-md border border-line bg-panel px-3 py-2">
+            <div className="flex items-center gap-3 rounded-md border border-line/80 bg-panel/90 px-3 py-2 shadow-insetPanel">
               <div className="grid h-8 w-8 place-items-center rounded-md bg-cyan/10 text-xs font-bold text-cyan">
                 {initials.toUpperCase()}
               </div>
@@ -258,14 +268,14 @@ export const AppShell = (): JSX.Element => {
         </header>
 
         <main className="min-h-0 flex-1 overflow-hidden">
-          <div className="h-full min-h-0 overflow-y-auto px-8 py-6">
+          <div key={location.pathname} className="page-transition h-full min-h-0 overflow-y-auto px-8 py-6">
             <Outlet />
           </div>
         </main>
       </div>
 
       {notificationsOpen && (
-        <div className="fixed right-6 top-24 z-40 w-[420px] rounded-lg border border-line bg-panel shadow-premium">
+        <div className="modal-panel fixed right-6 top-24 z-40 w-[420px] rounded-lg border border-line bg-panel shadow-premium">
           <div className="flex items-start justify-between gap-4 border-b border-line p-4">
             <div>
               <div className="text-sm font-semibold text-white">Notificações recentes</div>
@@ -342,7 +352,7 @@ export const AppShell = (): JSX.Element => {
       )}
 
       {toast && (
-        <div className="fixed bottom-5 right-5 z-50 w-[380px] rounded-lg border border-cyan/25 bg-panel shadow-premium">
+        <div className="modal-panel fixed bottom-5 right-5 z-50 w-[380px] rounded-lg border border-cyan/25 bg-panel shadow-premium">
           <div className="flex items-start justify-between gap-3 border-b border-line p-4">
             <div className="text-sm font-semibold text-white">{toast.title}</div>
             <Badge tone={toast.severity === "warning" ? "warning" : toast.severity === "critical" ? "danger" : "cyan"}>
@@ -362,7 +372,7 @@ export const AppShell = (): JSX.Element => {
       )}
 
       {fallbackNotification && (
-        <div className="fixed bottom-5 right-5 z-50 w-[360px] rounded-lg border border-cyan/25 bg-panel shadow-premium">
+        <div className="modal-panel fixed bottom-5 right-5 z-50 w-[360px] rounded-lg border border-cyan/25 bg-panel shadow-premium">
           <div className="flex items-start justify-between gap-3 border-b border-line p-4">
             <div className="text-sm font-semibold text-white">
               {fallbackNotification.title}
