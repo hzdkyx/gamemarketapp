@@ -933,7 +933,7 @@ export const SettingsPage = (): JSX.Element => {
           ? summary.errors[0] ?? "Sync cloud falhou."
           : summary.pushed === 0 && summary.pulled === 0 && summary.applied === 0 && summary.conflicts === 0
             ? "Nenhuma alteração pendente. Sincronização concluída."
-          : `${summary.pushed} envio(s), ${summary.applied} aplicação(ões), ${summary.conflicts} conflito(s), ${summary.ignored ?? 0} campo(s) seguro(s) ignorado(s).`
+          : `${summary.pushed} envio(s), ${summary.applied} aplicação(ões), ${summary.skipped ?? 0} pulado(s), ${summary.conflicts} conflito(s), ${summary.ignored ?? 0} ignorado(s) seguro(s).`
       );
       await refreshCloudSyncSettings();
     } catch (syncError) {
@@ -1023,11 +1023,16 @@ export const SettingsPage = (): JSX.Element => {
       setCloudResult(
         summary.status === "failed"
           ? summary.errors[0] ?? "Download do workspace falhou."
-          : `${summary.applied} registro(s) aplicado(s) neste desktop.`
+          : `Baixados: ${summary.pulled}. Aplicados: ${summary.applied}. Pulados: ${summary.skipped ?? 0}. Conflitos: ${summary.conflicts}. Ignorados seguros: ${summary.ignored ?? 0}.`
       );
       await refreshCloudSyncSettings();
     } catch (downloadError) {
-      setCloudResult(downloadError instanceof Error ? downloadError.message : "Falha ao baixar workspace.");
+      const message = downloadError instanceof Error ? downloadError.message : "";
+      setCloudResult(
+        /FOREIGN KEY constraint failed/i.test(message)
+          ? "Falha ao baixar workspace: alguns dados dependem de produtos/variações ainda não encontrados. Nenhum dado sensível foi alterado. Tente novamente após atualização."
+          : message || "Falha ao baixar workspace."
+      );
     } finally {
       setCloudBusy(null);
     }
@@ -1626,8 +1631,9 @@ export const SettingsPage = (): JSX.Element => {
                 <div>Coletados: {cloudSyncSummary.collected ?? cloudSyncSummary.pushed}</div>
                 <div>Baixados: {cloudSyncSummary.pulled}</div>
                 <div>Aplicados: {cloudSyncSummary.applied}</div>
+                <div>Pulados: {cloudSyncSummary.skipped ?? 0}</div>
                 <div>Conflitos: {cloudSyncSummary.conflicts}</div>
-                <div>Ignorados segurança: {cloudSyncSummary.ignored ?? 0}</div>
+                <div>Ignorados/pulados seguros: {cloudSyncSummary.ignored ?? 0}</div>
                 <div>Duração: {cloudSyncSummary.durationMs} ms</div>
                 <div>Status: {cloudSyncSummary.status}</div>
               </div>

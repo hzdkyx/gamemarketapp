@@ -16,7 +16,9 @@ import { cloudSyncSettingsService } from "./cloud-sync-settings-service";
 
 const toSafeCloudError = (error: unknown): string =>
   error instanceof Error
-    ? error.message.match(/entities|invalid_type|expected array|Zod/i)
+    ? error.message.match(/FOREIGN KEY constraint failed/i)
+      ? "Falha ao baixar workspace: alguns dados dependem de produtos/variações ainda não encontrados. Nenhum dado sensível foi alterado. Tente novamente após atualização."
+      : error.message.match(/entities|invalid_type|expected array|Zod/i)
       ? "Falha ao enviar dados locais: o pacote de sincronização estava vazio ou inválido. Nenhum dado foi alterado."
       : error.message.replace(/Bearer\s+[A-Za-z0-9._~-]+/g, "Bearer [masked]")
     : "Falha no cloud sync.";
@@ -181,6 +183,7 @@ export const cloudSyncService = {
         conflicts: pushed.conflicts.length,
         collected,
         ignored,
+        skipped: 0,
         entityTypes,
         errors: []
       });
@@ -212,6 +215,7 @@ export const cloudSyncService = {
         conflicts: 0,
         collected,
         ignored,
+        skipped: 0,
         entityTypes,
         errors: [safeError]
       });
@@ -238,19 +242,21 @@ export const cloudSyncService = {
       cloudSyncSettingsService.markStatus("syncing", null);
       const pulled = await getClient().bootstrap(workspaceId);
       const applied = cloudSyncLocalStore.applyRemote(pulled.entities, pulled.serverTime);
+      const conflictCount = applied.conflicts;
       const summary = finishSummary(startedAt, {
-        status: applied.conflicts > 0 ? "conflict" : "synced",
+        status: conflictCount > 0 ? "conflict" : "synced",
         pushed: 0,
         pulled: pulled.entities.length,
         applied: applied.applied,
-        conflicts: applied.conflicts,
+        conflicts: conflictCount,
         collected: 0,
         ignored: applied.ignored,
-        entityTypes: [],
+        skipped: applied.skipped,
+        entityTypes: [...new Set(pulled.entities.map((entity) => entity.entityType))],
         errors: []
       });
       cloudSyncSettingsService.markSyncResult({
-        status: applied.conflicts > 0 ? "conflict" : "synced",
+        status: conflictCount > 0 ? "conflict" : "synced",
         lastSyncAt: pulled.serverTime,
         lastPullAt: pulled.serverTime,
         summary
@@ -266,6 +272,7 @@ export const cloudSyncService = {
         conflicts: 0,
         collected: 0,
         ignored: 0,
+        skipped: 0,
         entityTypes: [],
         errors: [safeError]
       });
@@ -309,7 +316,7 @@ export const cloudSyncService = {
       const pulled = shouldPull ? await client.pull(workspaceId, settings.lastPullAt) : null;
       const applied = pulled
         ? cloudSyncLocalStore.applyRemote(pulled.entities, pulled.serverTime)
-        : { applied: 0, conflicts: 0, ignored: 0 };
+        : { applied: 0, conflicts: 0, ignored: 0, skipped: 0 };
       const conflictCount = (pushed?.conflicts.length ?? 0) + applied.conflicts;
       const syncServerTime = pulled?.serverTime ?? pushed?.serverTime ?? workspaceStatus?.serverTime ?? new Date().toISOString();
       const summary = finishSummary(startedAt, {
@@ -320,6 +327,7 @@ export const cloudSyncService = {
         conflicts: conflictCount,
         collected,
         ignored: ignored + applied.ignored,
+        skipped: applied.skipped,
         entityTypes,
         errors: []
       });
@@ -352,6 +360,7 @@ export const cloudSyncService = {
         conflicts: 0,
         collected,
         ignored,
+        skipped: 0,
         entityTypes,
         errors: [safeError]
       });

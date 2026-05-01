@@ -543,7 +543,19 @@ export class PostgresCloudStorage implements CloudStorageService {
         FROM cloud_sync_entities
         WHERE workspace_id = $1
           ${sinceClause}
-        ORDER BY updated_at ASC, cloud_id ASC
+        ORDER BY
+          CASE entity_type
+            WHEN 'settings' THEN 0
+            WHEN 'products' THEN 1
+            WHEN 'product_variants' THEN 2
+            WHEN 'inventory_items' THEN 3
+            WHEN 'orders' THEN 4
+            WHEN 'events' THEN 5
+            WHEN 'app_notifications' THEN 6
+            ELSE 100
+          END ASC,
+          updated_at ASC,
+          cloud_id ASC
       `,
       params,
     );

@@ -1773,6 +1773,7 @@ export interface CloudSyncSummary {
   applied: number;
   conflicts: number;
   ignored?: number;
+  skipped?: number;
   entityTypes?: CloudSyncEntityType[];
   errors: string[];
 }

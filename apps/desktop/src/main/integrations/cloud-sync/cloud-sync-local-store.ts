@@ -35,6 +35,15 @@ interface SyncTableConfig {
 
 const tableConfigs: SyncTableConfig[] = [
   {
+    entityType: "settings",
+    table: "settings",
+    localIdColumn: "key",
+    updatedAtColumn: "updated_at",
+    columns: ["key", "value_json", "is_secret", "updated_at"],
+    where:
+      "is_secret = 0 AND key NOT LIKE 'cloud_sync_%' AND key NOT LIKE 'webhook_server_%' AND key NOT LIKE 'gamemarket_%'"
+  },
+  {
     entityType: "products",
     table: "products",
     localIdColumn: "id",
@@ -207,15 +216,6 @@ const tableConfigs: SyncTableConfig[] = [
       "read_at",
       "created_at"
     ]
-  },
-  {
-    entityType: "settings",
-    table: "settings",
-    localIdColumn: "key",
-    updatedAtColumn: "updated_at",
-    columns: ["key", "value_json", "is_secret", "updated_at"],
-    where:
-      "is_secret = 0 AND key NOT LIKE 'cloud_sync_%' AND key NOT LIKE 'webhook_server_%' AND key NOT LIKE 'gamemarket_%'"
   }
 ];
 
@@ -223,6 +223,24 @@ const configByEntityType = new Map(tableConfigs.map((config) => [config.entityTy
 const entityOrder = new Map(tableConfigs.map((config, index) => [config.entityType, index]));
 
 type Row = Record<string, unknown>;
+
+interface ForeignKeyRule {
+  column: string;
+  targetTable: string;
+  targetColumn?: string;
+  onMissing: "nullify" | "skip";
+  reason: string;
+}
+
+interface DeferredForeignKey {
+  table: string;
+  localIdColumn: string;
+  localId: string;
+  column: string;
+  value: string;
+  targetTable: string;
+  targetColumn: string;
+}
 
 interface BuiltPayload {
   payload: Record<string, unknown>;
@@ -239,7 +257,137 @@ export interface CloudSyncApplyRemoteResult {
   applied: number;
   conflicts: number;
   ignored: number;
+  skipped: number;
 }
+
+const dependencyRulesByEntityType: Partial<Record<CloudSyncEntityType, ForeignKeyRule[]>> = {
+  products: [
+    {
+      column: "created_by_user_id",
+      targetTable: "users",
+      onMissing: "nullify",
+      reason: "Usuário local criador não existe neste desktop."
+    },
+    {
+      column: "updated_by_user_id",
+      targetTable: "users",
+      onMissing: "nullify",
+      reason: "Usuário local atualizador não existe neste desktop."
+    }
+  ],
+  product_variants: [
+    {
+      column: "product_id",
+      targetTable: "products",
+      onMissing: "skip",
+      reason: "Produto pai da variação não existe neste desktop."
+    }
+  ],
+  inventory_items: [
+    {
+      column: "product_id",
+      targetTable: "products",
+      onMissing: "nullify",
+      reason: "Produto do item de estoque não existe neste desktop."
+    },
+    {
+      column: "product_variant_id",
+      targetTable: "product_variants",
+      onMissing: "nullify",
+      reason: "Variação do item de estoque não existe neste desktop."
+    },
+    {
+      column: "order_id",
+      targetTable: "orders",
+      onMissing: "nullify",
+      reason: "Pedido do item de estoque não existe neste desktop."
+    },
+    {
+      column: "created_by_user_id",
+      targetTable: "users",
+      onMissing: "nullify",
+      reason: "Usuário local criador não existe neste desktop."
+    },
+    {
+      column: "updated_by_user_id",
+      targetTable: "users",
+      onMissing: "nullify",
+      reason: "Usuário local atualizador não existe neste desktop."
+    }
+  ],
+  orders: [
+    {
+      column: "product_id",
+      targetTable: "products",
+      onMissing: "skip",
+      reason: "Produto do pedido não existe neste desktop."
+    },
+    {
+      column: "product_variant_id",
+      targetTable: "product_variants",
+      onMissing: "nullify",
+      reason: "Variação do pedido não existe neste desktop."
+    },
+    {
+      column: "inventory_item_id",
+      targetTable: "inventory_items",
+      onMissing: "nullify",
+      reason: "Item de estoque do pedido não existe neste desktop."
+    },
+    {
+      column: "created_by_user_id",
+      targetTable: "users",
+      onMissing: "nullify",
+      reason: "Usuário local criador não existe neste desktop."
+    },
+    {
+      column: "updated_by_user_id",
+      targetTable: "users",
+      onMissing: "nullify",
+      reason: "Usuário local atualizador não existe neste desktop."
+    }
+  ],
+  events: [
+    {
+      column: "order_id",
+      targetTable: "orders",
+      onMissing: "nullify",
+      reason: "Pedido do evento não existe neste desktop."
+    },
+    {
+      column: "product_id",
+      targetTable: "products",
+      onMissing: "nullify",
+      reason: "Produto do evento não existe neste desktop."
+    },
+    {
+      column: "inventory_item_id",
+      targetTable: "inventory_items",
+      onMissing: "nullify",
+      reason: "Item de estoque do evento não existe neste desktop."
+    },
+    {
+      column: "actor_user_id",
+      targetTable: "users",
+      onMissing: "nullify",
+      reason: "Usuário local do evento não existe neste desktop."
+    }
+  ],
+  app_notifications: [
+    {
+      column: "order_id",
+      targetTable: "orders",
+      onMissing: "nullify",
+      reason: "Pedido da notificação não existe neste desktop."
+    },
+    {
+      column: "event_id",
+      targetTable: "events",
+      onMissing: "nullify",
+      reason: "Evento da notificação não existe neste desktop."
+    }
+  ]
+};
 
 const countProtectedRowFields = (row: Row, columns: string[]): number => {
   const payloadColumns = new Set(columns);
@@ -298,7 +446,21 @@ const getExistingRow = (config: SyncTableConfig, entity: CloudSyncEntityView): R
     .get(entity.localId) as Row | undefined) ?? null;
 };
 
+const toNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const rowExists = (table: string, column: string, value: string): boolean =>
+  Boolean(getSqliteDatabase().prepare(`SELECT 1 FROM ${table} WHERE ${column} = ? LIMIT 1`).get(value));
+
 const insertConflict = (config: SyncTableConfig, localRow: Row, entity: CloudSyncEntityView): void => {
+  const remotePayload = sanitizeSyncPayloadObjectWithStats(entity.payload).payload;
+
   getSqliteDatabase()
     .prepare(
       `
@@ -327,7 +489,43 @@ const insertConflict = (config: SyncTableConfig, localRow: Row, entity: CloudSyn
       remoteVersion: entity.version,
       incomingBaseVersion: Number(localRow.sync_revision ?? 0),
       localPayloadJson: JSON.stringify(toPayload(localRow, config.columns).payload),
-      remotePayloadJson: JSON.stringify(entity.payload),
+      remotePayloadJson: JSON.stringify(remotePayload),
+      createdAt: new Date().toISOString()
+    });
+};
+
+const insertRemoteDependencyConflict = (config: SyncTableConfig, entity: CloudSyncEntityView, reason: string): void => {
+  const remotePayload = sanitizeSyncPayloadObjectWithStats(entity.payload).payload;
+
+  getSqliteDatabase()
+    .prepare(
+      `
+        INSERT INTO cloud_sync_conflicts (
+          id,
+          workspace_id,
+          entity_type,
+          local_id,
+          cloud_id,
+          remote_version,
+          incoming_base_version,
+          local_payload_json,
+          remote_payload_json,
+          created_at,
+          resolved_at
+        )
+        VALUES (@id, @workspaceId, @entityType, @localId, @cloudId, @remoteVersion, @incomingBaseVersion, @localPayloadJson, @remotePayloadJson, @createdAt, NULL)
+      `
+    )
+    .run({
+      id: randomUUID(),
+      workspaceId: entity.workspaceId,
+      entityType: entity.entityType,
+      localId: entity.localId,
+      cloudId: entity.cloudId,
+      remoteVersion: entity.version,
+      incomingBaseVersion: 0,
+      localPayloadJson: JSON.stringify({ reason }),
+      remotePayloadJson: JSON.stringify({ reason, payload: remotePayload }),
       createdAt: new Date().toISOString()
     });
 };
@@ -338,20 +536,60 @@ const isTruthySecretFlag = (value: unknown): boolean =>
 const normalizeRemoteEntity = (
   config: SyncTableConfig,
   entity: CloudSyncEntityView
-): { entity: CloudSyncEntityView | null; ignored: number } => {
+): { entity: CloudSyncEntityView | null; ignored: number; skipped: boolean; reason?: string; deferred: DeferredForeignKey[] } => {
   if (config.entityType !== "settings") {
-    return { entity, ignored: 0 };
+    const payload = { ...entity.payload };
+    const deferred: DeferredForeignKey[] = [];
+    const ignored = 0;
+
+    for (const rule of dependencyRulesByEntityType[config.entityType] ?? []) {
+      const value = toNonEmptyString(payload[rule.column]);
+      if (!value) {
+        payload[rule.column] = null;
+        continue;
+      }
+
+      const targetColumn = rule.targetColumn ?? "id";
+      if (rowExists(rule.targetTable, targetColumn, value)) {
+        continue;
+      }
+
+      if (rule.onMissing === "skip") {
+        return { entity: null, ignored, skipped: true, reason: rule.reason, deferred };
+      }
+
+      payload[rule.column] = null;
+      deferred.push({
+        table: config.table,
+        localIdColumn: config.localIdColumn,
+        localId: entity.localId,
+        column: rule.column,
+        value,
+        targetTable: rule.targetTable,
+        targetColumn
+      });
+    }
+
+    return {
+      entity: {
+        ...entity,
+        payload
+      },
+      ignored,
+      skipped: false,
+      deferred
+    };
   }
 
   const settingKey = typeof entity.payload.key === "string" ? entity.payload.key : entity.localId;
   const remoteIsSecret = isTruthySecretFlag(entity.payload.is_secret) || isTruthySecretFlag(entity.payload.isSecret);
   if (!settingKey.trim() || remoteIsSecret || isSensitiveSettingKey(settingKey)) {
-    return { entity: null, ignored: 1 };
+    return { entity: null, ignored: 1, skipped: false, deferred: [] };
   }
 
   const valueJson = entity.payload.value_json ?? entity.payload.valueJson;
   if (typeof valueJson !== "string") {
-    return { entity: null, ignored: 1 };
+    return { entity: null, ignored: 1, skipped: false, deferred: [] };
   }
 
   const updatedAt =
@@ -373,9 +611,39 @@ const normalizeRemoteEntity = (
         updated_at: updatedAt
       }
     },
-    ignored: 0
+    ignored: 0,
+    skipped: false,
+    deferred: []
   };
 };
+
+const applyDeferredForeignKeys = (items: DeferredForeignKey[]): { restored: number; ignored: number } => {
+  const db = getSqliteDatabase();
+  let restored = 0;
+  let ignored = 0;
+
+  for (const item of items) {
+    if (!rowExists(item.targetTable, item.targetColumn, item.value)) {
+      ignored += 1;
+      continue;
+    }
+
+    const result = db
+      .prepare(`UPDATE ${item.table} SET ${item.column} = @value WHERE ${item.localIdColumn} = @localId`)
+      .run({
+        value: item.value,
+        localId: item.localId
+      });
+    if (result.changes > 0) {
+      restored += 1;
+    }
+  }
+
+  return { restored, ignored };
+};
+
+const isSqliteConstraintFailure = (error: unknown): boolean =>
+  error instanceof Error && /FOREIGN KEY constraint failed|constraint failed|NOT NULL constraint failed/i.test(error.message);
 
 const upsertEntity = (config: SyncTableConfig, entity: CloudSyncEntityView, syncedAt: string): void => {
   const db = getSqliteDatabase();
@@ -512,6 +780,8 @@ export const cloudSyncLocalStore = {
     let applied = 0;
     let conflicts = 0;
     let ignored = 0;
+    let skipped = 0;
+    const deferredForeignKeys: DeferredForeignKey[] = [];
     const db = getSqliteDatabase();
     const transaction = db.transaction((items: CloudSyncEntityView[]) => {
       for (const entity of items) {
@@ -521,6 +791,12 @@ export const cloudSyncLocalStore = {
         }
         const normalized = normalizeRemoteEntity(config, entity);
         ignored += normalized.ignored;
+        if (normalized.skipped) {
+          skipped += 1;
+          conflicts += 1;
+          insertRemoteDependencyConflict(config, entity, normalized.reason ?? "Dependência obrigatória ausente.");
+          continue;
+        }
         if (!normalized.entity) {
           continue;
         }
@@ -535,11 +811,28 @@ export const cloudSyncLocalStore = {
           }
           continue;
         }
-        upsertEntity(config, normalized.entity, syncedAt);
-        applied += 1;
+        try {
+          upsertEntity(config, normalized.entity, syncedAt);
+          deferredForeignKeys.push(...normalized.deferred);
+          applied += 1;
+        } catch (error) {
+          if (!isSqliteConstraintFailure(error)) {
+            throw error;
+          }
+
+          skipped += 1;
+          conflicts += 1;
+          insertRemoteDependencyConflict(
+            config,
+            normalized.entity,
+            "Registro remoto não pôde ser aplicado por violar uma restrição local."
+          );
+        }
       }
+
+      ignored += applyDeferredForeignKeys(deferredForeignKeys).ignored;
     });
     transaction(ordered);
-    return { applied, conflicts, ignored };
+    return { applied, conflicts, ignored, skipped };
   }
 };

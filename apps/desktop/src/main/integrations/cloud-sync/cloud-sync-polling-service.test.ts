@@ -43,6 +43,7 @@ vi.mock("./cloud-sync-service", () => ({
         applied: state.settings.pendingChanges,
         conflicts: 0,
         ignored: 0,
+        skipped: 0,
         entityTypes: [],
         errors: state.nextSummaryStatus === "failed" ? ["Backend indisponível."] : []
       };

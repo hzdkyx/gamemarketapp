@@ -47,10 +47,12 @@ const state = vi.hoisted(() => ({
   applyRemoteResult: {
     applied: 0,
     conflicts: 0,
-    ignored: 0
+    ignored: 0,
+    skipped: 0
   },
   pushCalls: [] as Array<{ workspaceId: string; changes: unknown[] }>,
   pullCalls: [] as Array<{ workspaceId: string; since: string | null }>,
+  bootstrapCalls: [] as Array<{ workspaceId: string }>,
   statusCalls: [] as Array<{ workspaceId: string; since: string | null }>,
   statusResponse: {
     workspaceId: "workspace-existing-1",
@@ -107,6 +109,16 @@ vi.mock("./cloud-sync-client", () => ({
       };
     }
 
+    async bootstrap(workspaceId: string): Promise<unknown> {
+      state.bootstrapCalls.push({ workspaceId });
+      return {
+        ok: true,
+        workspaceId,
+        entities: state.remoteEntities,
+        serverTime: "2026-05-01T12:00:00.000Z"
+      };
+    }
+
     async status(workspaceId: string, since?: string | null): Promise<unknown> {
       state.statusCalls.push({ workspaceId, since: since ?? null });
       return {
@@ -142,6 +154,7 @@ beforeEach(() => {
   };
   state.pushCalls = [];
   state.pullCalls = [];
+  state.bootstrapCalls = [];
   state.statusCalls = [];
   state.statusResponse = {
     workspaceId: "workspace-existing-1",
@@ -151,11 +164,12 @@ beforeEach(() => {
     serverTime: "2026-05-01T12:00:00.000Z"
   };
   state.remoteEntities = [];
-  state.applyRemoteResult = {
-    applied: 0,
-    conflicts: 0,
-    ignored: 0
-  };
+    state.applyRemoteResult = {
+      applied: 0,
+      conflicts: 0,
+      ignored: 0,
+      skipped: 0
+    };
   state.bootstrapOwnerCalls = 0;
   state.markSyncResults = [];
 });
@@ -256,7 +270,8 @@ describe("cloudSyncService.syncNow", () => {
     state.applyRemoteResult = {
       applied: 0,
       conflicts: 0,
-      ignored: 1
+      ignored: 1,
+      skipped: 0
     };
 
     const summary = await cloudSyncService.syncNow();
@@ -269,5 +284,85 @@ describe("cloudSyncService.syncNow", () => {
       conflicts: 0,
       ignored: 1
     });
+  });
+
+  it("keeps skipped remote entities in the download summary without failing autosync", async () => {
+    state.collection.ignored = 0;
+    state.remoteEntities = [
+      {
+        cloudId: "cloud-variant-1",
+        workspaceId: "workspace-existing-1",
+        entityType: "settings",
+        localId: "safe_setting",
+        payload: {
+          key: "safe_setting",
+          value_json: JSON.stringify("ok")
+        },
+        version: 1,
+        updatedByUserId: "cloud-user-1",
+        createdAt: "2026-05-01T12:00:00.000Z",
+        updatedAt: "2026-05-01T12:00:00.000Z",
+        deletedAt: null
+      }
+    ];
+    state.applyRemoteResult = {
+      applied: 0,
+      conflicts: 1,
+      ignored: 0,
+      skipped: 1
+    };
+
+    const summary = await cloudSyncService.syncNow();
+
+    expect(summary).toMatchObject({
+      status: "conflict",
+      pulled: 1,
+      applied: 0,
+      conflicts: 1,
+      skipped: 1,
+      errors: []
+    });
+  });
+});
+
+describe("cloudSyncService.downloadWorkspace", () => {
+  it("uses bootstrap download and reports applied, skipped, and conflicts without recreating the workspace", async () => {
+    state.remoteEntities = [
+      {
+        cloudId: "cloud-setting-1",
+        workspaceId: "workspace-existing-1",
+        entityType: "settings",
+        localId: "safe_setting",
+        payload: {
+          key: "safe_setting",
+          value_json: JSON.stringify("ok")
+        },
+        version: 1,
+        updatedByUserId: "cloud-user-1",
+        createdAt: "2026-05-01T12:00:00.000Z",
+        updatedAt: "2026-05-01T12:00:00.000Z",
+        deletedAt: null
+      }
+    ];
+    state.applyRemoteResult = {
+      applied: 1,
+      conflicts: 0,
+      ignored: 0,
+      skipped: 0
+    };
+
+    const summary = await cloudSyncService.downloadWorkspace();
+
+    expect(summary).toMatchObject({
+      status: "synced",
+      pulled: 1,
+      applied: 1,
+      conflicts: 0,
+      skipped: 0,
+      entityTypes: ["settings"],
+      errors: []
+    });
+    expect(state.bootstrapCalls).toEqual([{ workspaceId: "workspace-existing-1" }]);
+    expect(state.bootstrapOwnerCalls).toBe(0);
   });
 });
