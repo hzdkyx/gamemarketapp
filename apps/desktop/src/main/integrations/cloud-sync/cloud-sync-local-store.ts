@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { CloudSyncEntityType, CloudSyncEntityView } from "../../../shared/contracts";
 import { getSqliteDatabase } from "../../database/database";
 import type { CloudSyncChange } from "./cloud-sync-client";
+import { isSensitiveSyncKey, sanitizeSyncPayloadObjectWithStats } from "./sync-sanitizer";
 
 const syncMetaColumns = new Set([
   "cloud_id",
@@ -19,6 +20,7 @@ const protectedColumns = new Set([
   "account_email_encrypted",
   "account_email_password_encrypted",
   "access_notes_encrypted",
+  "metadata_json",
   "raw_payload"
 ]);
 
@@ -203,8 +205,7 @@ const tableConfigs: SyncTableConfig[] = [
       "event_id",
       "dedupe_key",
       "read_at",
-      "created_at",
-      "metadata_json"
+      "created_at"
     ]
   },
   {
@@ -223,12 +224,40 @@ const entityOrder = new Map(tableConfigs.map((config, index) => [config.entityTy
 
 type Row = Record<string, unknown>;
 
-const toPayload = (row: Row, columns: string[]): Record<string, unknown> =>
-  Object.fromEntries(
+interface BuiltPayload {
+  payload: Record<string, unknown>;
+  ignoredFields: number;
+}
+
+export interface CloudSyncLocalCollection {
+  changes: CloudSyncChange[];
+  ignored: number;
+  entityTypes: CloudSyncEntityType[];
+}
+
+const countProtectedRowFields = (row: Row, columns: string[]): number => {
+  const payloadColumns = new Set(columns);
+  return Object.keys(row).filter(
+    (column) =>
+      !syncMetaColumns.has(column) &&
+      (!payloadColumns.has(column) || protectedColumns.has(column) || isSensitiveSyncKey(column)) &&
+      (protectedColumns.has(column) || isSensitiveSyncKey(column))
+  ).length;
+};
+
+const toPayload = (row: Row, columns: string[]): BuiltPayload => {
+  const rawPayload = Object.fromEntries(
     columns
-      .filter((column) => !syncMetaColumns.has(column) && !protectedColumns.has(column))
+      .filter((column) => !syncMetaColumns.has(column) && !protectedColumns.has(column) && !isSensitiveSyncKey(column))
       .map((column) => [column, row[column]])
   );
+  const sanitized = sanitizeSyncPayloadObjectWithStats(rawPayload);
+
+  return {
+    payload: sanitized.payload,
+    ignoredFields: sanitized.ignoredFields + countProtectedRowFields(row, columns)
+  };
+};
 
 const isDirtyRow = (row: Row, updatedAtColumn: string): boolean => {
   const syncStatus = String(row.sync_status ?? "pending");
@@ -288,7 +317,7 @@ const insertConflict = (config: SyncTableConfig, localRow: Row, entity: CloudSyn
       cloudId: entity.cloudId,
       remoteVersion: entity.version,
       incomingBaseVersion: Number(localRow.sync_revision ?? 0),
-      localPayloadJson: JSON.stringify(toPayload(localRow, config.columns)),
+      localPayloadJson: JSON.stringify(toPayload(localRow, config.columns).payload),
       remotePayloadJson: JSON.stringify(entity.payload),
       createdAt: new Date().toISOString()
     });
@@ -332,21 +361,37 @@ const upsertEntity = (config: SyncTableConfig, entity: CloudSyncEntityView, sync
 };
 
 export const cloudSyncLocalStore = {
-  listChanges(includeAll = false): CloudSyncChange[] {
-    return tableConfigs.flatMap((config) =>
-      selectRows(config, includeAll).map((row) => ({
-        entityType: config.entityType,
-        localId: String(row[config.localIdColumn]),
-        ...(typeof row.cloud_id === "string" ? { cloudId: row.cloud_id } : {}),
-        baseVersion: Number(row.sync_revision ?? 0),
-        updatedAt:
-          typeof row[config.updatedAtColumn] === "string"
-            ? (row[config.updatedAtColumn] as string)
-            : new Date().toISOString(),
-        deletedAt: typeof row.deleted_at === "string" ? row.deleted_at : null,
-        payload: toPayload(row, config.columns)
-      }))
+  collectChanges(includeAll = false): CloudSyncLocalCollection {
+    let ignored = 0;
+    const changes = tableConfigs.flatMap((config) =>
+      selectRows(config, includeAll).map((row) => {
+        const builtPayload = toPayload(row, config.columns);
+        ignored += builtPayload.ignoredFields;
+
+        return {
+          entityType: config.entityType,
+          localId: String(row[config.localIdColumn]),
+          ...(typeof row.cloud_id === "string" ? { cloudId: row.cloud_id } : {}),
+          baseVersion: Number(row.sync_revision ?? 0),
+          updatedAt:
+            typeof row[config.updatedAtColumn] === "string"
+              ? (row[config.updatedAtColumn] as string)
+              : new Date().toISOString(),
+          deletedAt: typeof row.deleted_at === "string" ? row.deleted_at : null,
+          payload: builtPayload.payload
+        };
+      })
     );
+
+    return {
+      changes,
+      ignored,
+      entityTypes: [...new Set(changes.map((change) => change.entityType))]
+    };
+  },
+
+  listChanges(includeAll = false): CloudSyncChange[] {
+    return this.collectChanges(includeAll).changes;
   },
 
   markPushed(entities: CloudSyncEntityView[], syncedAt: string): void {

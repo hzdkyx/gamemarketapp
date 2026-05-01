@@ -91,12 +91,28 @@ export const cloudSyncEntityChangeSchema = z
   })
   .strict();
 
+const cloudSyncEntityChangesSchema = z.array(cloudSyncEntityChangeSchema).max(1000);
+
 export const cloudSyncPushInputSchema = z
   .object({
     workspaceId: z.string().trim().min(1),
-    changes: z.array(cloudSyncEntityChangeSchema).max(1000),
+    entities: cloudSyncEntityChangesSchema.optional(),
+    changes: cloudSyncEntityChangesSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((input, context) => {
+    if (!input.entities && !input.changes) {
+      context.addIssue({
+        code: "custom",
+        path: ["entities"],
+        message: "Informe entities como array, mesmo vazio.",
+      });
+    }
+  })
+  .transform((input) => ({
+    workspaceId: input.workspaceId,
+    entities: input.entities ?? input.changes ?? [],
+  }));
 
 export interface CloudUserView {
   id: string;

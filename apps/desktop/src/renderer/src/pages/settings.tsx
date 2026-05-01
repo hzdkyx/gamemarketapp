@@ -850,7 +850,7 @@ export const SettingsPage = (): JSX.Element => {
       setCloudResult(
         summary.status === "failed"
           ? summary.errors[0] ?? "Sync cloud falhou."
-          : `${summary.pushed} envio(s), ${summary.applied} aplicação(ões), ${summary.conflicts} conflito(s).`
+          : `${summary.pushed} envio(s), ${summary.applied} aplicação(ões), ${summary.conflicts} conflito(s), ${summary.ignored ?? 0} campo(s) seguro(s) ignorado(s).`
       );
       await refreshCloudSyncSettings();
     } catch (syncError) {
@@ -878,7 +878,7 @@ export const SettingsPage = (): JSX.Element => {
       setCloudResult(
         summary.status === "failed"
           ? summary.errors[0] ?? "Upload inicial falhou."
-          : `${summary.pushed} registro(s) local(is) enviados para a nuvem.`
+          : `Dados locais enviados com sucesso: ${summary.pushed} entidades. Coletadas: ${summary.collected ?? summary.pushed}. Ignoradas por segurança: ${summary.ignored ?? 0}.`
       );
       await refreshCloudSyncSettings();
     } catch (publishError) {
@@ -1399,9 +1399,11 @@ export const SettingsPage = (): JSX.Element => {
             {cloudSyncSummary ? (
               <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-2 xl:grid-cols-4">
                 <div>Enviados: {cloudSyncSummary.pushed}</div>
+                <div>Coletados: {cloudSyncSummary.collected ?? cloudSyncSummary.pushed}</div>
                 <div>Baixados: {cloudSyncSummary.pulled}</div>
                 <div>Aplicados: {cloudSyncSummary.applied}</div>
                 <div>Conflitos: {cloudSyncSummary.conflicts}</div>
+                <div>Ignorados segurança: {cloudSyncSummary.ignored ?? 0}</div>
                 <div>Duração: {cloudSyncSummary.durationMs} ms</div>
                 <div>Status: {cloudSyncSummary.status}</div>
               </div>

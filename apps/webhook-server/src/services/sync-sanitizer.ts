@@ -1,7 +1,8 @@
 const protectedKeyPattern =
-  /^(account_login|accountLogin|account_password|accountPassword|account_email|accountEmail|account_email_password|accountEmailPassword|access_notes|accessNotes|secretValue|serialKey|apiKey|webhookSecret|appSyncToken|gameMarketToken|rawPayload|raw_payload|rawPayloadMasked|headersMasked)$/i;
+  /^(account_login|accountLogin|account_password|accountPassword|account_email|accountEmail|account_email_password|accountEmailPassword|access_notes|accessNotes|secretValue|serialKey|apiKey|api_key|webhookSecret|webhook_secret|appSyncToken|app_sync_token|cloudSessionToken|cloud_session_token|gameMarketToken|gamemarketToken|gamemarket_token|passwordHash|password_hash|encryptedSecret|encrypted_secret|rawPayload|raw_payload|rawExternalPayload|raw_external_payload|externalPayloadRaw|external_payload_raw|rawPayloadMasked|headersMasked)$/i;
 
-const broadSecretKeyPattern = /(password|senha|token|secret|credential|api[-_]?key|serial[-_]?key)/i;
+const broadSecretKeyPattern =
+  /(password|senha|token|secret|credential|api[-_\s]?key|serial[-_\s]?key|raw[-_\s]?(external[-_\s]?)?payload|external[-_\s]?payload[-_\s]?raw)/i;
 
 export const sanitizeSyncPayload = (value: unknown, key = "", depth = 0): unknown => {
   if (protectedKeyPattern.test(key) || broadSecretKeyPattern.test(key)) {

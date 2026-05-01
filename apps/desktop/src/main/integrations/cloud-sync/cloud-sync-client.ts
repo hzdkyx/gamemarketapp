@@ -141,6 +141,20 @@ const pushResponseSchema = pullResponseSchema.extend({
   )
 });
 
+const normalizedPushResponseSchema = z.preprocess((value) => {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const response = value as Record<string, unknown>;
+    if (!Array.isArray(response.entities) && Array.isArray(response.applied)) {
+      return {
+        ...response,
+        entities: response.applied
+      };
+    }
+  }
+
+  return value;
+}, pushResponseSchema);
+
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
 
 const toSafeJson = async (response: Response): Promise<unknown> => {
@@ -183,7 +197,11 @@ export class CloudSyncClient {
 
     const json = await toSafeJson(response);
     if (!response.ok) {
-      throw new Error(`Cloud sync HTTP ${response.status}`);
+      const message =
+        json && typeof json === "object" && "message" in json && typeof json.message === "string"
+          ? json.message
+          : `Cloud sync HTTP ${response.status}`;
+      throw new Error(`Cloud sync HTTP ${response.status}: ${message}`);
     }
     return json;
   }
@@ -271,10 +289,11 @@ export class CloudSyncClient {
   }
 
   async push(workspaceId: string, changes: CloudSyncChange[]): Promise<CloudSyncPushResponse> {
-    return pushResponseSchema.parse(
+    const entities = Array.isArray(changes) ? changes : [];
+    return normalizedPushResponseSchema.parse(
       await this.request("/api/sync/push", {
         method: "POST",
-        body: JSON.stringify({ workspaceId, changes })
+        body: JSON.stringify({ workspaceId, entities })
       })
     ) as CloudSyncPushResponse;
   }

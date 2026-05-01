@@ -1731,9 +1731,12 @@ export interface CloudSyncSummary {
   finishedAt: string;
   durationMs: number;
   status: "synced" | "partial" | "failed" | "conflict";
+  collected?: number;
   pushed: number;
   pulled: number;
   applied: number;
   conflicts: number;
+  ignored?: number;
+  entityTypes?: CloudSyncEntityType[];
   errors: string[];
 }

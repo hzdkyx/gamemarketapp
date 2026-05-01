@@ -38,7 +38,7 @@ interface CloudBootstrapBody {
 
 const pushProductPayload = (workspaceId: string, name: string, baseVersion = 0) => ({
   workspaceId,
-  changes: [
+  entities: [
     {
       entityType: "products",
       localId: "local-product-1",
@@ -268,6 +268,7 @@ describe("webhook server", () => {
       },
     });
     expect(managerPush.statusCode).toBe(200);
+    expect(managerPush.json().entities).toHaveLength(2);
     expect(managerPush.json().applied).toHaveLength(2);
 
     const viewerInvite = await app.inject({
@@ -334,6 +335,7 @@ describe("webhook server", () => {
     });
     expect(push.statusCode).toBe(200);
     expect(push.body).not.toContain("do-not-sync");
+    expect(push.json().entities).toHaveLength(1);
     expect(push.json().applied[0].payload).toMatchObject({
       name: "Produto sincronizado",
       nested: { safe: "kept" },
@@ -356,6 +358,58 @@ describe("webhook server", () => {
     });
     expect(pull.statusCode).toBe(200);
     expect(pull.json().entities[0].payload).toMatchObject({ name: "Produto sincronizado" });
+  });
+
+  it("accepts empty sync pushes and returns entities as an array", async () => {
+    const bootstrap = await app.inject({
+      method: "POST",
+      url: "/api/auth/bootstrap-owner",
+      payload: ownerPayload,
+    });
+    const owner = bootstrap.json() as CloudBootstrapBody;
+    const workspaceId = owner.workspaces[0]!.id;
+
+    const push = await app.inject({
+      method: "POST",
+      url: "/api/sync/push",
+      headers: cloudAuth(owner.token),
+      payload: {
+        workspaceId,
+        entities: [],
+      },
+    });
+
+    expect(push.statusCode).toBe(200);
+    expect(push.json().entities).toEqual([]);
+    expect(push.json().applied).toEqual([]);
+    expect(push.json().conflicts).toEqual([]);
+  });
+
+  it("rejects invalid sync pushes with a friendly error", async () => {
+    const bootstrap = await app.inject({
+      method: "POST",
+      url: "/api/auth/bootstrap-owner",
+      payload: ownerPayload,
+    });
+    const owner = bootstrap.json() as CloudBootstrapBody;
+    const workspaceId = owner.workspaces[0]!.id;
+
+    const push = await app.inject({
+      method: "POST",
+      url: "/api/sync/push",
+      headers: cloudAuth(owner.token),
+      payload: {
+        workspaceId,
+      },
+    });
+
+    expect(push.statusCode).toBe(400);
+    expect(push.json()).toMatchObject({
+      ok: false,
+      error: "request_error",
+    });
+    expect(push.json().message).toContain("entities como array");
+    expect(push.body).not.toContain("invalid_type");
   });
 
   it("records simple conflicts while preserving last-write-wins behavior", async () => {

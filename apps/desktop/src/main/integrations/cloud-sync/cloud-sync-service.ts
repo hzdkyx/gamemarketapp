@@ -1,5 +1,6 @@
 import type {
   CloudSyncBootstrapOwnerInput,
+  CloudSyncEntityType,
   CloudSyncInviteUserInput,
   CloudSyncLoginInput,
   CloudSyncSettingsUpdateInput,
@@ -8,12 +9,20 @@ import type {
   CloudSyncUpdateMemberInput,
   CloudWorkspaceMemberView
 } from "../../../shared/contracts";
+import { logger } from "../../logger";
 import { CloudSyncClient } from "./cloud-sync-client";
 import { cloudSyncLocalStore } from "./cloud-sync-local-store";
 import { cloudSyncSettingsService } from "./cloud-sync-settings-service";
 
 const toSafeCloudError = (error: unknown): string =>
-  error instanceof Error ? error.message.replace(/Bearer\s+[A-Za-z0-9._~-]+/g, "Bearer [masked]") : "Falha no cloud sync.";
+  error instanceof Error
+    ? error.message.match(/entities|invalid_type|expected array|Zod/i)
+      ? "Falha ao enviar dados locais: o pacote de sincronização estava vazio ou inválido. Nenhum dado foi alterado."
+      : error.message.replace(/Bearer\s+[A-Za-z0-9._~-]+/g, "Bearer [masked]")
+    : "Falha no cloud sync.";
+
+const maskWorkspaceId = (workspaceId: string): string =>
+  workspaceId.length <= 8 ? "[masked]" : `${workspaceId.slice(0, 4)}...${workspaceId.slice(-4)}`;
 
 const getClient = (): CloudSyncClient => {
   const settings = cloudSyncSettingsService.getSettings();
@@ -121,9 +130,27 @@ export const cloudSyncService = {
 
   async publishLocalData(): Promise<CloudSyncSummary> {
     const startedAt = new Date().toISOString();
+    let workspaceIdForLog: string | null = null;
+    let collected = 0;
+    let ignored = 0;
+    let entityTypes: CloudSyncEntityType[] = [];
     try {
       const { workspaceId } = requireCloudReady();
-      const changes = cloudSyncLocalStore.listChanges(true);
+      workspaceIdForLog = workspaceId;
+      const collection = cloudSyncLocalStore.collectChanges(true);
+      const changes = collection.changes;
+      collected = changes.length;
+      ignored = collection.ignored;
+      entityTypes = collection.entityTypes;
+      logger.info(
+        {
+          workspaceId: maskWorkspaceId(workspaceId),
+          entityCount: changes.length,
+          entityTypes,
+          ignoredFields: ignored
+        },
+        "cloudSync publishLocalData started"
+      );
       const pushed = await getClient().push(workspaceId, changes);
       const syncedAt = pushed.serverTime;
       cloudSyncLocalStore.markPushed(pushed.applied, syncedAt);
@@ -134,6 +161,9 @@ export const cloudSyncService = {
         pulled: 0,
         applied: pushed.applied.length,
         conflicts: pushed.conflicts.length,
+        collected,
+        ignored,
+        entityTypes,
         errors: []
       });
       cloudSyncSettingsService.markSyncResult({
@@ -142,6 +172,17 @@ export const cloudSyncService = {
         lastPushAt: syncedAt,
         summary
       });
+      logger.info(
+        {
+          workspaceId: maskWorkspaceId(workspaceId),
+          entityCount: changes.length,
+          entityTypes,
+          ignoredFields: ignored,
+          durationMs: summary.durationMs,
+          status: summary.status
+        },
+        "cloudSync publishLocalData finished"
+      );
       return summary;
     } catch (error) {
       const safeError = toSafeCloudError(error);
@@ -151,9 +192,23 @@ export const cloudSyncService = {
         pulled: 0,
         applied: 0,
         conflicts: 0,
+        collected,
+        ignored,
+        entityTypes,
         errors: [safeError]
       });
       cloudSyncSettingsService.markSyncResult({ status: "error", safeError, summary });
+      logger.warn(
+        {
+          workspaceId: workspaceIdForLog ? maskWorkspaceId(workspaceIdForLog) : null,
+          entityCount: collected,
+          entityTypes,
+          ignoredFields: ignored,
+          durationMs: summary.durationMs,
+          status: summary.status
+        },
+        "cloudSync publishLocalData failed"
+      );
       return summary;
     }
   },
@@ -170,6 +225,9 @@ export const cloudSyncService = {
         pulled: pulled.entities.length,
         applied: applied.applied,
         conflicts: applied.conflicts,
+        collected: 0,
+        ignored: 0,
+        entityTypes: [],
         errors: []
       });
       cloudSyncSettingsService.markSyncResult({
@@ -187,6 +245,9 @@ export const cloudSyncService = {
         pulled: 0,
         applied: 0,
         conflicts: 0,
+        collected: 0,
+        ignored: 0,
+        entityTypes: [],
         errors: [safeError]
       });
       cloudSyncSettingsService.markSyncResult({ status: "error", safeError, summary });
@@ -196,10 +257,28 @@ export const cloudSyncService = {
 
   async syncNow(): Promise<CloudSyncSummary> {
     const startedAt = new Date().toISOString();
+    let workspaceIdForLog: string | null = null;
+    let collected = 0;
+    let ignored = 0;
+    let entityTypes: CloudSyncEntityType[] = [];
     try {
       const { settings, workspaceId } = requireCloudReady();
+      workspaceIdForLog = workspaceId;
       const client = getClient();
-      const changes = cloudSyncLocalStore.listChanges(false);
+      const collection = cloudSyncLocalStore.collectChanges(false);
+      const changes = collection.changes;
+      collected = changes.length;
+      ignored = collection.ignored;
+      entityTypes = collection.entityTypes;
+      logger.info(
+        {
+          workspaceId: maskWorkspaceId(workspaceId),
+          entityCount: changes.length,
+          entityTypes,
+          ignoredFields: ignored
+        },
+        "cloudSync syncNow started"
+      );
       const pushed = changes.length > 0 ? await client.push(workspaceId, changes) : null;
       if (pushed) {
         cloudSyncLocalStore.markPushed(pushed.applied, pushed.serverTime);
@@ -214,6 +293,9 @@ export const cloudSyncService = {
         pulled: pulled.entities.length,
         applied: (pushed?.applied.length ?? 0) + applied.applied,
         conflicts: conflictCount,
+        collected,
+        ignored,
+        entityTypes,
         errors: []
       });
       cloudSyncSettingsService.markSyncResult({
@@ -223,6 +305,17 @@ export const cloudSyncService = {
         lastPushAt: pushed?.serverTime ?? null,
         summary
       });
+      logger.info(
+        {
+          workspaceId: maskWorkspaceId(workspaceId),
+          entityCount: changes.length,
+          entityTypes,
+          ignoredFields: ignored,
+          durationMs: summary.durationMs,
+          status: summary.status
+        },
+        "cloudSync syncNow finished"
+      );
       return summary;
     } catch (error) {
       const safeError = toSafeCloudError(error);
@@ -232,9 +325,23 @@ export const cloudSyncService = {
         pulled: 0,
         applied: 0,
         conflicts: 0,
+        collected,
+        ignored,
+        entityTypes,
         errors: [safeError]
       });
       cloudSyncSettingsService.markSyncResult({ status: "error", safeError, summary });
+      logger.warn(
+        {
+          workspaceId: workspaceIdForLog ? maskWorkspaceId(workspaceIdForLog) : null,
+          entityCount: collected,
+          entityTypes,
+          ignoredFields: ignored,
+          durationMs: summary.durationMs,
+          status: summary.status
+        },
+        "cloudSync syncNow failed"
+      );
       return summary;
     }
   },

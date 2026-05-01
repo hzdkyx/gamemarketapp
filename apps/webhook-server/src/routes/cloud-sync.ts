@@ -85,8 +85,8 @@ export const registerCloudSyncRoutes = (app: FastifyInstance, cloud: CloudStorag
   app.post("/api/sync/push", async (request) => {
     const input = cloudSyncPushInputSchema.parse(request.body);
     const context = await requireCloudWorkspace(request, cloud, input.workspaceId, "syncData");
-    authorizePushChanges(context.role, input.changes);
-    const safeChanges = input.changes.map((change) => ({
+    authorizePushChanges(context.role, input.entities);
+    const safeChanges = input.entities.map((change) => ({
       ...change,
       payload: sanitizeSyncPayloadObject(change.payload),
     }));
@@ -106,6 +106,7 @@ export const registerCloudSyncRoutes = (app: FastifyInstance, cloud: CloudStorag
     return {
       ok: true,
       workspaceId: input.workspaceId,
+      entities: result.applied,
       applied: result.applied,
       conflicts: result.conflicts,
       serverTime: new Date().toISOString(),

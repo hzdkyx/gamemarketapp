@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
+import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import type { EventStorageService } from "./services/event-storage-service.js";
 import type { CloudStorageService } from "./services/cloud-storage-service.js";
@@ -49,6 +50,19 @@ export const buildServer = ({ config, storage, cloud }: BuildServerOptions): Fas
   });
 
   app.setErrorHandler((error: FastifyError, _request, reply) => {
+    if (error instanceof z.ZodError) {
+      const syncEntitiesIssue = error.issues.some(
+        (issue) => issue.path[0] === "entities" || issue.path[0] === "changes",
+      );
+      return reply.code(400).send({
+        ok: false,
+        error: "request_error",
+        message: syncEntitiesIssue
+          ? "Payload de sincronização inválido: informe entities como array, mesmo vazio."
+          : "Payload inválido.",
+      });
+    }
+
     const statusCode = typeof error.statusCode === "number" ? error.statusCode : 500;
     if (statusCode >= 500) {
       app.log.error({ error }, "Unhandled webhook-server error");
