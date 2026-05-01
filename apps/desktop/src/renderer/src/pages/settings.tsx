@@ -210,7 +210,7 @@ const localNotificationToggles: Array<{ key: LocalNotificationToggleKey; label: 
 const gameMarketStatusLabel: Record<GameMarketSettingsView["connectionStatus"], string> = {
   not_configured: "Não configurado",
   configured: "Configurado",
-  docs_missing: "Documentação ausente",
+  docs_missing: "Configurado",
   connecting: "Conectando",
   connected: "Conectado",
   error: "Erro",
@@ -229,7 +229,7 @@ const gameMarketStatusTone = (status: GameMarketSettingsView["connectionStatus"]
     return "danger";
   }
 
-  if (status === "configured" || status === "connecting" || status === "syncing") {
+  if (status === "configured" || status === "docs_missing" || status === "connecting" || status === "syncing") {
     return "cyan";
   }
 
@@ -850,6 +850,8 @@ export const SettingsPage = (): JSX.Element => {
       setCloudResult(
         summary.status === "failed"
           ? summary.errors[0] ?? "Sync cloud falhou."
+          : summary.pushed === 0 && summary.pulled === 0 && summary.applied === 0 && summary.conflicts === 0
+            ? "Nenhuma alteração pendente. Sincronização concluída."
           : `${summary.pushed} envio(s), ${summary.applied} aplicação(ões), ${summary.conflicts} conflito(s), ${summary.ignored ?? 0} campo(s) seguro(s) ignorado(s).`
       );
       await refreshCloudSyncSettings();
@@ -1036,8 +1038,7 @@ export const SettingsPage = (): JSX.Element => {
     }
   };
 
-  const gameMarketCanCallApi =
-    gameMarketSettings?.documentation.status === "available" && Boolean(gameMarketSettings.hasToken);
+  const gameMarketCanCallApi = Boolean(gameMarketSettings?.apiBaseUrl && gameMarketSettings.hasToken);
   const gameMarketStatus =
     gameMarketBusy === "testing"
       ? "connecting"

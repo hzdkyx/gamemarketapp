@@ -25,4 +25,19 @@ describe("settings page scroll layout", () => {
     expect(settingsPage).toContain("<CardTitle>Webhook Server / Tempo Real</CardTitle>");
     expect(settingsPage).toContain("<CardTitle>Notificações Locais</CardTitle>");
   });
+
+  it("keeps GameMarket documentation as an informational warning, not an API-call blocker", () => {
+    const settingsPage = readSource("settings.tsx");
+
+    expect(settingsPage).toContain(
+      "const gameMarketCanCallApi = Boolean(gameMarketSettings?.apiBaseUrl && gameMarketSettings.hasToken);"
+    );
+    expect(settingsPage).not.toContain('documentation.status === "available" && Boolean(gameMarketSettings.hasToken)');
+  });
+
+  it("shows a friendly cloud sync message when there is nothing to exchange", () => {
+    const settingsPage = readSource("settings.tsx");
+
+    expect(settingsPage).toContain("Nenhuma alteração pendente. Sincronização concluída.");
+  });
 });

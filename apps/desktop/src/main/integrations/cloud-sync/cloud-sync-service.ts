@@ -226,7 +226,7 @@ export const cloudSyncService = {
         applied: applied.applied,
         conflicts: applied.conflicts,
         collected: 0,
-        ignored: 0,
+        ignored: applied.ignored,
         entityTypes: [],
         errors: []
       });
@@ -294,7 +294,7 @@ export const cloudSyncService = {
         applied: (pushed?.applied.length ?? 0) + applied.applied,
         conflicts: conflictCount,
         collected,
-        ignored,
+        ignored: ignored + applied.ignored,
         entityTypes,
         errors: []
       });

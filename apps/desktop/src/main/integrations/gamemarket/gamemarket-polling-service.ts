@@ -10,7 +10,6 @@ interface PollingDependencies {
   readSettings: () => {
     notifications: ReturnType<typeof settingsService.getNotificationSettings>;
     hasApiToken: boolean;
-    documentationAvailable: boolean;
   };
   syncNow: () => Promise<GameMarketSyncSummary>;
   saveStatus: (status: GameMarketPollingStatus) => void;
@@ -79,7 +78,6 @@ const makeDefaultDependencies = (): PollingDependencies => ({
     return {
       notifications,
       hasApiToken: gameMarketSettings.hasToken,
-      documentationAvailable: gameMarketSettings.documentation.status === "available",
     };
   },
   syncNow: () => gameMarketSyncService.syncNow(null, { trigger: "polling" }),
@@ -130,8 +128,7 @@ export const createGameMarketPollingService = (
   };
 
   const refresh = (): GameMarketPollingStatus => {
-    const { notifications, hasApiToken, documentationAvailable } =
-      dependencies.readSettings();
+    const { notifications, hasApiToken } = dependencies.readSettings();
     const intervalSeconds = notifications.pollingIntervalSeconds;
 
     if (!notifications.automaticPollingEnabled) {
@@ -147,7 +144,7 @@ export const createGameMarketPollingService = (
       });
     }
 
-    if (!hasApiToken || !documentationAvailable) {
+    if (!hasApiToken) {
       stopTimer();
       return persist({
         ...lastStatus,
@@ -168,11 +165,10 @@ export const createGameMarketPollingService = (
   };
 
   const runNow = async (): Promise<GameMarketPollingStatus> => {
-    const { notifications, hasApiToken, documentationAvailable } =
-      dependencies.readSettings();
+    const { notifications, hasApiToken } = dependencies.readSettings();
     const intervalSeconds = notifications.pollingIntervalSeconds;
 
-    if (!hasApiToken || !documentationAvailable) {
+    if (!hasApiToken) {
       stopTimer();
       return persist({
         ...lastStatus,

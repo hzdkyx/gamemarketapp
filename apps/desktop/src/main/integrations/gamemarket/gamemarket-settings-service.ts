@@ -165,6 +165,12 @@ const getSavedToken = (): string | null => {
   return decryptLocalSecret(encrypted);
 };
 
+const normalizeConnectionStatus = (
+  status: GameMarketSettingsView["connectionStatus"],
+  hasToken: boolean
+): GameMarketSettingsView["connectionStatus"] =>
+  status === "docs_missing" ? (hasToken ? "configured" : "not_configured") : status;
+
 export const getGameMarketDocumentationStatus = (): GameMarketDocumentationStatus => {
   const docsDirectory = findUp("docs/gamemarket-api");
 
@@ -216,16 +222,20 @@ export const gameMarketSettingsService = {
     const envToken = savedToken ? null : readEnvLocalValue(envTokenNames);
     const envBaseUrl = readEnvLocalValue(envBaseUrlNames);
     const tokenSource = savedToken ? "saved" : envToken ? "env" : "none";
-    const connectionStatus = readSetting<GameMarketSettingsView["connectionStatus"]>(
-      keys.lastConnectionStatus,
-      tokenSource === "none" ? "not_configured" : "configured"
+    const hasToken = Boolean(savedToken || envToken);
+    const connectionStatus = normalizeConnectionStatus(
+      readSetting<GameMarketSettingsView["connectionStatus"]>(
+        keys.lastConnectionStatus,
+        hasToken ? "configured" : "not_configured"
+      ),
+      hasToken
     );
 
     return {
       apiBaseUrl: readSetting(keys.baseUrl, envBaseUrl ?? defaultBaseUrl),
       integrationName: readSetting(keys.integrationName, defaultIntegrationName),
       environment: readSetting<GameMarketEnvironment>(keys.environment, "production"),
-      hasToken: Boolean(savedToken || envToken),
+      hasToken,
       tokenMasked: maskGameMarketToken(savedToken ?? envToken),
       tokenSource,
       connectionStatus,
@@ -264,14 +274,7 @@ export const gameMarketSettingsService = {
     }
 
     const settings = this.getSettings();
-    writeSetting(
-      keys.lastConnectionStatus,
-      settings.documentation.status === "available"
-        ? settings.hasToken
-          ? "configured"
-          : "not_configured"
-        : "docs_missing"
-    );
+    writeSetting(keys.lastConnectionStatus, settings.hasToken ? "configured" : "not_configured");
 
     return this.getSettings();
   },

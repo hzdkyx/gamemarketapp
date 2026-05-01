@@ -16,7 +16,7 @@ import { notificationService } from "./notification-service";
 
 const nowIso = (): string => new Date().toISOString();
 
-const sensitiveKeyPattern = /(password|senha|token|secret|chave|key|login|credential)/i;
+const sensitiveKeyPattern = /(password|senha|token|secret|chave|key|login|email|credential)/i;
 
 const sanitizeRawPayload = (payload: unknown): string | null => {
   if (payload === undefined || payload === null || payload === "") {

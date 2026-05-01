@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeSyncPayloadObjectWithStats } from "./sync-sanitizer";
+import { isSensitiveSettingKey, sanitizeSyncPayloadObjectWithStats } from "./sync-sanitizer";
 
 describe("desktop sync sanitizer", () => {
   it("removes protected sync fields before upload", () => {
@@ -34,5 +34,14 @@ describe("desktop sync sanitizer", () => {
     expect(result.ignoredFields).toBeGreaterThanOrEqual(16);
     expect(serialized).not.toContain("fake-");
     expect(serialized).not.toContain("unsafe");
+  });
+
+  it("classifies protected setting keys before cloud upload or pull apply", () => {
+    expect(isSensitiveSettingKey("gamemarket_api_token_encrypted")).toBe(true);
+    expect(isSensitiveSettingKey("webhook_server_secret")).toBe(true);
+    expect(isSensitiveSettingKey("cloud_session_token")).toBe(true);
+    expect(isSensitiveSettingKey("accountEmail")).toBe(true);
+    expect(isSensitiveSettingKey("serialKey")).toBe(true);
+    expect(isSensitiveSettingKey("ui_density")).toBe(false);
   });
 });

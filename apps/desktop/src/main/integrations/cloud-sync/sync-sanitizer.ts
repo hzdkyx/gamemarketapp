@@ -11,6 +11,10 @@ const exactSensitiveKeys = new Set(
     "app_sync_token",
     "cloudSessionToken",
     "cloud_session_token",
+    "cloudToken",
+    "cloud_token",
+    "sessionToken",
+    "session_token",
     "password",
     "passwordHash",
     "password_hash",
@@ -52,6 +56,9 @@ export const isSensitiveSyncKey = (key: string): boolean => {
   const normalized = key.trim().toLowerCase();
   return exactSensitiveKeys.has(normalized) || broadSensitiveKeyPattern.test(key);
 };
+
+export const isSensitiveSettingKey = (key: unknown): boolean =>
+  typeof key === "string" && isSensitiveSyncKey(key);
 
 const sanitizeValue = (value: unknown, key = "", depth = 0): SanitizedValueResult => {
   if (key && isSensitiveSyncKey(key)) {

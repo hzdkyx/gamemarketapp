@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
-  rowsByTable: {} as Record<string, Array<Record<string, unknown>>>
+  rowsByTable: {} as Record<string, Array<Record<string, unknown>>>,
+  conflicts: [] as Array<Record<string, unknown>>
 }));
 
 vi.mock("../../database/database", () => ({
@@ -10,8 +11,53 @@ vi.mock("../../database/database", () => ({
       all: () => {
         const table = /FROM\s+([a-z_]+)/i.exec(sql)?.[1] ?? "";
         return state.rowsByTable[table] ?? [];
+      },
+      get: (...args: unknown[]) => {
+        const table = /FROM\s+([a-z_]+)/i.exec(sql)?.[1] ?? "";
+        const rows = state.rowsByTable[table] ?? [];
+        if (sql.includes("cloud_id = ?")) {
+          return rows.find((row) => row.cloud_id === args[0]);
+        }
+        const column = /WHERE\s+([a-z_]+)\s*=\s*\?/i.exec(sql)?.[1] ?? "";
+        return rows.find((row) => row[column] === args[0]);
+      },
+      run: (params: Record<string, unknown> | string) => {
+        if (sql.includes("INSERT INTO cloud_sync_conflicts")) {
+          state.conflicts.push(params as Record<string, unknown>);
+          return { changes: 1 };
+        }
+
+        if (sql.includes("INSERT INTO settings")) {
+          const values = params as Record<string, unknown>;
+          if (values.is_secret === null || values.is_secret === undefined) {
+            throw new Error("NOT NULL constraint failed: settings.is_secret");
+          }
+          const rows = state.rowsByTable.settings ?? (state.rowsByTable.settings = []);
+          const existingIndex = rows.findIndex((row) => row.key === values.key);
+          const nextRow = {
+            ...(existingIndex >= 0 ? (rows[existingIndex] ?? {}) : {}),
+            ...values
+          };
+          if (existingIndex >= 0) {
+            rows[existingIndex] = nextRow;
+          } else {
+            rows.push(nextRow);
+          }
+          return { changes: 1 };
+        }
+
+        if (sql.includes("UPDATE settings") && sql.includes("sync_status = 'conflict'")) {
+          const row = (state.rowsByTable.settings ?? []).find((item) => item.key === params);
+          if (row) {
+            row.sync_status = "conflict";
+          }
+          return { changes: row ? 1 : 0 };
+        }
+
+        return { changes: 0 };
       }
-    })
+    }),
+    transaction: (callback: (items: unknown[]) => void) => (items: unknown[]) => callback(items)
   })
 }));
 
@@ -29,6 +75,7 @@ const resetRows = (): void => {
     app_notifications: [],
     settings: []
   };
+  state.conflicts = [];
 };
 
 const rowsFor = (table: string): Array<Record<string, unknown>> => state.rowsByTable[table] ?? [];
@@ -139,5 +186,87 @@ describe("cloudSyncLocalStore.collectChanges", () => {
     expect(serialized).not.toContain("unsafe");
     expect(serialized).not.toContain("account_login_encrypted");
     expect(serialized).not.toContain("raw_payload");
+  });
+
+  it("does not upload sensitive settings even when they were stored as non-secret", () => {
+    rowsFor("settings").push({
+      key: "custom_api_token",
+      value_json: JSON.stringify("gm_sk_should_not_sync_123456"),
+      is_secret: 0,
+      updated_at: now,
+      sync_revision: 0,
+      sync_status: "pending"
+    });
+
+    const collection = cloudSyncLocalStore.collectChanges(true);
+    const serialized = JSON.stringify(collection.changes);
+
+    expect(collection.changes).toHaveLength(0);
+    expect(collection.ignored).toBe(1);
+    expect(serialized).not.toContain("gm_sk_should_not_sync_123456");
+  });
+});
+
+describe("cloudSyncLocalStore.applyRemote", () => {
+  const remoteSetting = (overrides: Partial<Parameters<typeof cloudSyncLocalStore.applyRemote>[0][number]> = {}) => ({
+    cloudId: "cloud-setting-1",
+    workspaceId: "workspace-1",
+    entityType: "settings" as const,
+    localId: "ui_density",
+    payload: {
+      key: "ui_density",
+      value_json: JSON.stringify("compact"),
+      updated_at: now
+    },
+    version: 1,
+    updatedByUserId: "cloud-user-1",
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
+    ...overrides
+  });
+
+  it("applies non-sensitive settings with is_secret false when the cloud payload omits it", () => {
+    const result = cloudSyncLocalStore.applyRemote([remoteSetting()], now);
+    const stored = rowsFor("settings").find((row) => row.key === "ui_density");
+
+    expect(result).toEqual({ applied: 1, conflicts: 0, ignored: 0 });
+    expect(stored).toMatchObject({
+      key: "ui_density",
+      value_json: JSON.stringify("compact"),
+      is_secret: 0,
+      sync_status: "synced"
+    });
+  });
+
+  it("does not apply sensitive settings from the cloud over local secrets", () => {
+    rowsFor("settings").push({
+      key: "gamemarket_api_token_encrypted",
+      value_json: JSON.stringify("local-encrypted-token"),
+      is_secret: 1,
+      updated_at: now,
+      sync_revision: 0,
+      sync_status: "synced"
+    });
+
+    const result = cloudSyncLocalStore.applyRemote(
+      [
+        remoteSetting({
+          localId: "gamemarket_api_token_encrypted",
+          payload: {
+            key: "gamemarket_api_token_encrypted",
+            value_json: JSON.stringify("remote-encrypted-token"),
+            is_secret: 0,
+            updated_at: now
+          }
+        })
+      ],
+      now
+    );
+    const stored = rowsFor("settings").find((row) => row.key === "gamemarket_api_token_encrypted");
+
+    expect(result).toEqual({ applied: 0, conflicts: 0, ignored: 1 });
+    expect(stored?.value_json).toBe(JSON.stringify("local-encrypted-token"));
+    expect(stored?.is_secret).toBe(1);
   });
 });

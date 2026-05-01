@@ -9,7 +9,7 @@ import type {
 import { eventService } from "../../services/event-service";
 import { GameMarketClient } from "./gamemarket-client";
 import { gameMarketSettingsService } from "./gamemarket-settings-service";
-import { GameMarketDocsMissingError, toGameMarketSafeError } from "./gamemarket-errors";
+import { toGameMarketSafeError } from "./gamemarket-errors";
 import { gameMarketPollingService } from "./gamemarket-polling-service";
 import { gameMarketSyncService } from "./gamemarket-sync-service";
 
@@ -71,13 +71,6 @@ export const gameMarketService = {
     const settings = gameMarketSettingsService.getSettings();
 
     try {
-      if (settings.documentation.status !== "available") {
-        throw new GameMarketDocsMissingError({
-          documentationStatus: settings.documentation.status,
-          missing: settings.documentation.missing
-        });
-      }
-
       const token = gameMarketSettingsService.getTokenForRequest();
       if (!token) {
         throw new Error("Token GameMarket não configurado.");
@@ -111,7 +104,7 @@ export const gameMarketService = {
       };
     } catch (error) {
       const safeError = toGameMarketSafeError(error);
-      const status = safeError.code === "GAMEMARKET_DOCS_MISSING" ? "unavailable" : "error";
+      const status = "error";
       gameMarketSettingsService.markConnectionResult(status, safeError.safeMessage);
       eventService.createInternal({
         source: "gamemarket_api",
@@ -130,7 +123,7 @@ export const gameMarketService = {
         ok: false,
         status,
         checkedAt,
-        endpoint: settings.documentation.status === "available" ? connectionTestEndpoint : null,
+        endpoint: connectionTestEndpoint,
         safeMessage: safeError.safeMessage
       };
     }

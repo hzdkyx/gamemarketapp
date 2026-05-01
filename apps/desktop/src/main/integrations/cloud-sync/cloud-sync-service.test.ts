@@ -32,7 +32,25 @@ const state = vi.hoisted(() => ({
     ignored: 0,
     entityTypes: [] as string[]
   },
+  remoteEntities: [] as Array<{
+    cloudId: string;
+    workspaceId: string;
+    entityType: "settings";
+    localId: string;
+    payload: Record<string, unknown>;
+    version: number;
+    updatedByUserId: string;
+    createdAt: string;
+    updatedAt: string;
+    deletedAt: null;
+  }>,
+  applyRemoteResult: {
+    applied: 0,
+    conflicts: 0,
+    ignored: 0
+  },
   pushCalls: [] as Array<{ workspaceId: string; changes: unknown[] }>,
+  pullCalls: [] as Array<{ workspaceId: string; since: string | null }>,
   bootstrapOwnerCalls: 0,
   markSyncResults: [] as unknown[]
 }));
@@ -51,7 +69,8 @@ vi.mock("./cloud-sync-local-store", () => ({
   cloudSyncLocalStore: {
     collectChanges: () => state.collection,
     markPushed: vi.fn(),
-    markConflicts: vi.fn()
+    markConflicts: vi.fn(),
+    applyRemote: vi.fn(() => state.applyRemoteResult)
   }
 }));
 
@@ -65,6 +84,16 @@ vi.mock("./cloud-sync-client", () => ({
         entities: [],
         applied: [],
         conflicts: [],
+        serverTime: "2026-05-01T12:00:00.000Z"
+      };
+    }
+
+    async pull(workspaceId: string, since?: string | null): Promise<unknown> {
+      state.pullCalls.push({ workspaceId, since: since ?? null });
+      return {
+        ok: true,
+        workspaceId,
+        entities: state.remoteEntities,
         serverTime: "2026-05-01T12:00:00.000Z"
       };
     }
@@ -91,6 +120,13 @@ beforeEach(() => {
     entityTypes: []
   };
   state.pushCalls = [];
+  state.pullCalls = [];
+  state.remoteEntities = [];
+  state.applyRemoteResult = {
+    applied: 0,
+    conflicts: 0,
+    ignored: 0
+  };
   state.bootstrapOwnerCalls = 0;
   state.markSyncResults = [];
 });
@@ -122,5 +158,63 @@ describe("cloudSyncService.publishLocalData", () => {
     expect(summary.errors[0]).toBe("Modo nuvem não está ativado.");
     expect(state.pushCalls).toEqual([]);
     expect(state.bootstrapOwnerCalls).toBe(0);
+  });
+});
+
+describe("cloudSyncService.syncNow", () => {
+  it("finishes cleanly for an already populated workspace with no pending changes", async () => {
+    state.collection.ignored = 0;
+
+    const summary = await cloudSyncService.syncNow();
+
+    expect(summary).toMatchObject({
+      status: "synced",
+      pushed: 0,
+      pulled: 0,
+      applied: 0,
+      conflicts: 0,
+      collected: 0,
+      ignored: 0,
+      errors: []
+    });
+    expect(state.pushCalls).toEqual([]);
+    expect(state.pullCalls).toEqual([{ workspaceId: "workspace-existing-1", since: null }]);
+  });
+
+  it("includes safely ignored remote settings in the sync summary", async () => {
+    state.collection.ignored = 0;
+    state.remoteEntities = [
+      {
+        cloudId: "cloud-setting-1",
+        workspaceId: "workspace-existing-1",
+        entityType: "settings",
+        localId: "gamemarket_api_token_encrypted",
+        payload: {
+          key: "gamemarket_api_token_encrypted",
+          value_json: JSON.stringify("remote-token")
+        },
+        version: 1,
+        updatedByUserId: "cloud-user-1",
+        createdAt: "2026-05-01T12:00:00.000Z",
+        updatedAt: "2026-05-01T12:00:00.000Z",
+        deletedAt: null
+      }
+    ];
+    state.applyRemoteResult = {
+      applied: 0,
+      conflicts: 0,
+      ignored: 1
+    };
+
+    const summary = await cloudSyncService.syncNow();
+
+    expect(summary).toMatchObject({
+      status: "synced",
+      pushed: 0,
+      pulled: 1,
+      applied: 0,
+      conflicts: 0,
+      ignored: 1
+    });
   });
 });

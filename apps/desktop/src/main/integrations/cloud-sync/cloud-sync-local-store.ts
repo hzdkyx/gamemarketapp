@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { CloudSyncEntityType, CloudSyncEntityView } from "../../../shared/contracts";
 import { getSqliteDatabase } from "../../database/database";
 import type { CloudSyncChange } from "./cloud-sync-client";
-import { isSensitiveSyncKey, sanitizeSyncPayloadObjectWithStats } from "./sync-sanitizer";
+import { isSensitiveSettingKey, isSensitiveSyncKey, sanitizeSyncPayloadObjectWithStats } from "./sync-sanitizer";
 
 const syncMetaColumns = new Set([
   "cloud_id",
@@ -235,6 +235,12 @@ export interface CloudSyncLocalCollection {
   entityTypes: CloudSyncEntityType[];
 }
 
+export interface CloudSyncApplyRemoteResult {
+  applied: number;
+  conflicts: number;
+  ignored: number;
+}
+
 const countProtectedRowFields = (row: Row, columns: string[]): number => {
   const payloadColumns = new Set(columns);
   return Object.keys(row).filter(
@@ -274,6 +280,9 @@ const selectRows = (config: SyncTableConfig, includeAll: boolean): Row[] => {
 
   return includeAll ? rows : rows.filter((row) => isDirtyRow(row, config.updatedAtColumn));
 };
+
+const shouldSkipLocalRow = (config: SyncTableConfig, row: Row): boolean =>
+  config.entityType === "settings" && isSensitiveSettingKey(row.key);
 
 const getExistingRow = (config: SyncTableConfig, entity: CloudSyncEntityView): Row | null => {
   const db = getSqliteDatabase();
@@ -323,6 +332,51 @@ const insertConflict = (config: SyncTableConfig, localRow: Row, entity: CloudSyn
     });
 };
 
+const isTruthySecretFlag = (value: unknown): boolean =>
+  value === true || value === 1 || value === "1" || (typeof value === "string" && value.toLowerCase() === "true");
+
+const normalizeRemoteEntity = (
+  config: SyncTableConfig,
+  entity: CloudSyncEntityView
+): { entity: CloudSyncEntityView | null; ignored: number } => {
+  if (config.entityType !== "settings") {
+    return { entity, ignored: 0 };
+  }
+
+  const settingKey = typeof entity.payload.key === "string" ? entity.payload.key : entity.localId;
+  const remoteIsSecret = isTruthySecretFlag(entity.payload.is_secret) || isTruthySecretFlag(entity.payload.isSecret);
+  if (!settingKey.trim() || remoteIsSecret || isSensitiveSettingKey(settingKey)) {
+    return { entity: null, ignored: 1 };
+  }
+
+  const valueJson = entity.payload.value_json ?? entity.payload.valueJson;
+  if (typeof valueJson !== "string") {
+    return { entity: null, ignored: 1 };
+  }
+
+  const updatedAt =
+    typeof entity.payload.updated_at === "string"
+      ? entity.payload.updated_at
+      : typeof entity.payload.updatedAt === "string"
+        ? entity.payload.updatedAt
+        : entity.updatedAt;
+
+  return {
+    entity: {
+      ...entity,
+      localId: settingKey,
+      payload: {
+        ...entity.payload,
+        key: settingKey,
+        value_json: valueJson,
+        is_secret: 0,
+        updated_at: updatedAt
+      }
+    },
+    ignored: 0
+  };
+};
+
 const upsertEntity = (config: SyncTableConfig, entity: CloudSyncEntityView, syncedAt: string): void => {
   const db = getSqliteDatabase();
   const values = {
@@ -363,12 +417,19 @@ const upsertEntity = (config: SyncTableConfig, entity: CloudSyncEntityView, sync
 export const cloudSyncLocalStore = {
   collectChanges(includeAll = false): CloudSyncLocalCollection {
     let ignored = 0;
-    const changes = tableConfigs.flatMap((config) =>
-      selectRows(config, includeAll).map((row) => {
+    const changes: CloudSyncChange[] = [];
+
+    for (const config of tableConfigs) {
+      for (const row of selectRows(config, includeAll)) {
+        if (shouldSkipLocalRow(config, row)) {
+          ignored += 1;
+          continue;
+        }
+
         const builtPayload = toPayload(row, config.columns);
         ignored += builtPayload.ignoredFields;
 
-        return {
+        changes.push({
           entityType: config.entityType,
           localId: String(row[config.localIdColumn]),
           ...(typeof row.cloud_id === "string" ? { cloudId: row.cloud_id } : {}),
@@ -379,9 +440,9 @@ export const cloudSyncLocalStore = {
               : new Date().toISOString(),
           deletedAt: typeof row.deleted_at === "string" ? row.deleted_at : null,
           payload: builtPayload.payload
-        };
-      })
-    );
+        });
+      }
+    }
 
     return {
       changes,
@@ -442,7 +503,7 @@ export const cloudSyncLocalStore = {
     }
   },
 
-  applyRemote(entities: CloudSyncEntityView[], syncedAt: string): { applied: number; conflicts: number } {
+  applyRemote(entities: CloudSyncEntityView[], syncedAt: string): CloudSyncApplyRemoteResult {
     const ordered = [...entities].sort(
       (left, right) =>
         (entityOrder.get(left.entityType) ?? 100) - (entityOrder.get(right.entityType) ?? 100) ||
@@ -450,6 +511,7 @@ export const cloudSyncLocalStore = {
     );
     let applied = 0;
     let conflicts = 0;
+    let ignored = 0;
     const db = getSqliteDatabase();
     const transaction = db.transaction((items: CloudSyncEntityView[]) => {
       for (const entity of items) {
@@ -457,16 +519,26 @@ export const cloudSyncLocalStore = {
         if (!config) {
           continue;
         }
-        const localRow = getExistingRow(config, entity);
-        if (localRow && isDirtyRow(localRow, config.updatedAtColumn) && Number(localRow.sync_revision ?? 0) < entity.version) {
-          insertConflict(config, localRow, entity);
+        const normalized = normalizeRemoteEntity(config, entity);
+        ignored += normalized.ignored;
+        if (!normalized.entity) {
+          continue;
+        }
+
+        const localRow = getExistingRow(config, normalized.entity);
+        if (
+          localRow &&
+          isDirtyRow(localRow, config.updatedAtColumn) &&
+          Number(localRow.sync_revision ?? 0) < normalized.entity.version
+        ) {
+          insertConflict(config, localRow, normalized.entity);
           conflicts += 1;
         }
-        upsertEntity(config, entity, syncedAt);
+        upsertEntity(config, normalized.entity, syncedAt);
         applied += 1;
       }
     });
     transaction(ordered);
-    return { applied, conflicts };
+    return { applied, conflicts, ignored };
   }
 };

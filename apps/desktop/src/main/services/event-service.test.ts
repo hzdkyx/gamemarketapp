@@ -100,6 +100,7 @@ describe("event service", () => {
       rawPayload: {
         token: "secret-token",
         accountPassword: "secret-password",
+        accountEmail: "secret-email@example.test",
         visible: "ok"
       }
     });
@@ -108,6 +109,7 @@ describe("event service", () => {
     expect(event.rawPayload).toContain("visible");
     expect(event.rawPayload).not.toContain("secret-token");
     expect(event.rawPayload).not.toContain("secret-password");
+    expect(event.rawPayload).not.toContain("secret-email@example.test");
   });
 
   it("marks events as read and exports CSV", () => {

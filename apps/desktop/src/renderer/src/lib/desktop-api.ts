@@ -291,7 +291,7 @@ const fallbackApi: HzdKyxDesktopApi = {
       hasToken: false,
       tokenMasked: null,
       tokenSource: "none",
-      connectionStatus: "docs_missing",
+      connectionStatus: "not_configured",
       lastConnectionAt: null,
       lastSyncAt: null,
       lastError: null,

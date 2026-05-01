@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
@@ -76,5 +79,45 @@ describe("GameMarket settings service", () => {
     expect(settings.hasToken).toBe(true);
     expect(settings.tokenSource).toBe("env");
     expect(state.settings.has("gamemarket_api_token_encrypted")).toBe(false);
+  });
+
+  it("keeps GameMarket configured when local documentation is absent", () => {
+    const previousCwd = process.cwd();
+    const tempDir = mkdtempSync(join(tmpdir(), "gm-docs-optional-"));
+
+    try {
+      process.chdir(tempDir);
+      const settings = gameMarketSettingsService.updateSettings({
+        apiBaseUrl: "https://gamemarket.com.br",
+        integrationName: "Teste",
+        environment: "production",
+        token: "test-token-secret-123456"
+      });
+
+      expect(settings.documentation.status).toBe("missing");
+      expect(settings.connectionStatus).toBe("configured");
+      expect(settings.tokenMasked).toBe("test••••••••3456");
+      expect(gameMarketSettingsService.revealToken()).toBe("test-token-secret-123456");
+    } finally {
+      process.chdir(previousCwd);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("normalizes legacy docs_missing status without rewriting the saved token", () => {
+    gameMarketSettingsService.updateSettings({
+      token: "test-token-secret-123456"
+    });
+    const storedToken = state.settings.get("gamemarket_api_token_encrypted")?.value_json;
+    state.settings.set("gamemarket_last_connection_status", {
+      value_json: JSON.stringify("docs_missing"),
+      is_secret: 0
+    });
+
+    const settings = gameMarketSettingsService.getSettings();
+
+    expect(settings.connectionStatus).toBe("configured");
+    expect(state.settings.get("gamemarket_api_token_encrypted")?.value_json).toBe(storedToken);
+    expect(settings.tokenMasked).toBe("test••••••••3456");
   });
 });

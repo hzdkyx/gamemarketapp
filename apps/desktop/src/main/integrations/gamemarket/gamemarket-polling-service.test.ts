@@ -88,14 +88,12 @@ describe("gameMarketPollingService", () => {
   let savedStatuses: GameMarketPollingStatus[];
   let settings: NotificationSettings;
   let hasApiToken: boolean;
-  let documentationAvailable: boolean;
   let syncNow: ReturnType<typeof vi.fn<() => Promise<GameMarketSyncSummary>>>;
 
   const makeDependencies = (): PollingDependencies => ({
     readSettings: () => ({
       notifications: settings,
       hasApiToken,
-      documentationAvailable,
     }),
     syncNow,
     saveStatus: (status) => {
@@ -120,7 +118,6 @@ describe("gameMarketPollingService", () => {
     savedStatuses = [];
     settings = baseSettings();
     hasApiToken = true;
-    documentationAvailable = true;
     syncNow = vi.fn(async () => syncedSummary());
   });
 

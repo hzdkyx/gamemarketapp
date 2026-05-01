@@ -38,7 +38,8 @@ const state = vi.hoisted(() => ({
     message?: string;
     playSound?: boolean;
     metadata?: unknown;
-  }>
+  }>,
+  documentationStatus: "available" as "available" | "missing" | "incomplete"
 }));
 
 const findOrderById = (id: string): SyncedOrderRow | undefined =>
@@ -242,7 +243,7 @@ vi.mock("./gamemarket-settings-service", () => ({
     getSettings: () => ({
       apiBaseUrl: "https://gamemarket.com.br",
       documentation: {
-        status: "available",
+        status: state.documentationStatus,
         missing: []
       }
     }),
@@ -313,6 +314,7 @@ beforeEach(() => {
   state.ordersByExternalId.clear();
   state.events.length = 0;
   state.notifications.length = 0;
+  state.documentationStatus = "available";
   state.productsByExternalId.set("15", {
     id: "product-15",
     name: "Produto GameMarket",
@@ -347,6 +349,17 @@ describe("gameMarketSyncService order status preservation", () => {
 
     expect(repeated.ordersNew).toBe(0);
     expect(state.notifications).toHaveLength(1);
+  });
+
+  it("does not block manual sync when local documentation is absent", async () => {
+    state.documentationStatus = "missing";
+    state.remoteOrders.push(remoteOrder("processing"));
+
+    const summary = await gameMarketSyncService.syncNow("admin-1");
+
+    expect(summary.status).toBe("synced");
+    expect(summary.ordersNew).toBe(1);
+    expect(summary.errors).toEqual([]);
   });
 
   it("corrects GMK-ORD-34831 when it was completed early while GameMarket is still processing", async () => {

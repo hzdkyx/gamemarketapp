@@ -19,7 +19,7 @@ import {
   shouldApplyGameMarketOrderStatus
 } from "./gamemarket-mappers";
 import { gameMarketSettingsService } from "./gamemarket-settings-service";
-import { GameMarketDocsMissingError, toGameMarketSafeError } from "./gamemarket-errors";
+import { toGameMarketSafeError } from "./gamemarket-errors";
 
 const pageLimit = 100;
 const maxPagesPerResource = 10;
@@ -851,13 +851,6 @@ export const gameMarketSyncService = {
 
     try {
       const settings = gameMarketSettingsService.getSettings();
-      if (settings.documentation.status !== "available") {
-        throw new GameMarketDocsMissingError({
-          documentationStatus: settings.documentation.status,
-          missing: settings.documentation.missing
-        });
-      }
-
       const token = gameMarketSettingsService.getTokenForRequest();
       if (!token) {
         throw new Error("Token GameMarket não configurado.");
