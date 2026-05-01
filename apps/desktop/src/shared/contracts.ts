@@ -201,6 +201,35 @@ export const webhookServerConnectionStatusValues = [
   "partial",
   "unavailable",
 ] as const;
+export const cloudRoleValues = [
+  "owner",
+  "admin",
+  "manager",
+  "operator",
+  "viewer",
+] as const;
+export const cloudSyncModeValues = ["local", "cloud"] as const;
+export const cloudSyncConnectionStatusValues = [
+  "not_configured",
+  "configured",
+  "auth_required",
+  "connected",
+  "syncing",
+  "synced",
+  "partial",
+  "conflict",
+  "error",
+  "unavailable",
+] as const;
+export const cloudSyncEntityTypeValues = [
+  "products",
+  "product_variants",
+  "inventory_items",
+  "orders",
+  "events",
+  "app_notifications",
+  "settings",
+] as const;
 export const inventorySecretFieldValues = [
   "accountLogin",
   "accountPassword",
@@ -285,6 +314,12 @@ export const gamemarketConnectionStatusSchema = z.enum(
 export const webhookServerConnectionStatusSchema = z.enum(
   webhookServerConnectionStatusValues,
 );
+export const cloudRoleSchema = z.enum(cloudRoleValues);
+export const cloudSyncModeSchema = z.enum(cloudSyncModeValues);
+export const cloudSyncConnectionStatusSchema = z.enum(
+  cloudSyncConnectionStatusValues,
+);
+export const cloudSyncEntityTypeSchema = z.enum(cloudSyncEntityTypeValues);
 
 export const productCreateInputSchema = z
   .object({
@@ -723,6 +758,59 @@ export const webhookServerRevealTokenInputSchema = z
 
 export const webhookServerEmptyInputSchema = z.object({}).strict();
 
+export const cloudSyncSettingsUpdateInputSchema = z
+  .object({
+    backendUrl: z
+      .string()
+      .trim()
+      .url("Informe uma URL válida.")
+      .max(500)
+      .optional(),
+    mode: cloudSyncModeSchema.optional(),
+    workspaceId: nullableTextSchema,
+    autoSyncEnabled: z.boolean().optional(),
+    syncIntervalSeconds: z.number().int().min(60).max(86_400).optional(),
+    clearSession: z.boolean().optional(),
+  })
+  .strict();
+
+export const cloudSyncBootstrapOwnerInputSchema = z
+  .object({
+    name: requiredTextSchema,
+    email: nullableTextSchema,
+    username: nullableTextSchema,
+    password: passwordSchema,
+    workspaceName: z.string().trim().min(2).max(120).default("HzdKyx GameMarket"),
+  })
+  .strict();
+
+export const cloudSyncLoginInputSchema = z
+  .object({
+    identifier: z.string().trim().min(3).max(160),
+    password: z.string().min(1, "Campo obrigatório."),
+  })
+  .strict();
+
+export const cloudSyncInviteUserInputSchema = z
+  .object({
+    name: requiredTextSchema,
+    email: nullableTextSchema,
+    username: nullableTextSchema,
+    password: passwordSchema,
+    role: cloudRoleSchema.exclude(["owner"]).default("manager"),
+  })
+  .strict();
+
+export const cloudSyncUpdateMemberInputSchema = z
+  .object({
+    userId: idSchema,
+    role: cloudRoleSchema.exclude(["owner"]),
+    status: userStatusSchema.default("active"),
+  })
+  .strict();
+
+export const cloudSyncEmptyInputSchema = z.object({}).strict();
+
 export const authLoginInputSchema = z
   .object({
     username: usernameSchema,
@@ -837,6 +925,11 @@ export type GameMarketConnectionStatus =
   (typeof gamemarketConnectionStatusValues)[number];
 export type WebhookServerConnectionStatus =
   (typeof webhookServerConnectionStatusValues)[number];
+export type CloudRole = (typeof cloudRoleValues)[number];
+export type CloudSyncMode = (typeof cloudSyncModeValues)[number];
+export type CloudSyncConnectionStatus =
+  (typeof cloudSyncConnectionStatusValues)[number];
+export type CloudSyncEntityType = (typeof cloudSyncEntityTypeValues)[number];
 
 export type ProductCreateInput = z.infer<typeof productCreateInputSchema>;
 export type ProductUpdateData = z.infer<typeof productUpdateDataSchema>;
@@ -903,6 +996,19 @@ export type WebhookServerSettingsUpdateInput = z.infer<
 >;
 export type WebhookServerRevealTokenInput = z.infer<
   typeof webhookServerRevealTokenInputSchema
+>;
+export type CloudSyncSettingsUpdateInput = z.infer<
+  typeof cloudSyncSettingsUpdateInputSchema
+>;
+export type CloudSyncBootstrapOwnerInput = z.infer<
+  typeof cloudSyncBootstrapOwnerInputSchema
+>;
+export type CloudSyncLoginInput = z.infer<typeof cloudSyncLoginInputSchema>;
+export type CloudSyncInviteUserInput = z.infer<
+  typeof cloudSyncInviteUserInputSchema
+>;
+export type CloudSyncUpdateMemberInput = z.infer<
+  typeof cloudSyncUpdateMemberInputSchema
 >;
 export type AuthLoginInput = z.infer<typeof authLoginInputSchema>;
 export type AuthSetupAdminInput = z.infer<typeof authSetupAdminInputSchema>;
@@ -1550,4 +1656,84 @@ export interface WebhookServerTestEventResult {
   eventType: string;
   severity: EventSeverity;
   message: string;
+}
+
+export interface CloudUserView {
+  id: string;
+  name: string;
+  email: string | null;
+  username: string | null;
+  role: CloudRole;
+  status: UserStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CloudWorkspaceView {
+  id: string;
+  name: string;
+  role: CloudRole;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CloudWorkspaceMemberView extends CloudUserView {
+  membershipId: string;
+  workspaceId: string;
+}
+
+export interface CloudSyncSettingsView {
+  backendUrl: string;
+  mode: CloudSyncMode;
+  connectionStatus: CloudSyncConnectionStatus;
+  hasSession: boolean;
+  currentUser: CloudUserView | null;
+  workspaces: CloudWorkspaceView[];
+  workspaceId: string | null;
+  workspaceName: string | null;
+  workspaceRole: CloudRole | null;
+  autoSyncEnabled: boolean;
+  syncIntervalSeconds: number;
+  lastSyncAt: string | null;
+  lastPullAt: string | null;
+  lastPushAt: string | null;
+  lastError: string | null;
+  pendingChanges: number;
+  conflictCount: number;
+}
+
+export interface CloudSyncEntityView {
+  cloudId: string;
+  workspaceId: string;
+  entityType: CloudSyncEntityType;
+  localId: string;
+  payload: Record<string, unknown>;
+  version: number;
+  updatedByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+export interface CloudSyncConflictView {
+  id: string;
+  workspaceId: string;
+  entityType: CloudSyncEntityType;
+  localId: string;
+  cloudId: string;
+  remoteVersion: number;
+  incomingBaseVersion: number;
+  createdAt: string;
+}
+
+export interface CloudSyncSummary {
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  status: "synced" | "partial" | "failed" | "conflict";
+  pushed: number;
+  pulled: number;
+  applied: number;
+  conflicts: number;
+  errors: string[];
 }

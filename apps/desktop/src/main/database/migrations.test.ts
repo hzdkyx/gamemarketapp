@@ -34,4 +34,17 @@ describe("runtime migrations", () => {
     expect(migration?.sql).toContain("idx_app_notifications_dedupe");
     expect(migration?.sql).toContain("WHERE dedupe_key IS NOT NULL");
   });
+
+  it("defines the cloud workspace sync migration without removing local mode tables", () => {
+    const migration = runtimeMigrations.find((item) => item.id === "0009_phase7_cloud_workspace_sync");
+
+    expect(migration).toBeTruthy();
+    expect(migration?.sql).toContain("ALTER TABLE products ADD COLUMN cloud_id");
+    expect(migration?.sql).toContain("ALTER TABLE product_variants ADD COLUMN workspace_id");
+    expect(migration?.sql).toContain("ALTER TABLE inventory_items ADD COLUMN sync_status");
+    expect(migration?.sql).toContain("ALTER TABLE orders ADD COLUMN sync_revision");
+    expect(migration?.sql).toContain("ALTER TABLE events ADD COLUMN deleted_at");
+    expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS cloud_sync_conflicts");
+    expect(migration?.sql).toContain("idx_cloud_sync_conflicts_workspace");
+  });
 });

@@ -50,7 +50,26 @@ npm install
 npm run dev
 ```
 
-Também existe `start-app.bat` na raiz. Ele é apenas um atalho de desenvolvimento e executa `npm run dev`.
+`npm run dev` e `start-app.bat` são apenas modo desenvolvimento/debug. Eles abrem terminal porque carregam Vite/Electron em modo de desenvolvimento.
+
+## Como abrir o app sem CMD
+
+Para uso diário no Windows, não abra o app com `npm run dev` nem com `start-app.bat`.
+
+1. Gere o build de produção:
+
+```bash
+npm run dist
+```
+
+2. Use um dos arquivos gerados em `apps/desktop/release/`:
+
+- `HzdKyx GameMarket Manager Setup 0.1.0.exe`: instalador NSIS recomendado para uso normal.
+- `HzdKyx GameMarket Manager Portable 0.1.0.exe`: versão portable, sem instalação.
+
+Depois de instalar pelo Setup, abra o app pelo atalho **HzdKyx GameMarket Manager** no menu iniciar ou na área de trabalho. Esses atalhos apontam para o `.exe` do Electron e não dependem de CMD.
+
+Para usar em outro PC, envie o instalador `HzdKyx GameMarket Manager Setup 0.1.0.exe`. O `start-app.bat` continua existindo apenas como atalho local de desenvolvimento.
 
 Se o SQLite nativo falhar após troca de versão do Electron ou Node:
 
@@ -64,6 +83,7 @@ npm run rebuild:native --workspace @hzdk/gamemarket-desktop
 npm run lint
 npm run test
 npm run build
+npm run dist
 ```
 
 ## Webhook Server Local
@@ -105,7 +125,7 @@ Em produção, `NODE_ENV=production` exige `DATABASE_URL`, `WEBHOOK_INGEST_SECRE
 
 Fluxo local:
 
-1. Abra o app com `npm run dev`, `start-app.bat` ou pelo `.exe`.
+1. Abra o app pelo atalho instalado, pelo portable `.exe` ou, em desenvolvimento, com `npm run dev`.
 2. Se não existir admin, a tela **Configuração inicial** será exibida.
 3. Crie o admin informando nome, usuário, senha e confirmação.
 4. Depois da criação, o app volta para a tela de login.
@@ -141,19 +161,23 @@ Para gerar instalador e executável portable:
 npm run dist
 ```
 
-O script da raiz chama o workspace desktop, executa build e depois `electron-builder --win`.
+O script da raiz chama o workspace desktop, limpa `apps/desktop/release/`, executa build e depois `electron-builder --win`.
 
 Saída esperada:
 
-- `apps/desktop/release/*.exe`
-- instalador NSIS;
-- portable `.exe`, quando o ambiente permitir.
+- `apps/desktop/release/HzdKyx GameMarket Manager Setup 0.1.0.exe`: instalador NSIS.
+- `apps/desktop/release/HzdKyx GameMarket Manager Portable 0.1.0.exe`: executável portable.
+- `apps/desktop/release/win-unpacked/HzdKyx GameMarket Manager.exe`: app empacotado usado pelo build.
+
+O instalador cria atalho no menu iniciar e na área de trabalho com o nome **HzdKyx GameMarket Manager**. O AppUserModelID usado pelo app e pelo build é `com.hzdk.gamemarket.manager`, mantendo notificações e identidade do Windows estáveis.
 
 Diferenças:
 
-- `npm run dev`: abre Electron em modo desenvolvimento.
+- `npm run dev`: abre Electron em modo desenvolvimento e pode mostrar terminal, logs e menu nativo.
 - `start-app.bat`: atalho local para desenvolvimento, equivalente a `npm run dev`.
+- `npm run start:production`: abre `release/win-unpacked/HzdKyx GameMarket Manager.exe` para teste local do build empacotado.
 - `npm run dist`: gera artefatos Windows para uso normal.
+- Setup ou Portable `.exe`: caminho correto para uso final sem CMD.
 
 ## Produtos
 

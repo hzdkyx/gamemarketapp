@@ -9,7 +9,9 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "tsc --noEmit && electron-vite build",
-    "dist": "npm run build && electron-builder --win",
+    "clean:release": "node -e \"require('node:fs').rmSync('release',{recursive:true,force:true})\"",
+    "dist": "npm run clean:release && npm run build && electron-builder --win",
+    "start:production": "node scripts/start-production.mjs",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3",
     "seed:product-variants": "electron scripts/seed-product-variants.mjs",
     "repair:product-variants": "electron scripts/repair-product-variants.mjs",
@@ -69,14 +71,35 @@
       "package.json"
     ],
     "win": {
+      "executableName": "HzdKyx GameMarket Manager",
       "target": [
-        "nsis",
-        "portable"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "HzdKyx GameMarket Manager",
+      "uninstallDisplayName": "HzdKyx GameMarket Manager",
+      "artifactName": "${productName} Setup ${version}.${ext}",
       "allowToChangeInstallationDirectory": true
+    },
+    "portable": {
+      "artifactName": "${productName} Portable ${version}.${ext}",
+      "requestExecutionLevel": "user"
     }
   }
 }

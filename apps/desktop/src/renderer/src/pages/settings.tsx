@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BellRing,
+  Cloud,
   Database,
+  DownloadCloud,
   Edit3,
   Eye,
   FileText,
@@ -12,7 +14,9 @@ import {
   Save,
   Server,
   ShieldCheck,
+  UploadCloud,
   UserPlus,
+  UsersRound,
   Volume2
 } from "lucide-react";
 import { Badge } from "@renderer/components/ui/badge";
@@ -22,6 +26,10 @@ import { getDesktopApi } from "@renderer/lib/desktop-api";
 import { playSaleAlertSound } from "@renderer/lib/notification-sound";
 import type {
   EventType,
+  CloudRole,
+  CloudSyncSettingsView,
+  CloudSyncSummary,
+  CloudWorkspaceMemberView,
   GameMarketEnvironment,
   GameMarketPollingStatus,
   GameMarketSettingsView,
@@ -102,6 +110,35 @@ interface WebhookServerFormState {
   backendUrl: string;
   pollingEnabled: boolean;
   pollingIntervalSeconds: number;
+}
+
+interface CloudSyncFormState {
+  backendUrl: string;
+  mode: "local" | "cloud";
+  workspaceId: string;
+  autoSyncEnabled: boolean;
+  syncIntervalSeconds: number;
+}
+
+interface CloudLoginFormState {
+  identifier: string;
+  password: string;
+}
+
+interface CloudOwnerFormState {
+  name: string;
+  email: string;
+  username: string;
+  password: string;
+  workspaceName: string;
+}
+
+interface CloudInviteFormState {
+  name: string;
+  email: string;
+  username: string;
+  password: string;
+  role: Exclude<CloudRole, "owner">;
 }
 
 interface UserFormState {
@@ -237,6 +274,45 @@ const webhookServerStatusTone = (
   return "warning";
 };
 
+const cloudRoleLabels: Record<CloudRole, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  manager: "Manager",
+  operator: "Operator",
+  viewer: "Viewer"
+};
+
+const cloudStatusLabel: Record<CloudSyncSettingsView["connectionStatus"], string> = {
+  not_configured: "Não configurado",
+  configured: "Configurado",
+  auth_required: "Login necessário",
+  connected: "Conectado",
+  syncing: "Sincronizando",
+  synced: "Sincronizado",
+  partial: "Sync parcial",
+  conflict: "Conflito",
+  error: "Erro",
+  unavailable: "Indisponível"
+};
+
+const cloudStatusTone = (
+  status: CloudSyncSettingsView["connectionStatus"]
+): "success" | "warning" | "danger" | "cyan" | "neutral" => {
+  if (status === "connected" || status === "synced") {
+    return "success";
+  }
+  if (status === "error" || status === "unavailable") {
+    return "danger";
+  }
+  if (status === "conflict" || status === "partial") {
+    return "warning";
+  }
+  if (status === "syncing" || status === "configured") {
+    return "cyan";
+  }
+  return "neutral";
+};
+
 export const SettingsPage = (): JSX.Element => {
   const api = useMemo(() => getDesktopApi(), []);
   const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus | null>(null);
@@ -267,6 +343,38 @@ export const SettingsPage = (): JSX.Element => {
   const [webhookServerResult, setWebhookServerResult] = useState("");
   const [revealedWebhookServerToken, setRevealedWebhookServerToken] = useState<string | null>(null);
   const [webhookServerSyncSummary, setWebhookServerSyncSummary] = useState<WebhookServerSyncSummary | null>(null);
+  const [cloudSyncSettings, setCloudSyncSettings] = useState<CloudSyncSettingsView | null>(null);
+  const [cloudSyncForm, setCloudSyncForm] = useState<CloudSyncFormState>({
+    backendUrl: "http://localhost:3001",
+    mode: "local",
+    workspaceId: "",
+    autoSyncEnabled: false,
+    syncIntervalSeconds: 300
+  });
+  const [cloudLoginForm, setCloudLoginForm] = useState<CloudLoginFormState>({
+    identifier: "",
+    password: ""
+  });
+  const [cloudOwnerForm, setCloudOwnerForm] = useState<CloudOwnerFormState>({
+    name: "",
+    email: "",
+    username: "",
+    password: "",
+    workspaceName: "HzdKyx GameMarket"
+  });
+  const [cloudInviteForm, setCloudInviteForm] = useState<CloudInviteFormState>({
+    name: "",
+    email: "",
+    username: "",
+    password: "",
+    role: "manager"
+  });
+  const [cloudMembers, setCloudMembers] = useState<CloudWorkspaceMemberView[]>([]);
+  const [cloudBusy, setCloudBusy] = useState<
+    "saving" | "testing" | "login" | "owner" | "syncing" | "publishing" | "downloading" | "inviting" | null
+  >(null);
+  const [cloudResult, setCloudResult] = useState("");
+  const [cloudSyncSummary, setCloudSyncSummary] = useState<CloudSyncSummary | null>(null);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [userForm, setUserForm] = useState<UserFormState | null>(null);
   const [resetPasswordUser, setResetPasswordUser] = useState<UserRecord | null>(null);
@@ -294,6 +402,10 @@ export const SettingsPage = (): JSX.Element => {
         api.webhookServer.getSettings(),
         api.webhookServer.getLastSyncSummary()
       ]);
+      const [loadedCloudSyncSettings, loadedCloudSyncSummary] = await Promise.all([
+        api.cloudSync.getSettings(),
+        api.cloudSync.getLastSyncSummary()
+      ]);
       setDatabaseStatus(dbStatus);
       setAppMeta(meta);
       setSettings(notificationSettings);
@@ -313,6 +425,22 @@ export const SettingsPage = (): JSX.Element => {
         pollingIntervalSeconds: loadedWebhookServerSettings.pollingIntervalSeconds
       });
       setWebhookServerSyncSummary(webhookSyncSummary);
+      setCloudSyncSettings(loadedCloudSyncSettings);
+      setCloudSyncForm({
+        backendUrl: loadedCloudSyncSettings.backendUrl,
+        mode: loadedCloudSyncSettings.mode,
+        workspaceId: loadedCloudSyncSettings.workspaceId ?? "",
+        autoSyncEnabled: loadedCloudSyncSettings.autoSyncEnabled,
+        syncIntervalSeconds: loadedCloudSyncSettings.syncIntervalSeconds
+      });
+      setCloudSyncSummary(loadedCloudSyncSummary);
+      if (loadedCloudSyncSettings.workspaceRole === "owner" || loadedCloudSyncSettings.workspaceRole === "admin") {
+        try {
+          setCloudMembers(await api.cloudSync.listMembers());
+        } catch {
+          setCloudMembers([]);
+        }
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Falha ao carregar configurações.");
     }
@@ -577,6 +705,246 @@ export const SettingsPage = (): JSX.Element => {
     }
   };
 
+  const refreshCloudSyncSettings = async (): Promise<void> => {
+    const [loadedCloudSyncSettings, loadedCloudSummary] = await Promise.all([
+      api.cloudSync.getSettings(),
+      api.cloudSync.getLastSyncSummary()
+    ]);
+    setCloudSyncSettings(loadedCloudSyncSettings);
+    setCloudSyncSummary(loadedCloudSummary);
+    setCloudSyncForm({
+      backendUrl: loadedCloudSyncSettings.backendUrl,
+      mode: loadedCloudSyncSettings.mode,
+      workspaceId: loadedCloudSyncSettings.workspaceId ?? "",
+      autoSyncEnabled: loadedCloudSyncSettings.autoSyncEnabled,
+      syncIntervalSeconds: loadedCloudSyncSettings.syncIntervalSeconds
+    });
+
+    if (loadedCloudSyncSettings.workspaceRole === "owner" || loadedCloudSyncSettings.workspaceRole === "admin") {
+      try {
+        setCloudMembers(await api.cloudSync.listMembers());
+      } catch {
+        setCloudMembers([]);
+      }
+    } else {
+      setCloudMembers([]);
+    }
+  };
+
+  const saveCloudSyncSettings = async (): Promise<void> => {
+    setCloudBusy("saving");
+    setCloudResult("");
+    setError(null);
+
+    try {
+      const updated = await api.cloudSync.updateSettings({
+        backendUrl: cloudSyncForm.backendUrl,
+        mode: cloudSyncForm.mode,
+        workspaceId: cloudSyncForm.workspaceId || null,
+        autoSyncEnabled: cloudSyncForm.autoSyncEnabled,
+        syncIntervalSeconds: cloudSyncForm.syncIntervalSeconds
+      });
+      setCloudSyncSettings(updated);
+      setCloudResult("Configuração cloud salva.");
+      await refreshCloudSyncSettings();
+    } catch (saveError) {
+      setCloudResult(saveError instanceof Error ? saveError.message : "Falha ao salvar sync cloud.");
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const testCloudSyncConnection = async (): Promise<void> => {
+    setCloudBusy("testing");
+    setCloudResult("Testando backend cloud...");
+    setError(null);
+
+    try {
+      const result = await api.cloudSync.testConnection();
+      setCloudResult(result.safeMessage);
+      await refreshCloudSyncSettings();
+    } catch (testError) {
+      setCloudResult(testError instanceof Error ? testError.message : "Falha ao testar backend cloud.");
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const bootstrapCloudOwner = async (): Promise<void> => {
+    setCloudBusy("owner");
+    setCloudResult("");
+    setError(null);
+
+    try {
+      const updated = await api.cloudSync.bootstrapOwner({
+        name: cloudOwnerForm.name,
+        email: cloudOwnerForm.email || null,
+        username: cloudOwnerForm.username || null,
+        password: cloudOwnerForm.password,
+        workspaceName: cloudOwnerForm.workspaceName
+      });
+      setCloudSyncSettings(updated);
+      setCloudOwnerForm({
+        name: "",
+        email: "",
+        username: "",
+        password: "",
+        workspaceName: "HzdKyx GameMarket"
+      });
+      setCloudResult("Owner e workspace criados. Sessão cloud ativa.");
+      await refreshCloudSyncSettings();
+    } catch (ownerError) {
+      setCloudResult(ownerError instanceof Error ? ownerError.message : "Falha ao criar owner cloud.");
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const loginCloud = async (): Promise<void> => {
+    setCloudBusy("login");
+    setCloudResult("");
+    setError(null);
+
+    try {
+      const updated = await api.cloudSync.login({
+        identifier: cloudLoginForm.identifier,
+        password: cloudLoginForm.password
+      });
+      setCloudLoginForm({ identifier: "", password: "" });
+      setCloudSyncSettings(updated);
+      setCloudResult("Login cloud concluído.");
+      await refreshCloudSyncSettings();
+    } catch (loginError) {
+      setCloudResult(loginError instanceof Error ? loginError.message : "Falha ao entrar no workspace.");
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const logoutCloud = async (): Promise<void> => {
+    setCloudBusy("login");
+    setCloudResult("");
+    setError(null);
+
+    try {
+      const updated = await api.cloudSync.logout();
+      setCloudSyncSettings(updated);
+      setCloudMembers([]);
+      setCloudResult("Sessão cloud encerrada neste desktop.");
+      await refreshCloudSyncSettings();
+    } catch (logoutError) {
+      setCloudResult(logoutError instanceof Error ? logoutError.message : "Falha ao sair da conta cloud.");
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const syncCloudNow = async (): Promise<void> => {
+    setCloudBusy("syncing");
+    setCloudResult("Sincronizando workspace...");
+    setError(null);
+
+    try {
+      const summary = await api.cloudSync.syncNow();
+      setCloudSyncSummary(summary);
+      setCloudResult(
+        summary.status === "failed"
+          ? summary.errors[0] ?? "Sync cloud falhou."
+          : `${summary.pushed} envio(s), ${summary.applied} aplicação(ões), ${summary.conflicts} conflito(s).`
+      );
+      await refreshCloudSyncSettings();
+    } catch (syncError) {
+      setCloudResult(syncError instanceof Error ? syncError.message : "Falha ao sincronizar workspace.");
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const publishLocalData = async (): Promise<void> => {
+    const confirmed = window.confirm(
+      "Enviar os dados locais seguros deste desktop para o workspace cloud atual? Segredos protegidos não serão enviados."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setCloudBusy("publishing");
+    setCloudResult("Enviando dados locais seguros...");
+    setError(null);
+
+    try {
+      const summary = await api.cloudSync.publishLocalData();
+      setCloudSyncSummary(summary);
+      setCloudResult(
+        summary.status === "failed"
+          ? summary.errors[0] ?? "Upload inicial falhou."
+          : `${summary.pushed} registro(s) local(is) enviados para a nuvem.`
+      );
+      await refreshCloudSyncSettings();
+    } catch (publishError) {
+      setCloudResult(publishError instanceof Error ? publishError.message : "Falha no upload inicial.");
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const downloadCloudWorkspace = async (): Promise<void> => {
+    const confirmed = window.confirm(
+      "Baixar os dados do workspace cloud para este desktop? Conflitos locais serão registrados antes de aplicar last-write-wins."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setCloudBusy("downloading");
+    setCloudResult("Baixando workspace...");
+    setError(null);
+
+    try {
+      const summary = await api.cloudSync.downloadWorkspace();
+      setCloudSyncSummary(summary);
+      setCloudResult(
+        summary.status === "failed"
+          ? summary.errors[0] ?? "Download do workspace falhou."
+          : `${summary.applied} registro(s) aplicado(s) neste desktop.`
+      );
+      await refreshCloudSyncSettings();
+    } catch (downloadError) {
+      setCloudResult(downloadError instanceof Error ? downloadError.message : "Falha ao baixar workspace.");
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const inviteCloudUser = async (): Promise<void> => {
+    setCloudBusy("inviting");
+    setCloudResult("");
+    setError(null);
+
+    try {
+      await api.cloudSync.inviteUser({
+        name: cloudInviteForm.name,
+        email: cloudInviteForm.email || null,
+        username: cloudInviteForm.username || null,
+        password: cloudInviteForm.password,
+        role: cloudInviteForm.role
+      });
+      setCloudInviteForm({
+        name: "",
+        email: "",
+        username: "",
+        password: "",
+        role: "manager"
+      });
+      setCloudResult("Usuário cloud criado no workspace.");
+      await refreshCloudSyncSettings();
+    } catch (inviteError) {
+      setCloudResult(inviteError instanceof Error ? inviteError.message : "Falha ao criar usuário cloud.");
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
   const openNewUser = (): void => {
     setUserForm(emptyUserForm);
   };
@@ -683,6 +1051,15 @@ export const SettingsPage = (): JSX.Element => {
       : webhookServerBusy === "syncing" || webhookServerBusy === "sendingTest"
         ? "syncing"
         : webhookServerSettings?.connectionStatus ?? "not_configured";
+  const cloudStatus =
+    cloudBusy === "syncing" || cloudBusy === "publishing" || cloudBusy === "downloading" || cloudBusy === "testing"
+      ? "syncing"
+      : cloudSyncSettings?.connectionStatus ?? "not_configured";
+  const cloudCanUseWorkspace = Boolean(
+    cloudSyncSettings?.hasSession && (cloudSyncForm.workspaceId || cloudSyncSettings?.workspaceId)
+  );
+  const cloudCanManageUsers =
+    cloudSyncSettings?.workspaceRole === "owner" || cloudSyncSettings?.workspaceRole === "admin";
 
   return (
     <div className="grid gap-6 pb-10 xl:grid-cols-2">
@@ -768,6 +1145,430 @@ export const SettingsPage = (): JSX.Element => {
               </tbody>
             </table>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="xl:col-span-2">
+        <CardHeader className="items-start">
+          <div>
+            <CardTitle>Conta e Sincronização</CardTitle>
+            <div className="mt-1 text-sm text-slate-400">Workspace cloud compartilhado para operação em mais de um desktop.</div>
+          </div>
+          <Badge tone={cloudStatusTone(cloudStatus)}>{cloudStatusLabel[cloudStatus]}</Badge>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid gap-3 md:grid-cols-4">
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                <Cloud size={16} className="text-cyan" />
+                Modo
+              </div>
+              <div className="mt-2 text-sm text-slate-400">
+                {cloudSyncSettings?.mode === "cloud" ? "Nuvem" : "Local"}
+              </div>
+            </div>
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="text-sm font-semibold text-white">Conta cloud</div>
+              <div className="mt-2 text-sm text-slate-400">
+                {cloudSyncSettings?.currentUser?.name ?? "Sem login"}
+              </div>
+              <div className="mt-1 font-mono text-xs text-slate-500">
+                {cloudSyncSettings?.currentUser?.email ?? cloudSyncSettings?.currentUser?.username ?? "-"}
+              </div>
+            </div>
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="text-sm font-semibold text-white">Workspace</div>
+              <div className="mt-2 text-sm text-slate-400">
+                {cloudSyncSettings?.workspaceName ?? "Nenhum selecionado"}
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                {cloudSyncSettings?.workspaceRole ? cloudRoleLabels[cloudSyncSettings.workspaceRole] : "-"}
+              </div>
+            </div>
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="text-sm font-semibold text-white">Última sincronização</div>
+              <div className="mt-2 text-sm text-slate-400">{formatDateTime(cloudSyncSettings?.lastSyncAt)}</div>
+              <div className="mt-1 text-xs text-slate-500">
+                {cloudSyncSettings?.pendingChanges ?? 0} pendente(s), {cloudSyncSettings?.conflictCount ?? 0} conflito(s)
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-line bg-panelSoft p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-white">Configuração do workspace</div>
+                <div className="mt-1 text-xs text-slate-500">Token de sessão fica criptografado no main process e não é revelado no renderer.</div>
+              </div>
+              <Badge tone={cloudSyncSettings?.hasSession ? "success" : "neutral"}>
+                {cloudSyncSettings?.hasSession ? "sessão ativa" : "sem sessão"}
+              </Badge>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <label className="space-y-2 xl:col-span-2">
+                <span className="text-xs font-semibold text-slate-400">Backend URL</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={cloudSyncForm.backendUrl}
+                  onChange={(event) => setCloudSyncForm({ ...cloudSyncForm, backendUrl: event.target.value })}
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Modo</span>
+                <select
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={cloudSyncForm.mode}
+                  onChange={(event) =>
+                    setCloudSyncForm({ ...cloudSyncForm, mode: event.target.value as CloudSyncFormState["mode"] })
+                  }
+                >
+                  <option value="local">local</option>
+                  <option value="cloud">cloud</option>
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Intervalo automático</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  type="number"
+                  min={60}
+                  max={86400}
+                  value={cloudSyncForm.syncIntervalSeconds}
+                  onChange={(event) =>
+                    setCloudSyncForm({ ...cloudSyncForm, syncIntervalSeconds: Number(event.target.value) })
+                  }
+                />
+              </label>
+              <label className="space-y-2 xl:col-span-2">
+                <span className="text-xs font-semibold text-slate-400">Workspace atual</span>
+                <select
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={cloudSyncForm.workspaceId}
+                  onChange={(event) => setCloudSyncForm({ ...cloudSyncForm, workspaceId: event.target.value })}
+                >
+                  <option value="">Selecionar após login</option>
+                  {cloudSyncSettings?.workspaces.map((workspace) => (
+                    <option key={workspace.id} value={workspace.id}>
+                      {workspace.name} ({cloudRoleLabels[workspace.role]})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center justify-between rounded-lg border border-line bg-panel p-3 xl:col-span-2">
+                <span className="text-sm font-semibold text-white">Ativar sincronização automática</span>
+                <input
+                  className="h-5 w-5 accent-cyan"
+                  type="checkbox"
+                  checked={cloudSyncForm.autoSyncEnabled}
+                  onChange={(event) =>
+                    setCloudSyncForm({ ...cloudSyncForm, autoSyncEnabled: event.target.checked })
+                  }
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="mb-3 text-sm font-semibold text-white">Entrar em workspace existente</div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">E-mail ou usuário</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    value={cloudLoginForm.identifier}
+                    autoComplete="username"
+                    onChange={(event) => setCloudLoginForm({ ...cloudLoginForm, identifier: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">Senha</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    type="password"
+                    value={cloudLoginForm.password}
+                    autoComplete="current-password"
+                    onChange={(event) => setCloudLoginForm({ ...cloudLoginForm, password: event.target.value })}
+                  />
+                </label>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button variant="primary" disabled={cloudBusy !== null} onClick={() => void loginCloud()}>
+                  <Cloud size={16} />
+                  {cloudBusy === "login" ? "Entrando..." : "Entrar"}
+                </Button>
+                <Button variant="ghost" disabled={cloudBusy !== null || !cloudSyncSettings?.hasSession} onClick={() => void logoutCloud()}>
+                  Sair
+                </Button>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="mb-3 text-sm font-semibold text-white">Criar owner e workspace inicial</div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">Nome</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    value={cloudOwnerForm.name}
+                    onChange={(event) => setCloudOwnerForm({ ...cloudOwnerForm, name: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">E-mail</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    value={cloudOwnerForm.email}
+                    autoComplete="email"
+                    onChange={(event) => setCloudOwnerForm({ ...cloudOwnerForm, email: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">Usuário</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    value={cloudOwnerForm.username}
+                    autoComplete="username"
+                    onChange={(event) => setCloudOwnerForm({ ...cloudOwnerForm, username: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">Senha</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    type="password"
+                    value={cloudOwnerForm.password}
+                    autoComplete="new-password"
+                    onChange={(event) => setCloudOwnerForm({ ...cloudOwnerForm, password: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2 sm:col-span-2">
+                  <span className="text-xs font-semibold text-slate-400">Nome do workspace</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    value={cloudOwnerForm.workspaceName}
+                    onChange={(event) => setCloudOwnerForm({ ...cloudOwnerForm, workspaceName: event.target.value })}
+                  />
+                </label>
+              </div>
+              <div className="mt-3">
+                <Button variant="secondary" disabled={cloudBusy !== null} onClick={() => void bootstrapCloudOwner()}>
+                  <UsersRound size={16} />
+                  {cloudBusy === "owner" ? "Criando..." : "Criar workspace"}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" disabled={cloudBusy !== null} onClick={() => void saveCloudSyncSettings()}>
+              <Save size={16} />
+              {cloudBusy === "saving" ? "Salvando..." : "Salvar configuração"}
+            </Button>
+            <Button variant="secondary" disabled={cloudBusy !== null} onClick={() => void testCloudSyncConnection()}>
+              <Server size={16} />
+              {cloudBusy === "testing" ? "Testando..." : "Testar backend"}
+            </Button>
+            <Button variant="secondary" disabled={cloudBusy !== null || !cloudCanUseWorkspace} onClick={() => void syncCloudNow()}>
+              <RefreshCw size={16} />
+              {cloudBusy === "syncing" ? "Sincronizando..." : "Sincronizar agora"}
+            </Button>
+            <Button variant="secondary" disabled={cloudBusy !== null || !cloudCanUseWorkspace} onClick={() => void downloadCloudWorkspace()}>
+              <DownloadCloud size={16} />
+              {cloudBusy === "downloading" ? "Baixando..." : "Baixar workspace"}
+            </Button>
+            <Button variant="secondary" disabled={cloudBusy !== null || !cloudCanUseWorkspace} onClick={() => void publishLocalData()}>
+              <UploadCloud size={16} />
+              {cloudBusy === "publishing" ? "Enviando..." : "Enviar dados locais"}
+            </Button>
+          </div>
+
+          <div className="rounded-lg border border-line bg-panelSoft p-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-white">
+              <LockKeyhole size={16} className="text-cyan" />
+              Último resultado seguro
+            </div>
+            <div className="mt-2 text-sm leading-6 text-slate-400">
+              {cloudResult || cloudSyncSettings?.lastError || "Sem erro registrado."}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-line bg-panelSoft p-4">
+            <div className="text-sm font-semibold text-white">Resumo da última sincronização cloud</div>
+            {cloudSyncSummary ? (
+              <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-2 xl:grid-cols-4">
+                <div>Enviados: {cloudSyncSummary.pushed}</div>
+                <div>Baixados: {cloudSyncSummary.pulled}</div>
+                <div>Aplicados: {cloudSyncSummary.applied}</div>
+                <div>Conflitos: {cloudSyncSummary.conflicts}</div>
+                <div>Duração: {cloudSyncSummary.durationMs} ms</div>
+                <div>Status: {cloudSyncSummary.status}</div>
+              </div>
+            ) : (
+              <div className="mt-2 text-sm text-slate-400">Nenhuma sincronização cloud registrada.</div>
+            )}
+          </div>
+
+          {cloudCanManageUsers && (
+            <div className="rounded-lg border border-line bg-panelSoft p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold text-white">Usuários do workspace</div>
+                <Badge tone="cyan">{cloudMembers.length} membro(s)</Badge>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-5">
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">Nome</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    value={cloudInviteForm.name}
+                    onChange={(event) => setCloudInviteForm({ ...cloudInviteForm, name: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">E-mail</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    value={cloudInviteForm.email}
+                    autoComplete="off"
+                    onChange={(event) => setCloudInviteForm({ ...cloudInviteForm, email: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">Usuário</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    value={cloudInviteForm.username}
+                    autoComplete="off"
+                    onChange={(event) => setCloudInviteForm({ ...cloudInviteForm, username: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">Senha inicial</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    type="password"
+                    value={cloudInviteForm.password}
+                    autoComplete="new-password"
+                    onChange={(event) => setCloudInviteForm({ ...cloudInviteForm, password: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">Papel</span>
+                  <select
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    value={cloudInviteForm.role}
+                    onChange={(event) =>
+                      setCloudInviteForm({
+                        ...cloudInviteForm,
+                        role: event.target.value as Exclude<CloudRole, "owner">
+                      })
+                    }
+                  >
+                    <option value="admin">admin</option>
+                    <option value="manager">manager</option>
+                    <option value="operator">operator</option>
+                    <option value="viewer">viewer</option>
+                  </select>
+                </label>
+              </div>
+              <div className="mt-3">
+                <Button variant="primary" disabled={cloudBusy !== null} onClick={() => void inviteCloudUser()}>
+                  <UserPlus size={16} />
+                  {cloudBusy === "inviting" ? "Criando..." : "Criar colaborador"}
+                </Button>
+              </div>
+
+              <div className="mt-4 overflow-x-auto rounded-lg border border-line">
+                <table className="w-full border-collapse text-left text-sm">
+                  <thead className="bg-panel text-xs uppercase tracking-[0.12em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Usuário</th>
+                      <th className="px-4 py-3">Papel</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Criado em</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line bg-panel/40">
+                    {cloudMembers.map((member) => (
+                      <tr key={member.id} className="hover:bg-slate-900/45">
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-white">{member.name}</div>
+                          <div className="mt-1 font-mono text-xs text-slate-500">
+                            {member.email ?? member.username ?? member.id}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          {member.role === "owner" ? (
+                            <Badge tone="cyan">owner</Badge>
+                          ) : (
+                            <select
+                              className="focus-ring h-9 rounded-md border border-line bg-panel px-2 text-xs text-white"
+                              value={member.role}
+                              disabled={cloudBusy !== null}
+                              onChange={(event) =>
+                                void api.cloudSync
+                                  .updateMember({
+                                    userId: member.id,
+                                    role: event.target.value as Exclude<CloudRole, "owner">,
+                                    status: member.status
+                                  })
+                                  .then(refreshCloudSyncSettings)
+                                  .catch((updateError: unknown) =>
+                                    setCloudResult(
+                                      updateError instanceof Error
+                                        ? updateError.message
+                                        : "Falha ao atualizar membro."
+                                    )
+                                  )
+                              }
+                            >
+                              <option value="admin">admin</option>
+                              <option value="manager">manager</option>
+                              <option value="operator">operator</option>
+                              <option value="viewer">viewer</option>
+                            </select>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {member.role === "owner" ? (
+                            <Badge tone={member.status === "active" ? "success" : "neutral"}>{member.status}</Badge>
+                          ) : (
+                            <select
+                              className="focus-ring h-9 rounded-md border border-line bg-panel px-2 text-xs text-white"
+                              value={member.status}
+                              disabled={cloudBusy !== null}
+                              onChange={(event) =>
+                                void api.cloudSync
+                                  .updateMember({
+                                    userId: member.id,
+                                    role: member.role as Exclude<CloudRole, "owner">,
+                                    status: event.target.value as "active" | "disabled"
+                                  })
+                                  .then(refreshCloudSyncSettings)
+                                  .catch((updateError: unknown) =>
+                                    setCloudResult(
+                                      updateError instanceof Error
+                                        ? updateError.message
+                                        : "Falha ao atualizar membro."
+                                    )
+                                  )
+                              }
+                            >
+                              <option value="active">active</option>
+                              <option value="disabled">disabled</option>
+                            </select>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-slate-400">{formatDateTime(member.createdAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

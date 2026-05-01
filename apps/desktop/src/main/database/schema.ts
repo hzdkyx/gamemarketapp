@@ -38,7 +38,14 @@ export const products = sqliteTable("products", {
   createdByUserId: text("created_by_user_id").references(() => users.id),
   updatedByUserId: text("updated_by_user_id").references(() => users.id),
   createdAt: text("created_at").notNull(),
-  updatedAt: text("updated_at").notNull()
+  updatedAt: text("updated_at").notNull(),
+  cloudId: text("cloud_id"),
+  workspaceId: text("workspace_id"),
+  syncStatus: text("sync_status").notNull().default("pending"),
+  lastCloudSyncedAt: text("last_cloud_synced_at"),
+  syncRevision: integer("sync_revision").notNull().default(0),
+  updatedByCloudUserId: text("updated_by_cloud_user_id"),
+  deletedAt: text("deleted_at")
 });
 
 export const users = sqliteTable("users", {
@@ -107,7 +114,14 @@ export const productVariants = sqliteTable("product_variants", {
   needsReview: integer("needs_review").notNull().default(0),
   manuallyEditedAt: text("manually_edited_at"),
   createdAt: text("created_at").notNull(),
-  updatedAt: text("updated_at").notNull()
+  updatedAt: text("updated_at").notNull(),
+  cloudId: text("cloud_id"),
+  workspaceId: text("workspace_id"),
+  syncStatus: text("sync_status").notNull().default("pending"),
+  lastCloudSyncedAt: text("last_cloud_synced_at"),
+  syncRevision: integer("sync_revision").notNull().default(0),
+  updatedByCloudUserId: text("updated_by_cloud_user_id"),
+  deletedAt: text("deleted_at")
 });
 
 export const inventoryItems = sqliteTable("inventory_items", {
@@ -133,7 +147,14 @@ export const inventoryItems = sqliteTable("inventory_items", {
   createdByUserId: text("created_by_user_id").references(() => users.id),
   updatedByUserId: text("updated_by_user_id").references(() => users.id),
   createdAt: text("created_at").notNull(),
-  updatedAt: text("updated_at").notNull()
+  updatedAt: text("updated_at").notNull(),
+  cloudId: text("cloud_id"),
+  workspaceId: text("workspace_id"),
+  syncStatus: text("sync_status").notNull().default("pending"),
+  lastCloudSyncedAt: text("last_cloud_synced_at"),
+  syncRevision: integer("sync_revision").notNull().default(0),
+  updatedByCloudUserId: text("updated_by_cloud_user_id"),
+  deletedAt: text("deleted_at")
 });
 
 export const orders = sqliteTable("orders", {
@@ -190,7 +211,14 @@ export const orders = sqliteTable("orders", {
   deliveredAt: text("delivered_at"),
   completedAt: text("completed_at"),
   cancelledAt: text("cancelled_at"),
-  refundedAt: text("refunded_at")
+  refundedAt: text("refunded_at"),
+  cloudId: text("cloud_id"),
+  workspaceId: text("workspace_id"),
+  syncStatus: text("sync_status").notNull().default("pending"),
+  lastCloudSyncedAt: text("last_cloud_synced_at"),
+  syncRevision: integer("sync_revision").notNull().default(0),
+  updatedByCloudUserId: text("updated_by_cloud_user_id"),
+  deletedAt: text("deleted_at")
 });
 
 export const events = sqliteTable("events", {
@@ -256,14 +284,28 @@ export const events = sqliteTable("events", {
   actorUserId: text("actor_user_id").references(() => users.id),
   readAt: text("read_at"),
   rawPayload: text("raw_payload"),
-  createdAt: text("created_at").notNull()
+  createdAt: text("created_at").notNull(),
+  cloudId: text("cloud_id"),
+  workspaceId: text("workspace_id"),
+  syncStatus: text("sync_status").notNull().default("pending"),
+  lastCloudSyncedAt: text("last_cloud_synced_at"),
+  syncRevision: integer("sync_revision").notNull().default(0),
+  updatedByCloudUserId: text("updated_by_cloud_user_id"),
+  deletedAt: text("deleted_at")
 });
 
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   valueJson: text("value_json").notNull(),
   isSecret: integer("is_secret", { mode: "boolean" }).notNull().default(false),
-  updatedAt: text("updated_at").notNull()
+  updatedAt: text("updated_at").notNull(),
+  cloudId: text("cloud_id"),
+  workspaceId: text("workspace_id"),
+  syncStatus: text("sync_status").notNull().default("pending"),
+  lastCloudSyncedAt: text("last_cloud_synced_at"),
+  syncRevision: integer("sync_revision").notNull().default(0),
+  updatedByCloudUserId: text("updated_by_cloud_user_id"),
+  deletedAt: text("deleted_at")
 });
 
 export const notificationRules = sqliteTable("notification_rules", {
@@ -314,7 +356,28 @@ export const appNotifications = sqliteTable("app_notifications", {
   dedupeKey: text("dedupe_key"),
   readAt: text("read_at"),
   createdAt: text("created_at").notNull(),
-  metadataJson: text("metadata_json")
+  metadataJson: text("metadata_json"),
+  cloudId: text("cloud_id"),
+  workspaceId: text("workspace_id"),
+  syncStatus: text("sync_status").notNull().default("pending"),
+  lastCloudSyncedAt: text("last_cloud_synced_at"),
+  syncRevision: integer("sync_revision").notNull().default(0),
+  updatedByCloudUserId: text("updated_by_cloud_user_id"),
+  deletedAt: text("deleted_at")
+});
+
+export const cloudSyncConflicts = sqliteTable("cloud_sync_conflicts", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  entityType: text("entity_type").notNull(),
+  localId: text("local_id").notNull(),
+  cloudId: text("cloud_id").notNull(),
+  remoteVersion: integer("remote_version").notNull(),
+  incomingBaseVersion: integer("incoming_base_version").notNull(),
+  localPayloadJson: text("local_payload_json").notNull(),
+  remotePayloadJson: text("remote_payload_json").notNull(),
+  createdAt: text("created_at").notNull(),
+  resolvedAt: text("resolved_at")
 });
 
 export const productRelations = relations(products, ({ many }) => ({

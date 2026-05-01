@@ -13,6 +13,8 @@
     "dev": "npm run dev --workspace @hzdk/gamemarket-desktop",
     "build": "npm run build --workspaces --if-present",
     "dist": "npm run dist --workspace @hzdk/gamemarket-desktop",
+    "start:production": "npm run start:production --workspace @hzdk/gamemarket-desktop",
+    "clean:release": "npm run clean:release --workspace @hzdk/gamemarket-desktop",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "format": "npm run format --workspaces --if-present"

@@ -1088,5 +1088,95 @@ export const runtimeMigrations: RuntimeMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_app_notifications_order ON app_notifications(order_id);
       CREATE INDEX IF NOT EXISTS idx_app_notifications_type ON app_notifications(type);
     `
+  },
+  {
+    id: "0009_phase7_cloud_workspace_sync",
+    sql: `
+      ALTER TABLE products ADD COLUMN cloud_id TEXT;
+      ALTER TABLE products ADD COLUMN workspace_id TEXT;
+      ALTER TABLE products ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'pending';
+      ALTER TABLE products ADD COLUMN last_cloud_synced_at TEXT;
+      ALTER TABLE products ADD COLUMN sync_revision INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE products ADD COLUMN updated_by_cloud_user_id TEXT;
+      ALTER TABLE products ADD COLUMN deleted_at TEXT;
+
+      ALTER TABLE product_variants ADD COLUMN cloud_id TEXT;
+      ALTER TABLE product_variants ADD COLUMN workspace_id TEXT;
+      ALTER TABLE product_variants ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'pending';
+      ALTER TABLE product_variants ADD COLUMN last_cloud_synced_at TEXT;
+      ALTER TABLE product_variants ADD COLUMN sync_revision INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE product_variants ADD COLUMN updated_by_cloud_user_id TEXT;
+      ALTER TABLE product_variants ADD COLUMN deleted_at TEXT;
+
+      ALTER TABLE inventory_items ADD COLUMN cloud_id TEXT;
+      ALTER TABLE inventory_items ADD COLUMN workspace_id TEXT;
+      ALTER TABLE inventory_items ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'pending';
+      ALTER TABLE inventory_items ADD COLUMN last_cloud_synced_at TEXT;
+      ALTER TABLE inventory_items ADD COLUMN sync_revision INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE inventory_items ADD COLUMN updated_by_cloud_user_id TEXT;
+      ALTER TABLE inventory_items ADD COLUMN deleted_at TEXT;
+
+      ALTER TABLE orders ADD COLUMN cloud_id TEXT;
+      ALTER TABLE orders ADD COLUMN workspace_id TEXT;
+      ALTER TABLE orders ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'pending';
+      ALTER TABLE orders ADD COLUMN last_cloud_synced_at TEXT;
+      ALTER TABLE orders ADD COLUMN sync_revision INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE orders ADD COLUMN updated_by_cloud_user_id TEXT;
+      ALTER TABLE orders ADD COLUMN deleted_at TEXT;
+
+      ALTER TABLE events ADD COLUMN cloud_id TEXT;
+      ALTER TABLE events ADD COLUMN workspace_id TEXT;
+      ALTER TABLE events ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'pending';
+      ALTER TABLE events ADD COLUMN last_cloud_synced_at TEXT;
+      ALTER TABLE events ADD COLUMN sync_revision INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE events ADD COLUMN updated_by_cloud_user_id TEXT;
+      ALTER TABLE events ADD COLUMN deleted_at TEXT;
+
+      ALTER TABLE app_notifications ADD COLUMN cloud_id TEXT;
+      ALTER TABLE app_notifications ADD COLUMN workspace_id TEXT;
+      ALTER TABLE app_notifications ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'pending';
+      ALTER TABLE app_notifications ADD COLUMN last_cloud_synced_at TEXT;
+      ALTER TABLE app_notifications ADD COLUMN sync_revision INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE app_notifications ADD COLUMN updated_by_cloud_user_id TEXT;
+      ALTER TABLE app_notifications ADD COLUMN deleted_at TEXT;
+
+      ALTER TABLE settings ADD COLUMN cloud_id TEXT;
+      ALTER TABLE settings ADD COLUMN workspace_id TEXT;
+      ALTER TABLE settings ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'pending';
+      ALTER TABLE settings ADD COLUMN last_cloud_synced_at TEXT;
+      ALTER TABLE settings ADD COLUMN sync_revision INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE settings ADD COLUMN updated_by_cloud_user_id TEXT;
+      ALTER TABLE settings ADD COLUMN deleted_at TEXT;
+
+      CREATE TABLE IF NOT EXISTS cloud_sync_conflicts (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        local_id TEXT NOT NULL,
+        cloud_id TEXT NOT NULL,
+        remote_version INTEGER NOT NULL,
+        incoming_base_version INTEGER NOT NULL,
+        local_payload_json TEXT NOT NULL,
+        remote_payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        resolved_at TEXT
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_products_cloud_id ON products(cloud_id) WHERE cloud_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_products_workspace_sync ON products(workspace_id, sync_status);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_product_variants_cloud_id ON product_variants(cloud_id) WHERE cloud_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_product_variants_workspace_sync ON product_variants(workspace_id, sync_status);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_cloud_id ON inventory_items(cloud_id) WHERE cloud_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_inventory_workspace_sync ON inventory_items(workspace_id, sync_status);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_cloud_id ON orders(cloud_id) WHERE cloud_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_orders_workspace_sync ON orders(workspace_id, sync_status);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_events_cloud_id ON events(cloud_id) WHERE cloud_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_events_workspace_sync ON events(workspace_id, sync_status);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_app_notifications_cloud_id ON app_notifications(cloud_id) WHERE cloud_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_app_notifications_workspace_sync ON app_notifications(workspace_id, sync_status);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_cloud_id ON settings(cloud_id) WHERE cloud_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_settings_workspace_sync ON settings(workspace_id, sync_status);
+      CREATE INDEX IF NOT EXISTS idx_cloud_sync_conflicts_workspace ON cloud_sync_conflicts(workspace_id, resolved_at);
+    `
   }
 ];

@@ -9,6 +9,14 @@ import type {
   AuthLoginInput,
   AuthSession,
   AuthSetupAdminInput,
+  CloudSyncBootstrapOwnerInput,
+  CloudSyncInviteUserInput,
+  CloudSyncLoginInput,
+  CloudSyncSettingsUpdateInput,
+  CloudSyncSettingsView,
+  CloudSyncSummary,
+  CloudSyncUpdateMemberInput,
+  CloudWorkspaceMemberView,
   DashboardSummary,
   EventCreateManualInput,
   EventListInput,
@@ -428,6 +436,39 @@ const api = {
         "webhookServer:getLastSyncSummary",
         {},
       ) as Promise<WebhookServerSyncSummary | null>,
+  },
+  cloudSync: {
+    getSettings: () =>
+      ipcRenderer.invoke("cloudSync:getSettings") as Promise<CloudSyncSettingsView>,
+    updateSettings: (payload: CloudSyncSettingsUpdateInput) =>
+      ipcRenderer.invoke("cloudSync:updateSettings", payload) as Promise<CloudSyncSettingsView>,
+    testConnection: () =>
+      ipcRenderer.invoke("cloudSync:testConnection", {}) as Promise<{
+        ok: boolean;
+        safeMessage: string;
+      }>,
+    bootstrapOwner: (payload: CloudSyncBootstrapOwnerInput) =>
+      ipcRenderer.invoke("cloudSync:bootstrapOwner", payload) as Promise<CloudSyncSettingsView>,
+    login: (payload: CloudSyncLoginInput) =>
+      ipcRenderer.invoke("cloudSync:login", payload) as Promise<CloudSyncSettingsView>,
+    logout: () =>
+      ipcRenderer.invoke("cloudSync:logout", {}) as Promise<CloudSyncSettingsView>,
+    refreshAccount: () =>
+      ipcRenderer.invoke("cloudSync:refreshAccount", {}) as Promise<CloudSyncSettingsView>,
+    listMembers: () =>
+      ipcRenderer.invoke("cloudSync:listMembers", {}) as Promise<CloudWorkspaceMemberView[]>,
+    inviteUser: (payload: CloudSyncInviteUserInput) =>
+      ipcRenderer.invoke("cloudSync:inviteUser", payload) as Promise<CloudWorkspaceMemberView>,
+    updateMember: (payload: CloudSyncUpdateMemberInput) =>
+      ipcRenderer.invoke("cloudSync:updateMember", payload) as Promise<CloudWorkspaceMemberView>,
+    publishLocalData: () =>
+      ipcRenderer.invoke("cloudSync:publishLocalData", {}) as Promise<CloudSyncSummary>,
+    downloadWorkspace: () =>
+      ipcRenderer.invoke("cloudSync:downloadWorkspace", {}) as Promise<CloudSyncSummary>,
+    syncNow: () =>
+      ipcRenderer.invoke("cloudSync:syncNow", {}) as Promise<CloudSyncSummary>,
+    getLastSyncSummary: () =>
+      ipcRenderer.invoke("cloudSync:getLastSyncSummary", {}) as Promise<CloudSyncSummary | null>,
   },
 };
 

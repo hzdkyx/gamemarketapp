@@ -1,16 +1,19 @@
 import { loadConfig } from "./config.js";
-import { createEventStorage } from "./db/connection.js";
+import { createCloudStorage, createEventStorage } from "./db/connection.js";
 import { buildServer } from "./server.js";
 
 const main = async (): Promise<void> => {
   const config = loadConfig();
   const storage = createEventStorage(config);
+  const cloud = createCloudStorage(config);
   await storage.initialize();
+  await cloud.initialize();
 
-  const app = buildServer({ config, storage });
+  const app = buildServer({ config, storage, cloud });
   const close = async (): Promise<void> => {
     await app.close();
     await storage.close();
+    await cloud.close();
   };
 
   process.on("SIGINT", () => {

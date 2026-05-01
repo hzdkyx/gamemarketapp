@@ -1,8 +1,9 @@
-import { BrowserWindow, app, ipcMain, shell } from "electron";
+import { BrowserWindow, Menu, app, ipcMain, shell } from "electron";
 import { join } from "node:path";
 import { initializeDatabase, getDatabaseStatus } from "./database/database";
 import { registerAppNotificationsIpc } from "./ipc/app-notifications-ipc";
 import { registerAuthIpc } from "./ipc/auth-ipc";
+import { registerCloudSyncIpc } from "./ipc/cloud-sync-ipc";
 import { registerDashboardIpc } from "./ipc/dashboard-ipc";
 import { registerEventsIpc } from "./ipc/events-ipc";
 import { registerGameMarketIpc } from "./ipc/gamemarket-ipc";
@@ -12,6 +13,7 @@ import { registerProfitIpc } from "./ipc/profit-ipc";
 import { registerProductsIpc } from "./ipc/products-ipc";
 import { registerSettingsIpc } from "./ipc/settings-ipc";
 import { registerWebhookServerIpc } from "./ipc/webhook-server-ipc";
+import { cloudSyncPollingService } from "./integrations/cloud-sync/cloud-sync-polling-service";
 import { webhookServerPollingService } from "./integrations/webhook-server/webhook-server-polling-service";
 import { gameMarketPollingService } from "./integrations/gamemarket/gamemarket-polling-service";
 import { logger } from "./logger";
@@ -73,6 +75,7 @@ const registerIpcHandlers = (): void => {
   registerAppNotificationsIpc(ipcMain);
   registerGameMarketIpc(ipcMain);
   registerWebhookServerIpc(ipcMain);
+  registerCloudSyncIpc(ipcMain);
 
   ipcMain.handle("app:get-meta", () => ({
     name: app.getName(),
@@ -90,6 +93,10 @@ const registerIpcHandlers = (): void => {
 };
 
 app.whenReady().then(() => {
+  if (app.isPackaged) {
+    Menu.setApplicationMenu(null);
+  }
+
   registerIpcHandlers();
 
   try {
@@ -97,6 +104,7 @@ app.whenReady().then(() => {
     logger.info({ databasePath: status.path }, "SQLite initialized");
     webhookServerPollingService.refresh();
     gameMarketPollingService.refresh();
+    cloudSyncPollingService.refresh();
   } catch (error) {
     logger.error({ error }, "Failed to initialize SQLite");
   }
@@ -113,6 +121,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   webhookServerPollingService.stop();
   gameMarketPollingService.stop();
+  cloudSyncPollingService.stop();
   if (process.platform !== "darwin") {
     app.quit();
   }

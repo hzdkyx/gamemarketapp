@@ -32,4 +32,12 @@ describe("renderer security boundaries", () => {
     expect(source).not.toMatch(/process\.env/);
     expect(source).not.toMatch(/fetch\([^)]*gamemarket/i);
   });
+
+  it("does not expose raw cloud sync session tokens through the renderer API", () => {
+    const desktopApiSource = readFileSync(join(rendererSrc, "lib", "desktop-api.ts"), "utf8");
+    const cloudSyncApi = desktopApiSource.match(/cloudSync:\s*{[\s\S]*?getLastSyncSummary[\s\S]*?},/)?.[0] ?? "";
+
+    expect(cloudSyncApi).not.toMatch(/revealToken|sessionToken|tokenMasked|tokenHash/);
+    expect(cloudSyncApi).not.toMatch(/passwordHash/);
+  });
 });

@@ -1,6 +1,7 @@
 import type { HzdKyxDesktopApi } from "../../../preload";
 import type {
   AppNotificationListResult,
+  CloudSyncSettingsView,
   GameMarketSettingsView,
   GameMarketPollingStatus,
   WebhookServerSettingsView,
@@ -400,6 +401,73 @@ const fallbackApi: HzdKyxDesktopApi = {
     }),
     getLastSyncSummary: async () => null,
   },
+  cloudSync: {
+    getSettings: async (): Promise<CloudSyncSettingsView> => ({
+      backendUrl: "http://localhost:3001",
+      mode: "local",
+      connectionStatus: "not_configured",
+      hasSession: false,
+      currentUser: null,
+      workspaces: [],
+      workspaceId: null,
+      workspaceName: null,
+      workspaceRole: null,
+      autoSyncEnabled: false,
+      syncIntervalSeconds: 300,
+      lastSyncAt: null,
+      lastPullAt: null,
+      lastPushAt: null,
+      lastError: "Electron preload indisponível no preview web.",
+      pendingChanges: 0,
+      conflictCount: 0,
+    }),
+    updateSettings: unavailable,
+    testConnection: async () => ({
+      ok: false,
+      safeMessage: "Teste exige execução no Electron.",
+    }),
+    bootstrapOwner: unavailable,
+    login: unavailable,
+    logout: unavailable,
+    refreshAccount: unavailable,
+    listMembers: async () => [],
+    inviteUser: unavailable,
+    updateMember: unavailable,
+    publishLocalData: async () => ({
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 0,
+      status: "failed",
+      pushed: 0,
+      pulled: 0,
+      applied: 0,
+      conflicts: 0,
+      errors: ["Sync exige execução no Electron."],
+    }),
+    downloadWorkspace: async () => ({
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 0,
+      status: "failed",
+      pushed: 0,
+      pulled: 0,
+      applied: 0,
+      conflicts: 0,
+      errors: ["Sync exige execução no Electron."],
+    }),
+    syncNow: async () => ({
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 0,
+      status: "failed",
+      pushed: 0,
+      pulled: 0,
+      applied: 0,
+      conflicts: 0,
+      errors: ["Sync exige execução no Electron."],
+    }),
+    getLastSyncSummary: async () => null,
+  },
 };
 
 const mergeDesktopApi = (
@@ -459,6 +527,10 @@ const mergeDesktopApi = (
   webhookServer: {
     ...fallbackApi.webhookServer,
     ...api?.webhookServer,
+  },
+  cloudSync: {
+    ...fallbackApi.cloudSync,
+    ...api?.cloudSync,
   },
 });
 

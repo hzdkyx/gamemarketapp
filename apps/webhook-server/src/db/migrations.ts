@@ -1,5 +1,16 @@
 import type { Pool } from "pg";
-import { postgresSchema } from "./schema.js";
+import { cloudPostgresSchema, postgresSchema } from "./schema.js";
+
+const migrations = [
+  {
+    id: "0001_webhook_events",
+    sql: postgresSchema,
+  },
+  {
+    id: "0002_cloud_workspace_sync",
+    sql: cloudPostgresSchema,
+  },
+];
 
 export const runPostgresMigrations = async (pool: Pool): Promise<void> => {
   await pool.query(`
@@ -9,20 +20,24 @@ export const runPostgresMigrations = async (pool: Pool): Promise<void> => {
     );
   `);
 
-  const applied = await pool.query("SELECT 1 FROM schema_migrations WHERE id = $1", ["0001_webhook_events"]);
-  if ((applied.rowCount ?? 0) > 0) {
-    return;
-  }
+  const appliedRows = await pool.query<{ id: string }>("SELECT id FROM schema_migrations");
+  const applied = new Set(appliedRows.rows.map((row) => row.id));
 
   const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-    await client.query(postgresSchema);
-    await client.query("INSERT INTO schema_migrations (id, applied_at) VALUES ($1, $2)", [
-      "0001_webhook_events",
-      new Date().toISOString(),
-    ]);
-    await client.query("COMMIT");
+    for (const migration of migrations) {
+      if (applied.has(migration.id)) {
+        continue;
+      }
+
+      await client.query("BEGIN");
+      await client.query(migration.sql);
+      await client.query("INSERT INTO schema_migrations (id, applied_at) VALUES ($1, $2)", [
+        migration.id,
+        new Date().toISOString(),
+      ]);
+      await client.query("COMMIT");
+    }
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

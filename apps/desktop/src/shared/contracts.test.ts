@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  cloudSyncInviteUserInputSchema,
+  cloudSyncLoginInputSchema,
+  cloudSyncSettingsUpdateInputSchema,
   eventCreateManualInputSchema,
   appNotificationListInputSchema,
   authSetupAdminInputSchema,
@@ -267,6 +270,47 @@ describe("Webhook Server contracts", () => {
     ).toBe(true);
     expect(() =>
       webhookServerRevealTokenInputSchema.parse({ confirm: false }),
+    ).toThrow();
+  });
+});
+
+describe("Cloud sync contracts", () => {
+  it("defaults to local mode and validates workspace sync settings", () => {
+    const parsed = cloudSyncSettingsUpdateInputSchema.parse({
+      backendUrl: "https://gamemarketapp-production.up.railway.app",
+      mode: "local",
+      workspaceId: null,
+      autoSyncEnabled: false,
+      syncIntervalSeconds: 300,
+    });
+
+    expect(parsed.mode).toBe("local");
+    expect(parsed.workspaceId).toBeNull();
+    expect(parsed.autoSyncEnabled).toBe(false);
+  });
+
+  it("validates cloud login and collaborator creation without exposing raw token contracts", () => {
+    const login = cloudSyncLoginInputSchema.parse({
+      identifier: "operadora@example.com",
+      password: "senha-forte-1",
+    });
+    const invite = cloudSyncInviteUserInputSchema.parse({
+      name: "Operadora",
+      email: "operadora@example.com",
+      username: null,
+      password: "senha-forte-2",
+      role: "manager",
+    });
+
+    expect(login.identifier).toBe("operadora@example.com");
+    expect(invite.role).toBe("manager");
+    expect(() =>
+      cloudSyncInviteUserInputSchema.parse({
+        name: "Leitura",
+        email: "viewer@example.com",
+        password: "senha-forte-3",
+        role: "owner",
+      }),
     ).toThrow();
   });
 });

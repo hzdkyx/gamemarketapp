@@ -4,6 +4,10 @@ import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import type { AppConfig } from "./config.js";
 import type { EventStorageService } from "./services/event-storage-service.js";
+import type { CloudStorageService } from "./services/cloud-storage-service.js";
+import { registerCloudAuthRoutes } from "./routes/cloud-auth.js";
+import { registerCloudSyncRoutes } from "./routes/cloud-sync.js";
+import { registerCloudWorkspaceRoutes } from "./routes/cloud-workspaces.js";
 import { registerEventsRoutes } from "./routes/events.js";
 import { registerGameMarketWebhookRoutes } from "./routes/gamemarket-webhooks.js";
 import { registerHealthRoutes } from "./routes/health.js";
@@ -12,9 +16,10 @@ import { registerTestEventsRoutes } from "./routes/test-events.js";
 export interface BuildServerOptions {
   config: AppConfig;
   storage: EventStorageService;
+  cloud: CloudStorageService;
 }
 
-export const buildServer = ({ config, storage }: BuildServerOptions): FastifyInstance => {
+export const buildServer = ({ config, storage, cloud }: BuildServerOptions): FastifyInstance => {
   const app = Fastify({
     logger: {
       level: config.logLevel,
@@ -56,6 +61,9 @@ export const buildServer = ({ config, storage }: BuildServerOptions): FastifyIns
     });
   });
 
+  registerCloudAuthRoutes(app, cloud);
+  registerCloudWorkspaceRoutes(app, cloud);
+  registerCloudSyncRoutes(app, cloud);
   registerHealthRoutes(app, config);
   registerGameMarketWebhookRoutes(app, config, storage);
   registerEventsRoutes(app, config, storage);
