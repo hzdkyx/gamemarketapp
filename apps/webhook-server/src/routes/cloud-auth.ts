@@ -1,12 +1,28 @@
 import type { FastifyInstance } from "fastify";
 import {
   cloudBootstrapOwnerInputSchema,
+  cloudChangePasswordInputSchema,
   cloudLoginInputSchema,
   type CloudSessionView,
+  type CloudUserView,
 } from "../contracts/cloud-contracts.js";
 import { createSessionToken, hashPassword, hashSessionToken, verifyPassword } from "../services/cloud-auth-service.js";
 import { requireCloudSession } from "../services/cloud-request-context.js";
-import type { CloudStorageService } from "../services/cloud-storage-service.js";
+import type { CloudStorageService, CloudUserRecord } from "../services/cloud-storage-service.js";
+
+const toCloudUserView = (user: CloudUserRecord): CloudUserView => ({
+  id: user.id,
+  name: user.name,
+  email: user.email,
+  username: user.username,
+  role: user.role,
+  status: user.status,
+  mustChangePassword: user.mustChangePassword,
+  lastLoginAt: user.lastLoginAt,
+  lastActivityAt: user.lastActivityAt,
+  createdAt: user.createdAt,
+  updatedAt: user.updatedAt,
+});
 
 export const registerCloudAuthRoutes = (app: FastifyInstance, cloud: CloudStorageService): void => {
   app.post("/api/auth/bootstrap-owner", async (request, reply) => {
@@ -49,16 +65,7 @@ export const registerCloudAuthRoutes = (app: FastifyInstance, cloud: CloudStorag
     const token = createSessionToken();
     await cloud.createSession(user.id, hashSessionToken(token));
     const response: CloudSessionView = {
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        username: user.username,
-        role: user.role,
-        status: user.status,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-      },
+      user: toCloudUserView(user),
       workspaces: await cloud.listWorkspacesForUser(user.id),
     };
 
@@ -73,6 +80,41 @@ export const registerCloudAuthRoutes = (app: FastifyInstance, cloud: CloudStorag
       ok: true,
       token,
       ...response,
+    };
+  });
+
+  app.post("/api/auth/change-password", async (request, reply) => {
+    const context = await requireCloudSession(request, cloud);
+    const input = cloudChangePasswordInputSchema.parse(request.body);
+    const valid = await verifyPassword(input.currentPassword, context.user.passwordHash);
+    if (!valid) {
+      return reply.code(401).send({ ok: false, error: "invalid_credentials" });
+    }
+
+    const user = await cloud.changeUserPassword(
+      context.user.id,
+      await hashPassword(input.password),
+      false,
+      context.tokenHash,
+    );
+    if (!user) {
+      return reply.code(404).send({ ok: false, error: "not_found" });
+    }
+
+    const workspaces = await cloud.listWorkspacesForUser(user.id);
+    await cloud.recordAudit({
+      workspaceId: workspaces[0]?.id ?? null,
+      actorUserId: user.id,
+      action: "cloud.user_password_changed",
+      entityType: "cloud_user",
+      entityId: user.id,
+      metadata: { targetCloudUserId: user.id },
+    });
+
+    return {
+      ok: true,
+      user: toCloudUserView(user),
+      workspaces,
     };
   });
 
@@ -92,16 +134,7 @@ export const registerCloudAuthRoutes = (app: FastifyInstance, cloud: CloudStorag
     const context = await requireCloudSession(request, cloud);
     return {
       ok: true,
-      user: {
-        id: context.user.id,
-        name: context.user.name,
-        email: context.user.email,
-        username: context.user.username,
-        role: context.user.role,
-        status: context.user.status,
-        createdAt: context.user.createdAt,
-        updatedAt: context.user.updatedAt,
-      },
+      user: toCloudUserView(context.user),
       workspaces: await cloud.listWorkspacesForUser(context.user.id),
     };
   });

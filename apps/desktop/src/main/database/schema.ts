@@ -53,6 +53,7 @@ export const users = sqliteTable("users", {
   name: text("name").notNull(),
   username: text("username").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  passwordHint: text("password_hint"),
   role: text("role", {
     enum: ["admin", "operator", "viewer"]
   }).notNull(),
@@ -229,6 +230,7 @@ export const events = sqliteTable("events", {
   }).notNull(),
   type: text("type", {
     enum: [
+      "auth.local_password_reset",
       "order.created",
       "order.payment_confirmed",
       "order.awaiting_delivery",

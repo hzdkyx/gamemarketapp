@@ -57,6 +57,10 @@ export const requireCloudWorkspace = async (
     throw httpError(403, "Workspace access denied.");
   }
 
+  if (context.user.mustChangePassword) {
+    throw httpError(403, "Troca de senha cloud obrigatória.");
+  }
+
   if (!hasCloudPermission(membership.role, permission)) {
     throw httpError(403, "Workspace permission denied.");
   }

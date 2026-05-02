@@ -3,7 +3,9 @@ import pg from "pg";
 import type {
   CloudBootstrapOwnerInput,
   CloudCreateWorkspaceInput,
+  CloudAuditLogView,
   CloudInviteUserInput,
+  CloudResetMemberPasswordInput,
   CloudRole,
   CloudSessionView,
   CloudSyncConflictView,
@@ -11,9 +13,9 @@ import type {
   CloudSyncEntityType,
   CloudSyncEntityView,
   CloudSyncWorkspaceStatus,
-  CloudUpdateMemberInput,
   CloudUserStatus,
   CloudUserView,
+  CloudWorkspaceMemberUpdateInput,
   CloudWorkspaceMemberView,
   CloudWorkspaceView,
 } from "../contracts/cloud-contracts.js";
@@ -34,6 +36,7 @@ export interface CloudMembership {
   userId: string;
   role: CloudRole;
   status: CloudUserStatus;
+  removedAt: string | null;
 }
 
 export interface CloudSyncPushResult {
@@ -50,13 +53,31 @@ export interface CloudStorageService {
   createOwnerWorkspace(input: CloudBootstrapOwnerInput, passwordHash: string): Promise<CloudSessionView>;
   createWorkspace(ownerUserId: string, input: CloudCreateWorkspaceInput): Promise<CloudWorkspaceView>;
   createSession(userId: string, tokenHash: string): Promise<void>;
+  changeUserPassword(
+    userId: string,
+    passwordHash: string,
+    mustChangePassword: boolean,
+    keepTokenHash?: string | null,
+  ): Promise<CloudUserRecord | null>;
   getSessionUser(tokenHash: string): Promise<CloudUserRecord | null>;
   revokeSession(tokenHash: string): Promise<void>;
   listWorkspacesForUser(userId: string): Promise<CloudWorkspaceView[]>;
   getWorkspaceMember(workspaceId: string, userId: string): Promise<CloudMembership | null>;
   listWorkspaceMembers(workspaceId: string): Promise<CloudWorkspaceMemberView[]>;
   inviteUser(workspaceId: string, input: CloudInviteUserInput, passwordHash: string): Promise<CloudWorkspaceMemberView>;
-  updateWorkspaceMember(workspaceId: string, input: CloudUpdateMemberInput): Promise<CloudWorkspaceMemberView | null>;
+  updateWorkspaceMember(
+    workspaceId: string,
+    userId: string,
+    input: CloudWorkspaceMemberUpdateInput,
+  ): Promise<CloudWorkspaceMemberView | null>;
+  removeWorkspaceMember(workspaceId: string, userId: string): Promise<CloudWorkspaceMemberView | null>;
+  resetWorkspaceMemberPassword(
+    workspaceId: string,
+    userId: string,
+    passwordHash: string,
+    input: Pick<CloudResetMemberPasswordInput, "mustChangePassword">,
+  ): Promise<CloudWorkspaceMemberView | null>;
+  listMemberAuditLogs(workspaceId: string, userId: string): Promise<CloudAuditLogView[]>;
   listSyncEntities(workspaceId: string, since?: string): Promise<CloudSyncEntityView[]>;
   getSyncStatus(workspaceId: string, since?: string): Promise<CloudSyncWorkspaceStatus>;
   upsertSyncChanges(
@@ -82,6 +103,9 @@ interface UserRow {
   password_hash: string;
   role: CloudRole;
   status: CloudUserStatus;
+  must_change_password: boolean | null;
+  last_login_at: string | null;
+  last_activity_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -125,6 +149,17 @@ interface ConflictRow {
   created_at: string;
 }
 
+interface AuditLogRow {
+  id: string;
+  workspace_id: string | null;
+  actor_user_id: string | null;
+  action: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  metadata: unknown;
+  created_at: string;
+}
+
 const toIso = (value: string | Date): string => new Date(value).toISOString();
 
 const hashPayload = (payload: unknown): string =>
@@ -151,6 +186,9 @@ const mapUser = (row: UserRow): CloudUserRecord => ({
   passwordHash: row.password_hash,
   role: row.role,
   status: row.status,
+  mustChangePassword: Boolean(row.must_change_password),
+  lastLoginAt: row.last_login_at ? toIso(row.last_login_at) : null,
+  lastActivityAt: row.last_activity_at ? toIso(row.last_activity_at) : null,
   createdAt: toIso(row.created_at),
   updatedAt: toIso(row.updated_at),
 });
@@ -162,6 +200,9 @@ const toUserView = (user: CloudUserRecord, role = user.role): CloudUserView => (
   username: user.username,
   role,
   status: user.status,
+  mustChangePassword: user.mustChangePassword,
+  lastLoginAt: user.lastLoginAt,
+  lastActivityAt: user.lastActivityAt,
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 });
@@ -202,6 +243,17 @@ const mapConflict = (row: ConflictRow): CloudSyncConflictView => ({
   cloudId: row.cloud_id,
   remoteVersion: Number(row.remote_version),
   incomingBaseVersion: Number(row.incoming_base_version),
+  createdAt: toIso(row.created_at),
+});
+
+const mapAuditLog = (row: AuditLogRow): CloudAuditLogView => ({
+  id: row.id,
+  workspaceId: row.workspace_id,
+  actorUserId: row.actor_user_id,
+  action: row.action,
+  entityType: row.entity_type,
+  entityId: row.entity_id,
+  metadata: parsePayload(row.metadata),
   createdAt: toIso(row.created_at),
 });
 
@@ -348,6 +400,37 @@ export class PostgresCloudStorage implements CloudStorageService {
       `,
       [randomUUID(), userId, tokenHash, now.toISOString(), new Date(now.getTime() + sessionDurationMs).toISOString()],
     );
+    await this.pool.query("UPDATE cloud_users SET last_login_at = $1, updated_at = $1 WHERE id = $2", [
+      now.toISOString(),
+      userId,
+    ]);
+  }
+
+  async changeUserPassword(
+    userId: string,
+    passwordHash: string,
+    mustChangePassword: boolean,
+    keepTokenHash?: string | null,
+  ): Promise<CloudUserRecord | null> {
+    const now = new Date().toISOString();
+    await this.pool.query(
+      `
+        UPDATE cloud_users
+        SET password_hash = $1, must_change_password = $2, updated_at = $3
+        WHERE id = $4
+      `,
+      [passwordHash, mustChangePassword, now, userId],
+    );
+    await this.pool.query(
+      `
+        UPDATE cloud_sessions
+        SET revoked_at = COALESCE(revoked_at, $1)
+        WHERE user_id = $2
+          AND ($3::text IS NULL OR token_hash <> $3)
+      `,
+      [now, userId, keepTokenHash ?? null],
+    );
+    return this.getUserById(userId);
   }
 
   async getSessionUser(tokenHash: string): Promise<CloudUserRecord | null> {
@@ -396,6 +479,7 @@ export class PostgresCloudStorage implements CloudStorageService {
         INNER JOIN cloud_workspaces ON cloud_workspaces.id = cloud_workspace_members.workspace_id
         WHERE cloud_workspace_members.user_id = $1
           AND cloud_workspace_members.status = 'active'
+          AND cloud_workspace_members.removed_at IS NULL
         ORDER BY LOWER(cloud_workspaces.name) ASC
       `,
       [userId],
@@ -411,11 +495,13 @@ export class PostgresCloudStorage implements CloudStorageService {
       user_id: string;
       role: CloudRole;
       status: CloudUserStatus;
+      removed_at: string | null;
     }>(
       `
-        SELECT id, workspace_id, user_id, role, status
+        SELECT id, workspace_id, user_id, role, status, removed_at
         FROM cloud_workspace_members
         WHERE workspace_id = $1 AND user_id = $2
+          AND removed_at IS NULL
         LIMIT 1
       `,
       [workspaceId, userId],
@@ -429,6 +515,7 @@ export class PostgresCloudStorage implements CloudStorageService {
           userId: row.user_id,
           role: row.role,
           status: row.status,
+          removedAt: row.removed_at ? toIso(row.removed_at) : null,
         }
       : null;
   }
@@ -441,10 +528,17 @@ export class PostgresCloudStorage implements CloudStorageService {
           cloud_workspace_members.id AS membership_id,
           cloud_workspace_members.workspace_id,
           cloud_workspace_members.role AS membership_role,
-          cloud_workspace_members.status AS membership_status
+          cloud_workspace_members.status AS membership_status,
+          (
+            SELECT MAX(cloud_sync_entities.updated_at)
+            FROM cloud_sync_entities
+            WHERE cloud_sync_entities.workspace_id = cloud_workspace_members.workspace_id
+              AND cloud_sync_entities.updated_by_user_id = cloud_users.id
+          ) AS last_activity_at
         FROM cloud_workspace_members
         INNER JOIN cloud_users ON cloud_users.id = cloud_workspace_members.user_id
         WHERE cloud_workspace_members.workspace_id = $1
+          AND cloud_workspace_members.removed_at IS NULL
         ORDER BY cloud_workspace_members.role ASC, LOWER(cloud_users.name) ASC
       `,
       [workspaceId],
@@ -457,11 +551,12 @@ export class PostgresCloudStorage implements CloudStorageService {
     const now = new Date().toISOString();
     const normalizedEmail = normalizeIdentifier(input.email);
     const normalizedUsername = normalizeIdentifier(input.username);
-    const existing = input.email
-      ? await this.findUserByIdentifier(input.email)
-      : input.username
-        ? await this.findUserByIdentifier(input.username)
-        : null;
+    const existingByEmail = input.email ? await this.findUserByIdentifier(input.email) : null;
+    const existingByUsername = input.username ? await this.findUserByIdentifier(input.username) : null;
+    if (existingByEmail && existingByUsername && existingByEmail.id !== existingByUsername.id) {
+      throw Object.assign(new Error("E-mail e usuário pertencem a cadastros cloud diferentes."), { statusCode: 409 });
+    }
+    const existing = existingByEmail ?? existingByUsername;
     const userId = existing?.id ?? randomUUID();
     const membershipId = randomUUID();
 
@@ -496,7 +591,7 @@ export class PostgresCloudStorage implements CloudStorageService {
           INSERT INTO cloud_workspace_members (id, workspace_id, user_id, role, status, created_at, updated_at)
           VALUES ($1, $2, $3, $4, 'active', $5, $5)
           ON CONFLICT (workspace_id, user_id)
-          DO UPDATE SET role = excluded.role, status = 'active', updated_at = excluded.updated_at
+          DO UPDATE SET role = excluded.role, status = 'active', removed_at = NULL, updated_at = excluded.updated_at
         `,
         [membershipId, workspaceId, userId, input.role, now],
       );
@@ -516,18 +611,164 @@ export class PostgresCloudStorage implements CloudStorageService {
     return member;
   }
 
-  async updateWorkspaceMember(workspaceId: string, input: CloudUpdateMemberInput): Promise<CloudWorkspaceMemberView | null> {
+  async updateWorkspaceMember(
+    workspaceId: string,
+    userId: string,
+    input: CloudWorkspaceMemberUpdateInput,
+  ): Promise<CloudWorkspaceMemberView | null> {
+    const membership = await this.getWorkspaceMember(workspaceId, userId);
+    if (!membership) {
+      return null;
+    }
+
+    const normalizedEmail = input.email !== undefined ? normalizeIdentifier(input.email) : undefined;
+    const normalizedUsername = input.username !== undefined ? normalizeIdentifier(input.username) : undefined;
+
+    if (normalizedEmail) {
+      const duplicate = await this.pool.query<{ id: string }>(
+        "SELECT id FROM cloud_users WHERE email_normalized = $1 AND id <> $2 LIMIT 1",
+        [normalizedEmail, userId],
+      );
+      if (duplicate.rows[0]) {
+        throw Object.assign(new Error("E-mail cloud já está em uso."), { statusCode: 409 });
+      }
+    }
+
+    if (normalizedUsername) {
+      const duplicate = await this.pool.query<{ id: string }>(
+        "SELECT id FROM cloud_users WHERE username_normalized = $1 AND id <> $2 LIMIT 1",
+        [normalizedUsername, userId],
+      );
+      if (duplicate.rows[0]) {
+        throw Object.assign(new Error("Username cloud já está em uso."), { statusCode: 409 });
+      }
+    }
+
+    const now = new Date().toISOString();
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `
+          UPDATE cloud_users
+          SET
+            name = CASE WHEN $1::boolean THEN $2::text ELSE name END,
+            email = CASE WHEN $3::boolean THEN $4::text ELSE email END,
+            email_normalized = CASE WHEN $3::boolean THEN $5::text ELSE email_normalized END,
+            username = CASE WHEN $6::boolean THEN $7::text ELSE username END,
+            username_normalized = CASE WHEN $6::boolean THEN $8::text ELSE username_normalized END,
+            role = COALESCE($9::text, role),
+            status = COALESCE($10::text, status),
+            updated_at = $11
+          WHERE id = $12
+        `,
+        [
+          input.name !== undefined,
+          input.name ?? null,
+          input.email !== undefined,
+          input.email ?? null,
+          normalizedEmail ?? null,
+          input.username !== undefined,
+          input.username ?? null,
+          normalizedUsername ?? null,
+          input.role ?? null,
+          input.status ?? null,
+          now,
+          userId,
+        ],
+      );
+      await client.query(
+        `
+          UPDATE cloud_workspace_members
+          SET
+            role = COALESCE($1::text, role),
+            status = COALESCE($2::text, status),
+            updated_at = $3
+          WHERE workspace_id = $4 AND user_id = $5
+        `,
+        [input.role ?? null, input.status ?? null, now, workspaceId, userId],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    const members = await this.listWorkspaceMembers(workspaceId);
+    return members.find((item) => item.id === userId) ?? null;
+  }
+
+  async removeWorkspaceMember(workspaceId: string, userId: string): Promise<CloudWorkspaceMemberView | null> {
+    const members = await this.listWorkspaceMembers(workspaceId);
+    const member = members.find((item) => item.id === userId) ?? null;
+    if (!member) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
     await this.pool.query(
       `
         UPDATE cloud_workspace_members
-        SET role = $1, status = $2, updated_at = $3
-        WHERE workspace_id = $4 AND user_id = $5 AND role != 'owner'
+        SET status = 'disabled', removed_at = $1, updated_at = $1
+        WHERE workspace_id = $2 AND user_id = $3 AND removed_at IS NULL
       `,
-      [input.role, input.status, new Date().toISOString(), workspaceId, input.userId],
+      [
+        now,
+        workspaceId,
+        userId,
+      ],
+    );
+    return member;
+  }
+
+  async resetWorkspaceMemberPassword(
+    workspaceId: string,
+    userId: string,
+    passwordHash: string,
+    input: Pick<CloudResetMemberPasswordInput, "mustChangePassword">,
+  ): Promise<CloudWorkspaceMemberView | null> {
+    const membership = await this.getWorkspaceMember(workspaceId, userId);
+    if (!membership) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    await this.pool.query(
+      `
+        UPDATE cloud_users
+        SET password_hash = $1, must_change_password = $2, updated_at = $3
+        WHERE id = $4
+      `,
+      [passwordHash, input.mustChangePassword, now, userId],
+    );
+    await this.pool.query(
+      "UPDATE cloud_sessions SET revoked_at = COALESCE(revoked_at, $1) WHERE user_id = $2",
+      [now, userId],
     );
 
     const members = await this.listWorkspaceMembers(workspaceId);
-    return members.find((item) => item.id === input.userId) ?? null;
+    return members.find((item) => item.id === userId) ?? null;
+  }
+
+  async listMemberAuditLogs(workspaceId: string, userId: string): Promise<CloudAuditLogView[]> {
+    const result = await this.pool.query<AuditLogRow>(
+      `
+        SELECT *
+        FROM cloud_audit_logs
+        WHERE workspace_id = $1
+          AND (
+            entity_id = $2
+            OR metadata->>'targetCloudUserId' = $2
+          )
+        ORDER BY created_at DESC
+        LIMIT 50
+      `,
+      [workspaceId, userId],
+    );
+
+    return result.rows.map(mapAuditLog);
   }
 
   async listSyncEntities(workspaceId: string, since?: string): Promise<CloudSyncEntityView[]> {
@@ -760,6 +1001,7 @@ export class InMemoryCloudStorage implements CloudStorageService {
   private sessions = new Map<string, MemorySession>();
   private syncEntities = new Map<string, CloudSyncEntityView>();
   private conflicts: CloudSyncConflictView[] = [];
+  private auditLogs: CloudAuditLogView[] = [];
 
   async initialize(): Promise<void> {
     return undefined;
@@ -797,6 +1039,9 @@ export class InMemoryCloudStorage implements CloudStorageService {
       passwordHash,
       role: "owner",
       status: "active",
+      mustChangePassword: false,
+      lastLoginAt: null,
+      lastActivityAt: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -815,6 +1060,7 @@ export class InMemoryCloudStorage implements CloudStorageService {
       userId: user.id,
       role: "owner",
       status: "active",
+      removedAt: null,
     });
     return {
       user: toUserView(user),
@@ -838,6 +1084,7 @@ export class InMemoryCloudStorage implements CloudStorageService {
       userId: ownerUserId,
       role: "owner",
       status: "active",
+      removedAt: null,
     });
     return (await this.listWorkspacesForUser(ownerUserId)).find((item) => item.id === workspace.id)!;
   }
@@ -850,6 +1097,35 @@ export class InMemoryCloudStorage implements CloudStorageService {
       expiresAt: new Date(now.getTime() + sessionDurationMs).toISOString(),
       revokedAt: null,
     });
+    const user = this.users.get(userId);
+    if (user) {
+      const timestamp = now.toISOString();
+      user.lastLoginAt = timestamp;
+      user.updatedAt = timestamp;
+    }
+  }
+
+  async changeUserPassword(
+    userId: string,
+    passwordHash: string,
+    mustChangePassword: boolean,
+    keepTokenHash?: string | null,
+  ): Promise<CloudUserRecord | null> {
+    const user = this.users.get(userId);
+    if (!user) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    user.passwordHash = passwordHash;
+    user.mustChangePassword = mustChangePassword;
+    user.updatedAt = now;
+    for (const [tokenHash, session] of this.sessions.entries()) {
+      if (session.userId === userId && tokenHash !== keepTokenHash) {
+        session.revokedAt = session.revokedAt ?? now;
+      }
+    }
+    return user;
   }
 
   async getSessionUser(tokenHash: string): Promise<CloudUserRecord | null> {
@@ -870,7 +1146,7 @@ export class InMemoryCloudStorage implements CloudStorageService {
 
   async listWorkspacesForUser(userId: string): Promise<CloudWorkspaceView[]> {
     return [...this.members.values()]
-      .filter((member) => member.userId === userId && member.status === "active")
+      .filter((member) => member.userId === userId && member.status === "active" && !member.removedAt)
       .map((member) => {
         const workspace = this.workspaces.get(member.workspaceId);
         if (!workspace) {
@@ -888,12 +1164,13 @@ export class InMemoryCloudStorage implements CloudStorageService {
   }
 
   async getWorkspaceMember(workspaceId: string, userId: string): Promise<CloudMembership | null> {
-    return this.members.get(`${workspaceId}:${userId}`) ?? null;
+    const member = this.members.get(`${workspaceId}:${userId}`) ?? null;
+    return member && !member.removedAt ? member : null;
   }
 
   async listWorkspaceMembers(workspaceId: string): Promise<CloudWorkspaceMemberView[]> {
     return [...this.members.values()]
-      .filter((member) => member.workspaceId === workspaceId)
+      .filter((member) => member.workspaceId === workspaceId && !member.removedAt)
       .map((member) => {
         const user = this.users.get(member.userId);
         if (!user) {
@@ -911,11 +1188,12 @@ export class InMemoryCloudStorage implements CloudStorageService {
 
   async inviteUser(workspaceId: string, input: CloudInviteUserInput, passwordHash: string): Promise<CloudWorkspaceMemberView> {
     const now = new Date().toISOString();
-    const existing = input.email
-      ? await this.findUserByIdentifier(input.email)
-      : input.username
-        ? await this.findUserByIdentifier(input.username)
-        : null;
+    const existingByEmail = input.email ? await this.findUserByIdentifier(input.email) : null;
+    const existingByUsername = input.username ? await this.findUserByIdentifier(input.username) : null;
+    if (existingByEmail && existingByUsername && existingByEmail.id !== existingByUsername.id) {
+      throw Object.assign(new Error("E-mail e usuário pertencem a cadastros cloud diferentes."), { statusCode: 409 });
+    }
+    const existing = existingByEmail ?? existingByUsername;
     const user: MemoryUser =
       (existing as MemoryUser | null) ?? {
         id: randomUUID(),
@@ -927,6 +1205,9 @@ export class InMemoryCloudStorage implements CloudStorageService {
         passwordHash,
         role: input.role,
         status: "active",
+        mustChangePassword: false,
+        lastLoginAt: null,
+        lastActivityAt: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -937,18 +1218,111 @@ export class InMemoryCloudStorage implements CloudStorageService {
       userId: user.id,
       role: input.role,
       status: "active",
+      removedAt: null,
     });
     return (await this.listWorkspaceMembers(workspaceId)).find((item) => item.id === user.id)!;
   }
 
-  async updateWorkspaceMember(workspaceId: string, input: CloudUpdateMemberInput): Promise<CloudWorkspaceMemberView | null> {
-    const member = this.members.get(`${workspaceId}:${input.userId}`);
-    if (!member || member.role === "owner") {
+  async updateWorkspaceMember(
+    workspaceId: string,
+    userId: string,
+    input: CloudWorkspaceMemberUpdateInput,
+  ): Promise<CloudWorkspaceMemberView | null> {
+    const member = this.members.get(`${workspaceId}:${userId}`);
+    const user = this.users.get(userId);
+    if (!member || !user) {
       return null;
     }
-    member.role = input.role;
-    member.status = input.status;
-    return (await this.listWorkspaceMembers(workspaceId)).find((item) => item.id === input.userId) ?? null;
+
+    const normalizedEmail = input.email !== undefined ? normalizeIdentifier(input.email) : undefined;
+    const normalizedUsername = input.username !== undefined ? normalizeIdentifier(input.username) : undefined;
+
+    if (
+      normalizedEmail &&
+      [...this.users.values()].some((item) => item.id !== userId && item.emailNormalized === normalizedEmail)
+    ) {
+      throw Object.assign(new Error("E-mail cloud já está em uso."), { statusCode: 409 });
+    }
+
+    if (
+      normalizedUsername &&
+      [...this.users.values()].some((item) => item.id !== userId && item.usernameNormalized === normalizedUsername)
+    ) {
+      throw Object.assign(new Error("Username cloud já está em uso."), { statusCode: 409 });
+    }
+
+    const now = new Date().toISOString();
+    if (input.name !== undefined) {
+      user.name = input.name;
+    }
+    if (input.email !== undefined) {
+      user.email = input.email ?? null;
+      user.emailNormalized = normalizedEmail ?? null;
+    }
+    if (input.username !== undefined) {
+      user.username = input.username ?? null;
+      user.usernameNormalized = normalizedUsername ?? null;
+    }
+    if (input.role !== undefined) {
+      user.role = input.role;
+      member.role = input.role;
+    }
+    if (input.status !== undefined) {
+      user.status = input.status;
+      member.status = input.status;
+    }
+    user.updatedAt = now;
+
+    return (await this.listWorkspaceMembers(workspaceId)).find((item) => item.id === userId) ?? null;
+  }
+
+  async removeWorkspaceMember(workspaceId: string, userId: string): Promise<CloudWorkspaceMemberView | null> {
+    const membership = this.members.get(`${workspaceId}:${userId}`) ?? null;
+    const member = (await this.listWorkspaceMembers(workspaceId)).find((item) => item.id === userId) ?? null;
+    if (!membership || membership.removedAt || !member) {
+      return null;
+    }
+    const now = new Date().toISOString();
+    membership.status = "disabled";
+    membership.removedAt = now;
+    return member;
+  }
+
+  async resetWorkspaceMemberPassword(
+    workspaceId: string,
+    userId: string,
+    passwordHash: string,
+    input: Pick<CloudResetMemberPasswordInput, "mustChangePassword">,
+  ): Promise<CloudWorkspaceMemberView | null> {
+    const member = this.members.get(`${workspaceId}:${userId}`);
+    const user = this.users.get(userId);
+    if (!member || !user) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    user.passwordHash = passwordHash;
+    user.mustChangePassword = input.mustChangePassword;
+    user.updatedAt = now;
+    for (const session of this.sessions.values()) {
+      if (session.userId === userId) {
+        session.revokedAt = session.revokedAt ?? now;
+      }
+    }
+
+    return (await this.listWorkspaceMembers(workspaceId)).find((item) => item.id === userId) ?? null;
+  }
+
+  async listMemberAuditLogs(workspaceId: string, userId: string): Promise<CloudAuditLogView[]> {
+    return this.auditLogs
+      .filter(
+        (log) =>
+          log.workspaceId === workspaceId &&
+          (log.entityId === userId || log.metadata.targetCloudUserId === userId),
+      )
+      .slice()
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, 50);
   }
 
   async listSyncEntities(workspaceId: string, since?: string): Promise<CloudSyncEntityView[]> {
@@ -1019,10 +1393,36 @@ export class InMemoryCloudStorage implements CloudStorageService {
       applied.push(entity);
     }
 
+    const user = this.users.get(userId);
+    if (user && applied.length > 0) {
+      const latestActivity = applied.reduce(
+        (latest, entity) => (entity.updatedAt > latest ? entity.updatedAt : latest),
+        user.lastActivityAt ?? "",
+      );
+      user.lastActivityAt = latestActivity || user.lastActivityAt;
+      user.updatedAt = latestActivity || user.updatedAt;
+    }
+
     return { applied, conflicts };
   }
 
-  async recordAudit(): Promise<void> {
-    return undefined;
+  async recordAudit(input: {
+    workspaceId: string | null;
+    actorUserId: string | null;
+    action: string;
+    entityType?: string | null;
+    entityId?: string | null;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    this.auditLogs.push({
+      id: randomUUID(),
+      workspaceId: input.workspaceId,
+      actorUserId: input.actorUserId,
+      action: input.action,
+      entityType: input.entityType ?? null,
+      entityId: input.entityId ?? null,
+      metadata: input.metadata ?? {},
+      createdAt: new Date().toISOString(),
+    });
   }
 }

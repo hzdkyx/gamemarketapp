@@ -40,4 +40,13 @@ describe("renderer security boundaries", () => {
     expect(cloudSyncApi).not.toMatch(/revealToken|sessionToken|tokenMasked|tokenHash/);
     expect(cloudSyncApi).not.toMatch(/passwordHash/);
   });
+
+  it("keeps local auth recovery renderer contracts free of hashes and secrets", () => {
+    const desktopApiSource = readFileSync(join(rendererSrc, "lib", "desktop-api.ts"), "utf8");
+    const authApi = desktopApiSource.match(/auth:\s*{[\s\S]*?},\s*users:/)?.[0] ?? "";
+
+    expect(authApi).toContain("listLocalRecoveryUsers");
+    expect(authApi).toContain("resetLocalPassword");
+    expect(authApi).not.toMatch(/passwordHash|token|secret|apiKey/i);
+  });
 });

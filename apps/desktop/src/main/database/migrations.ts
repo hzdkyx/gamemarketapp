@@ -101,7 +101,7 @@ export const runtimeMigrations: RuntimeMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
       CREATE INDEX IF NOT EXISTS idx_events_read ON events(read_at);
       CREATE INDEX IF NOT EXISTS idx_notification_rules_event ON notification_rules(event_type);
-    `
+    `,
   },
   {
     id: "0001_phase2_products_inventory",
@@ -249,7 +249,7 @@ export const runtimeMigrations: RuntimeMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_inventory_status ON inventory_items(status);
 
       PRAGMA foreign_keys = ON;
-    `
+    `,
   },
   {
     id: "0002_phase3_orders_events",
@@ -484,7 +484,7 @@ export const runtimeMigrations: RuntimeMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_events_inventory_item ON events(inventory_item_id);
 
       PRAGMA foreign_keys = ON;
-    `
+    `,
   },
   {
     id: "0003_phase35_auth_users_audit",
@@ -598,7 +598,7 @@ export const runtimeMigrations: RuntimeMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_events_inventory_item ON events(inventory_item_id);
 
       PRAGMA foreign_keys = ON;
-    `
+    `,
   },
   {
     id: "0004_phase4_gamemarket_api",
@@ -716,7 +716,7 @@ export const runtimeMigrations: RuntimeMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_events_actor ON events(actor_user_id);
 
       PRAGMA foreign_keys = ON;
-    `
+    `,
   },
   {
     id: "0005_phase5_webhook_server",
@@ -839,7 +839,7 @@ export const runtimeMigrations: RuntimeMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_webhook_server_imports_payload_hash ON webhook_server_event_imports(payload_hash);
 
       PRAGMA foreign_keys = ON;
-    `
+    `,
   },
   {
     id: "0006_product_variants",
@@ -882,7 +882,7 @@ export const runtimeMigrations: RuntimeMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_orders_product_variant ON orders(product_variant_id);
 
       PRAGMA foreign_keys = ON;
-    `
+    `,
   },
   {
     id: "0007_gamemarket_release_status_hotfix",
@@ -1053,7 +1053,7 @@ export const runtimeMigrations: RuntimeMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_events_actor ON events(actor_user_id);
 
       PRAGMA foreign_keys = ON;
-    `
+    `,
   },
   {
     id: "0008_phase6_local_notifications_polling",
@@ -1087,7 +1087,7 @@ export const runtimeMigrations: RuntimeMigration[] = [
       CREATE INDEX IF NOT EXISTS idx_app_notifications_read ON app_notifications(read_at);
       CREATE INDEX IF NOT EXISTS idx_app_notifications_order ON app_notifications(order_id);
       CREATE INDEX IF NOT EXISTS idx_app_notifications_type ON app_notifications(type);
-    `
+    `,
   },
   {
     id: "0009_phase7_cloud_workspace_sync",
@@ -1177,6 +1177,144 @@ export const runtimeMigrations: RuntimeMigration[] = [
       CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_cloud_id ON settings(cloud_id) WHERE cloud_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_settings_workspace_sync ON settings(workspace_id, sync_status);
       CREATE INDEX IF NOT EXISTS idx_cloud_sync_conflicts_workspace ON cloud_sync_conflicts(workspace_id, resolved_at);
-    `
-  }
+    `,
+  },
+  {
+    id: "0010_local_password_recovery",
+    sql: `
+      PRAGMA foreign_keys = OFF;
+
+      ALTER TABLE users ADD COLUMN password_hint TEXT;
+
+      CREATE TABLE events_new (
+        id TEXT PRIMARY KEY,
+        event_code TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL CHECK (source IN ('manual', 'system', 'gamemarket_api', 'gamemarket_future', 'webhook_future', 'webhook_server')),
+        type TEXT NOT NULL CHECK (type IN (
+          'auth.local_password_reset',
+          'order.created',
+          'order.payment_confirmed',
+          'order.awaiting_delivery',
+          'order.delivered',
+          'order.completed',
+          'order.status_corrected',
+          'order.cancelled',
+          'order.refunded',
+          'order.mediation',
+          'order.problem',
+          'inventory.reserved',
+          'inventory.released',
+          'inventory.sold',
+          'inventory.delivered',
+          'inventory.problem',
+          'product.low_stock',
+          'product.out_of_stock',
+          'security.secret_revealed',
+          'integration.gamemarket.settings_updated',
+          'integration.gamemarket.connection_tested',
+          'integration.gamemarket.connection_failed',
+          'integration.gamemarket.token_revealed',
+          'integration.gamemarket.sync_started',
+          'integration.gamemarket.sync_completed',
+          'integration.gamemarket.sync_failed',
+          'integration.gamemarket.order_imported',
+          'integration.gamemarket.order_updated',
+          'integration.gamemarket.product_imported',
+          'integration.gamemarket.product_updated',
+          'integration.webhook_server.settings_updated',
+          'integration.webhook_server.connection_tested',
+          'integration.webhook_server.connection_failed',
+          'integration.webhook_server.token_revealed',
+          'integration.webhook_server.sync_started',
+          'integration.webhook_server.sync_completed',
+          'integration.webhook_server.sync_failed',
+          'integration.webhook_server.test_event_sent',
+          'integration.webhook_server.event_imported',
+          'integration.webhook_server.review_received',
+          'integration.webhook_server.variant_sold_out',
+          'integration.webhook_server.unknown_event',
+          'system.notification_test'
+        )),
+        severity TEXT NOT NULL DEFAULT 'info' CHECK (severity IN ('info', 'success', 'warning', 'critical')),
+        title TEXT NOT NULL,
+        message TEXT,
+        order_id TEXT REFERENCES orders(id) ON DELETE SET NULL,
+        product_id TEXT REFERENCES products(id) ON DELETE SET NULL,
+        inventory_item_id TEXT REFERENCES inventory_items(id) ON DELETE SET NULL,
+        actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        read_at TEXT,
+        raw_payload TEXT,
+        created_at TEXT NOT NULL,
+        cloud_id TEXT,
+        workspace_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_cloud_synced_at TEXT,
+        sync_revision INTEGER NOT NULL DEFAULT 0,
+        updated_by_cloud_user_id TEXT,
+        deleted_at TEXT
+      );
+
+      INSERT INTO events_new (
+        id,
+        event_code,
+        source,
+        type,
+        severity,
+        title,
+        message,
+        order_id,
+        product_id,
+        inventory_item_id,
+        actor_user_id,
+        read_at,
+        raw_payload,
+        created_at,
+        cloud_id,
+        workspace_id,
+        sync_status,
+        last_cloud_synced_at,
+        sync_revision,
+        updated_by_cloud_user_id,
+        deleted_at
+      )
+      SELECT
+        id,
+        event_code,
+        source,
+        type,
+        severity,
+        title,
+        message,
+        order_id,
+        product_id,
+        inventory_item_id,
+        actor_user_id,
+        read_at,
+        raw_payload,
+        created_at,
+        cloud_id,
+        workspace_id,
+        sync_status,
+        last_cloud_synced_at,
+        sync_revision,
+        updated_by_cloud_user_id,
+        deleted_at
+      FROM events;
+
+      DROP TABLE events;
+      ALTER TABLE events_new RENAME TO events;
+
+      CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
+      CREATE INDEX IF NOT EXISTS idx_events_read ON events(read_at);
+      CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
+      CREATE INDEX IF NOT EXISTS idx_events_order ON events(order_id);
+      CREATE INDEX IF NOT EXISTS idx_events_product ON events(product_id);
+      CREATE INDEX IF NOT EXISTS idx_events_inventory_item ON events(inventory_item_id);
+      CREATE INDEX IF NOT EXISTS idx_events_actor ON events(actor_user_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_events_cloud_id ON events(cloud_id) WHERE cloud_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_events_workspace_sync ON events(workspace_id, sync_status);
+
+      PRAGMA foreign_keys = ON;
+    `,
+  },
 ];

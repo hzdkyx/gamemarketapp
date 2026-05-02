@@ -31,6 +31,16 @@ describe("settings page scroll layout", () => {
     expect(settingsPage).toContain("<CardTitle>Conta e Sincronização</CardTitle>");
     expect(settingsPage).toContain("<CardTitle>Webhook Server / Tempo Real</CardTitle>");
     expect(settingsPage).toContain("<CardTitle>Notificações Locais</CardTitle>");
+    expect(settingsPage).toContain("Usuários do Workspace");
+    expect(settingsPage).toContain("Editar membro do workspace");
+    expect(settingsPage).toContain("Resetar senha cloud");
+    expect(settingsPage).toContain("Troca de senha cloud obrigatória");
+    expect(settingsPage).toContain("Remover este usuário do workspace?");
+    expect(settingsPage).toContain("createPortal(");
+    expect(settingsPage).toContain("document.body");
+    expect(settingsPage).toContain("WorkspaceMemberModal");
+    expect(settingsPage).toContain("data-autofocus");
+    expect(settingsPage).toContain("z-[100]");
   });
 
   it("keeps GameMarket documentation as an informational warning, not an API-call blocker", () => {

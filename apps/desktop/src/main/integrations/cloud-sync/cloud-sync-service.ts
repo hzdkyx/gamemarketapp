@@ -1,8 +1,13 @@
 import type {
+  CloudAuditLogView,
   CloudSyncBootstrapOwnerInput,
+  CloudSyncChangePasswordInput,
   CloudSyncEntityType,
   CloudSyncInviteUserInput,
   CloudSyncLoginInput,
+  CloudSyncMemberActionInput,
+  CloudSyncRemoveMemberInput,
+  CloudSyncResetMemberPasswordInput,
   CloudSyncSettingsUpdateInput,
   CloudSyncSettingsView,
   CloudSyncSummary,
@@ -110,9 +115,16 @@ export const cloudSyncService = {
     const settings = cloudSyncSettingsService.getSettings();
     const result = await new CloudSyncClient({ baseUrl: settings.backendUrl }).login(input);
     const saved = cloudSyncSettingsService.saveSession(result.token, result.user, result.workspaces);
-    if (saved.workspaceId) {
+    if (saved.workspaceId && !result.user.mustChangePassword) {
       await this.downloadWorkspace();
     }
+    return cloudSyncSettingsService.getSettings();
+  },
+
+  async changePassword(input: CloudSyncChangePasswordInput): Promise<CloudSyncSettingsView> {
+    const result = await getClient().changePassword(input);
+    cloudSyncSettingsService.refreshSessionView(result.user, result.workspaces);
+    cloudSyncSettingsService.markStatus("connected", null);
     return cloudSyncSettingsService.getSettings();
   },
 
@@ -145,6 +157,31 @@ export const cloudSyncService = {
   async updateMember(input: CloudSyncUpdateMemberInput): Promise<CloudWorkspaceMemberView> {
     const { workspaceId } = requireCloudReady();
     return getClient().updateMember(workspaceId, input);
+  },
+
+  async disableWorkspaceMember(input: CloudSyncMemberActionInput): Promise<CloudWorkspaceMemberView> {
+    const { workspaceId } = requireCloudReady();
+    return getClient().disableMember(workspaceId, input);
+  },
+
+  async enableWorkspaceMember(input: CloudSyncMemberActionInput): Promise<CloudWorkspaceMemberView> {
+    const { workspaceId } = requireCloudReady();
+    return getClient().enableMember(workspaceId, input);
+  },
+
+  async removeWorkspaceMember(input: CloudSyncRemoveMemberInput): Promise<CloudWorkspaceMemberView> {
+    const { workspaceId } = requireCloudReady();
+    return getClient().removeMember(workspaceId, input);
+  },
+
+  async resetWorkspaceMemberPassword(input: CloudSyncResetMemberPasswordInput): Promise<CloudWorkspaceMemberView> {
+    const { workspaceId } = requireCloudReady();
+    return getClient().resetMemberPassword(workspaceId, input);
+  },
+
+  async listWorkspaceMemberAudit(input: CloudSyncMemberActionInput): Promise<CloudAuditLogView[]> {
+    const { workspaceId } = requireCloudReady();
+    return getClient().listMemberAudit(workspaceId, input.userId);
   },
 
   async publishLocalData(): Promise<CloudSyncSummary> {

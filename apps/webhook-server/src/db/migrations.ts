@@ -10,6 +10,30 @@ const migrations = [
     id: "0002_cloud_workspace_sync",
     sql: cloudPostgresSchema,
   },
+  {
+    id: "0003_cloud_user_admin",
+    sql: `
+      ALTER TABLE cloud_users
+        ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+
+      ALTER TABLE cloud_users
+        ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+
+      CREATE INDEX IF NOT EXISTS idx_cloud_sync_entities_updated_by
+        ON cloud_sync_entities(workspace_id, updated_by_user_id, updated_at);
+    `,
+  },
+  {
+    id: "0004_workspace_member_removed_at",
+    sql: `
+      ALTER TABLE cloud_workspace_members
+        ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ;
+
+      CREATE INDEX IF NOT EXISTS idx_cloud_workspace_members_active
+        ON cloud_workspace_members(workspace_id, user_id)
+        WHERE removed_at IS NULL;
+    `,
+  },
 ];
 
 export const runPostgresMigrations = async (pool: Pool): Promise<void> => {

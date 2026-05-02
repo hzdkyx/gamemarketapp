@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   BellRing,
   Cloud,
@@ -7,6 +8,7 @@ import {
   Edit3,
   Eye,
   FileText,
+  History,
   KeyRound,
   Link2,
   LockKeyhole,
@@ -16,7 +18,10 @@ import {
   Save,
   Server,
   ShieldCheck,
+  Trash2,
   UploadCloud,
+  UserCheck,
+  UserX,
   UserPlus,
   UsersRound,
   Volume2,
@@ -28,6 +33,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/u
 import { getDesktopApi } from "@renderer/lib/desktop-api";
 import { playSaleAlertSound } from "@renderer/lib/notification-sound";
 import type {
+  CloudAuditLogView,
   EventType,
   CloudSyncAutoSyncStatus,
   CloudRole,
@@ -45,7 +51,7 @@ import type {
   WebhookServerSettingsView,
   WebhookServerSyncSummary
 } from "../../../shared/contracts";
-import { eventTypeValues } from "../../../shared/contracts";
+import { eventTypeValues, isPasswordHintTooSimilar } from "../../../shared/contracts";
 import {
   CLOUD_SYNC_INTERVAL_OPTIONS_SECONDS,
   CLOUD_SYNC_MIN_INTERVAL_SECONDS,
@@ -65,6 +71,7 @@ interface AppMeta {
 }
 
 const eventLabels: Record<EventType, string> = {
+  "auth.local_password_reset": "Reset de senha local",
   "order.created": "Pedido criado",
   "order.payment_confirmed": "Pagamento confirmado",
   "order.awaiting_delivery": "Aguardando entrega",
@@ -134,6 +141,12 @@ interface CloudLoginFormState {
   password: string;
 }
 
+interface CloudPasswordFormState {
+  currentPassword: string;
+  password: string;
+  confirmPassword: string;
+}
+
 interface CloudOwnerFormState {
   name: string;
   email: string;
@@ -150,12 +163,44 @@ interface CloudInviteFormState {
   role: Exclude<CloudRole, "owner">;
 }
 
+interface CloudMemberEditFormState {
+  userId: string;
+  name: string;
+  email: string;
+  username: string;
+  role: CloudRole;
+  status: UserStatus;
+}
+
+interface CloudMemberRemovalState {
+  member: CloudWorkspaceMemberView;
+  confirmation: string;
+}
+
+interface CloudMemberPasswordResetState {
+  member: CloudWorkspaceMemberView;
+  temporaryPassword: string;
+  confirmPassword: string;
+  mustChangePassword: boolean;
+}
+
+interface CloudMemberStatusActionState {
+  member: CloudWorkspaceMemberView;
+  nextStatus: UserStatus;
+}
+
+interface CloudMemberAuditState {
+  member: CloudWorkspaceMemberView;
+  logs: CloudAuditLogView[];
+}
+
 interface UserFormState {
   id: string | null;
   name: string;
   username: string;
   password: string;
   confirmPassword: string;
+  passwordHint: string;
   role: UserRole;
   status: UserStatus;
   allowRevealSecrets: boolean;
@@ -168,6 +213,7 @@ const emptyUserForm: UserFormState = {
   username: "",
   password: "",
   confirmPassword: "",
+  passwordHint: "",
   role: "operator",
   status: "active",
   allowRevealSecrets: false,
@@ -191,6 +237,7 @@ const userToForm = (user: UserRecord): UserFormState => ({
   username: user.username,
   password: "",
   confirmPassword: "",
+  passwordHint: user.passwordHint ?? "",
   role: user.role,
   status: user.status,
   allowRevealSecrets: user.allowRevealSecrets,
@@ -202,6 +249,9 @@ const isUserLocked = (user: UserRecord): boolean =>
 
 const formatDateTime = (value: string | null | undefined): string =>
   value ? new Date(value).toLocaleString("pt-BR") : "-";
+
+const getCloudMemberConfirmation = (member: CloudWorkspaceMemberView): string =>
+  member.username ?? member.email ?? member.name;
 
 const isHttpUrl = (value: string | null | undefined): boolean => {
   if (!value?.trim()) {
@@ -364,6 +414,22 @@ const cloudStatusTone = (
   return "neutral";
 };
 
+const cloudRoleTone = (role: CloudRole): "success" | "warning" | "danger" | "cyan" | "neutral" | "purple" => {
+  if (role === "owner") {
+    return "cyan";
+  }
+  if (role === "admin") {
+    return "purple";
+  }
+  if (role === "manager") {
+    return "success";
+  }
+  if (role === "operator") {
+    return "warning";
+  }
+  return "neutral";
+};
+
 type SettingsSectionId = "users" | "cloud" | "system" | "gamemarket" | "webhook" | "notifications";
 
 const settingsSections: Array<{ id: SettingsSectionId; panelId: string; label: string; icon: LucideIcon }> = [
@@ -374,6 +440,81 @@ const settingsSections: Array<{ id: SettingsSectionId; panelId: string; label: s
   { id: "webhook", panelId: "settings-webhook", label: "Webhook Server", icon: Server },
   { id: "notifications", panelId: "settings-notifications", label: "Notificações", icon: BellRing }
 ];
+
+const WorkspaceMemberModal = ({
+  titleId,
+  panelClassName,
+  onClose,
+  children
+}: {
+  titleId: string;
+  panelClassName: string;
+  onClose?: () => void;
+  children: ReactNode;
+}): JSX.Element | null => {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const timeoutId = window.setTimeout(() => {
+      const focusTarget = panelRef.current?.querySelector<HTMLElement>(
+        "[data-autofocus='true'], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])"
+      );
+      focusTarget?.focus({ preventScroll: true });
+    }, 0);
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape" && onCloseRef.current) {
+        event.preventDefault();
+        onCloseRef.current();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.clearTimeout(timeoutId);
+      document.removeEventListener("keydown", handleKeyDown);
+      previouslyFocused?.focus({ preventScroll: true });
+    };
+  }, []);
+
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] grid place-items-center overflow-y-auto bg-black/70 p-4 sm:p-6">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className={`modal-panel max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg border border-line bg-background shadow-premium ${panelClassName}`}
+      >
+        {children}
+      </div>
+    </div>,
+    document.body
+  );
+};
+
+const formatCloudMemberActionError = (error: unknown, fallback: string): string => {
+  const message = error instanceof Error ? error.message : "";
+  if (/resetWorkspaceMemberPassword|reset-password/i.test(message) && /route\s+post:.*not found|Cloud sync HTTP 404/i.test(message)) {
+    return "Não foi possível resetar a senha cloud. O backend pode estar desatualizado ou a rota não está disponível. Atualize o backend e tente novamente.";
+  }
+
+  return message
+    ? message
+        .replace(/^Error invoking remote method '[^']+': Error:\s*/i, "")
+        .replace(/Bearer\s+[A-Za-z0-9._~-]+/g, "Bearer [masked]")
+    : fallback;
+};
 
 export const SettingsPage = (): JSX.Element => {
   const api = useMemo(() => getDesktopApi(), []);
@@ -420,6 +561,11 @@ export const SettingsPage = (): JSX.Element => {
     identifier: "",
     password: ""
   });
+  const [cloudPasswordForm, setCloudPasswordForm] = useState<CloudPasswordFormState>({
+    currentPassword: "",
+    password: "",
+    confirmPassword: ""
+  });
   const [cloudOwnerForm, setCloudOwnerForm] = useState<CloudOwnerFormState>({
     name: "",
     email: "",
@@ -435,17 +581,28 @@ export const SettingsPage = (): JSX.Element => {
     role: "manager"
   });
   const [cloudMembers, setCloudMembers] = useState<CloudWorkspaceMemberView[]>([]);
+  const [cloudMemberEdit, setCloudMemberEdit] = useState<CloudMemberEditFormState | null>(null);
+  const [cloudMemberRemoval, setCloudMemberRemoval] = useState<CloudMemberRemovalState | null>(null);
+  const [cloudMemberPasswordReset, setCloudMemberPasswordReset] = useState<CloudMemberPasswordResetState | null>(null);
+  const [cloudMemberStatusAction, setCloudMemberStatusAction] = useState<CloudMemberStatusActionState | null>(null);
+  const [cloudMemberAudit, setCloudMemberAudit] = useState<CloudMemberAuditState | null>(null);
   const [cloudBusy, setCloudBusy] = useState<
     | "saving"
     | "testing"
     | "login"
     | "owner"
+    | "password"
     | "syncing"
     | "publishing"
     | "downloading"
     | "inviting"
     | "pausing"
     | "resuming"
+    | "memberSaving"
+    | "memberRemoving"
+    | "memberStatus"
+    | "memberPassword"
+    | "memberAudit"
     | null
   >(null);
   const [cloudResult, setCloudResult] = useState("");
@@ -514,7 +671,7 @@ export const SettingsPage = (): JSX.Element => {
       setCloudSyncCustomInterval(!cloudSyncPresetValues.includes(loadedCloudSyncSettings.syncIntervalSeconds as 10 | 30 | 60 | 300));
       if (loadedCloudSyncSettings.workspaceRole === "owner" || loadedCloudSyncSettings.workspaceRole === "admin") {
         try {
-          setCloudMembers(await api.cloudSync.listMembers());
+          setCloudMembers(await api.cloudSync.listWorkspaceMembers());
         } catch {
           setCloudMembers([]);
         }
@@ -803,7 +960,7 @@ export const SettingsPage = (): JSX.Element => {
 
     if (loadedCloudSyncSettings.workspaceRole === "owner" || loadedCloudSyncSettings.workspaceRole === "admin") {
       try {
-        setCloudMembers(await api.cloudSync.listMembers());
+        setCloudMembers(await api.cloudSync.listWorkspaceMembers());
       } catch {
         setCloudMembers([]);
       }
@@ -893,10 +1050,36 @@ export const SettingsPage = (): JSX.Element => {
       });
       setCloudLoginForm({ identifier: "", password: "" });
       setCloudSyncSettings(updated);
-      setCloudResult("Login cloud concluído.");
+      setCloudResult(
+        updated.currentUser?.mustChangePassword
+          ? "Login cloud concluído. Troque a senha temporária para liberar ações do workspace."
+          : "Login cloud concluído."
+      );
       await refreshCloudSyncSettings();
     } catch (loginError) {
       setCloudResult(loginError instanceof Error ? loginError.message : "Falha ao entrar no workspace.");
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const changeCloudPassword = async (): Promise<void> => {
+    setCloudBusy("password");
+    setCloudResult("");
+    setError(null);
+
+    try {
+      const updated = await api.cloudSync.changePassword({
+        currentPassword: cloudPasswordForm.currentPassword,
+        password: cloudPasswordForm.password,
+        confirmPassword: cloudPasswordForm.confirmPassword
+      });
+      setCloudPasswordForm({ currentPassword: "", password: "", confirmPassword: "" });
+      setCloudSyncSettings(updated);
+      setCloudResult("Senha cloud alterada.");
+      await refreshCloudSyncSettings();
+    } catch (passwordError) {
+      setCloudResult(passwordError instanceof Error ? passwordError.message : "Falha ao trocar senha cloud.");
     } finally {
       setCloudBusy(null);
     }
@@ -1067,6 +1250,139 @@ export const SettingsPage = (): JSX.Element => {
     }
   };
 
+  const openCloudMemberEdit = (member: CloudWorkspaceMemberView): void => {
+    setCloudMemberEdit({
+      userId: member.id,
+      name: member.name,
+      email: member.email ?? "",
+      username: member.username ?? "",
+      role: member.role,
+      status: member.status
+    });
+  };
+
+  const saveCloudMemberEdit = async (): Promise<void> => {
+    if (!cloudMemberEdit) {
+      return;
+    }
+
+    setCloudBusy("memberSaving");
+    setCloudResult("");
+    setError(null);
+
+    try {
+      await api.cloudSync.updateWorkspaceMember({
+        userId: cloudMemberEdit.userId,
+        name: cloudMemberEdit.name,
+        email: cloudMemberEdit.email.trim() || null,
+        username: cloudMemberEdit.username.trim() || null,
+        role: cloudMemberEdit.role,
+        status: cloudMemberEdit.status
+      });
+      setCloudMemberEdit(null);
+      setCloudResult("Membro cloud atualizado.");
+      await refreshCloudSyncSettings();
+    } catch (updateError) {
+      setCloudResult(formatCloudMemberActionError(updateError, "Falha ao atualizar membro cloud."));
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const confirmCloudMemberStatusAction = async (): Promise<void> => {
+    if (!cloudMemberStatusAction) {
+      return;
+    }
+
+    setCloudBusy("memberStatus");
+    setCloudResult("");
+    setError(null);
+
+    try {
+      if (cloudMemberStatusAction.nextStatus === "disabled") {
+        await api.cloudSync.disableWorkspaceMember({ userId: cloudMemberStatusAction.member.id });
+        setCloudResult("Membro cloud desativado.");
+      } else {
+        await api.cloudSync.enableWorkspaceMember({ userId: cloudMemberStatusAction.member.id });
+        setCloudResult("Membro cloud reativado.");
+      }
+      setCloudMemberStatusAction(null);
+      await refreshCloudSyncSettings();
+    } catch (statusError) {
+      setCloudResult(formatCloudMemberActionError(statusError, "Falha ao alterar status do membro."));
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const removeCloudMember = async (): Promise<void> => {
+    if (!cloudMemberRemoval) {
+      return;
+    }
+
+    setCloudBusy("memberRemoving");
+    setCloudResult("");
+    setError(null);
+
+    try {
+      const removedMemberId = cloudMemberRemoval.member.id;
+      await api.cloudSync.removeWorkspaceMember({
+        userId: removedMemberId,
+        confirmation: cloudMemberRemoval.confirmation
+      });
+      setCloudMemberRemoval(null);
+      setCloudMembers((members) => members.filter((member) => member.id !== removedMemberId));
+      setCloudResult("Membro removido do workspace. O histórico foi preservado.");
+      await refreshCloudSyncSettings();
+      setCloudMembers((members) => members.filter((member) => member.id !== removedMemberId));
+    } catch (removeError) {
+      setCloudResult(formatCloudMemberActionError(removeError, "Falha ao remover membro do workspace."));
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const resetCloudMemberPassword = async (): Promise<void> => {
+    if (!cloudMemberPasswordReset) {
+      return;
+    }
+
+    setCloudBusy("memberPassword");
+    setCloudResult("");
+    setError(null);
+
+    try {
+      await api.cloudSync.resetWorkspaceMemberPassword({
+        userId: cloudMemberPasswordReset.member.id,
+        temporaryPassword: cloudMemberPasswordReset.temporaryPassword,
+        confirmPassword: cloudMemberPasswordReset.confirmPassword,
+        mustChangePassword: cloudMemberPasswordReset.mustChangePassword
+      });
+      setCloudMemberPasswordReset(null);
+      setCloudResult("Senha cloud resetada. A senha anterior não foi revelada.");
+      await refreshCloudSyncSettings();
+    } catch (passwordError) {
+      setCloudResult(formatCloudMemberActionError(passwordError, "Falha ao resetar senha cloud."));
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const openCloudMemberAudit = async (member: CloudWorkspaceMemberView): Promise<void> => {
+    setCloudBusy("memberAudit");
+    setCloudResult("");
+    setError(null);
+
+    try {
+      const logs = await api.cloudSync.listWorkspaceMemberAudit({ userId: member.id });
+      setCloudMemberAudit({ member, logs });
+    } catch (auditError) {
+      setCloudResult(formatCloudMemberActionError(auditError, "Falha ao carregar auditoria do membro."));
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
   const openNewUser = (): void => {
     setUserForm(emptyUserForm);
   };
@@ -1079,6 +1395,12 @@ export const SettingsPage = (): JSX.Element => {
     setSavingUser(true);
     setError(null);
 
+    if (!userForm.id && isPasswordHintTooSimilar(userForm.password, userForm.passwordHint)) {
+      setError("A dica não pode ser igual ou muito parecida com a senha.");
+      setSavingUser(false);
+      return;
+    }
+
     try {
       if (userForm.id) {
         await api.users.update({
@@ -1086,6 +1408,7 @@ export const SettingsPage = (): JSX.Element => {
           data: {
             name: userForm.name,
             username: userForm.username,
+            passwordHint: userForm.passwordHint,
             role: userForm.role,
             status: userForm.status,
             allowRevealSecrets: userForm.allowRevealSecrets,
@@ -1098,6 +1421,7 @@ export const SettingsPage = (): JSX.Element => {
           username: userForm.username,
           password: userForm.password,
           confirmPassword: userForm.confirmPassword,
+          passwordHint: userForm.passwordHint,
           role: userForm.role,
           status: userForm.status,
           allowRevealSecrets: userForm.allowRevealSecrets,
@@ -1192,10 +1516,20 @@ export const SettingsPage = (): JSX.Element => {
       ? String(cloudSyncForm.syncIntervalSeconds)
       : "custom";
   const cloudCanUseWorkspace = Boolean(
-    cloudSyncSettings?.hasSession && (cloudSyncForm.workspaceId || cloudSyncSettings?.workspaceId)
+    cloudSyncSettings?.hasSession &&
+    !cloudSyncSettings.currentUser?.mustChangePassword &&
+    (cloudSyncForm.workspaceId || cloudSyncSettings?.workspaceId)
   );
   const cloudCanManageUsers =
-    cloudSyncSettings?.workspaceRole === "owner" || cloudSyncSettings?.workspaceRole === "admin";
+    !cloudSyncSettings?.currentUser?.mustChangePassword &&
+    (cloudSyncSettings?.workspaceRole === "owner" || cloudSyncSettings?.workspaceRole === "admin");
+  const cloudEditableRoles: CloudRole[] =
+    cloudSyncSettings?.workspaceRole === "owner"
+      ? ["owner", "admin", "manager", "operator", "viewer"]
+      : ["manager", "operator", "viewer"];
+  const cloudMemberRemovalExpected = cloudMemberRemoval
+    ? getCloudMemberConfirmation(cloudMemberRemoval.member)
+    : "";
 
   return (
     <div className="space-y-6">
@@ -1257,6 +1591,9 @@ export const SettingsPage = (): JSX.Element => {
                     <td className="px-4 py-3">
                       <div className="font-semibold text-white">{user.name}</div>
                       <div className="mt-1 font-mono text-xs text-slate-500">{user.username}</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        Dica: {user.passwordHint ? "cadastrada" : "não cadastrada"}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <Badge tone={user.role === "admin" ? "cyan" : user.role === "operator" ? "purple" : "neutral"}>
@@ -1574,6 +1911,57 @@ export const SettingsPage = (): JSX.Element => {
             </div>
           </div>
 
+          {cloudSyncSettings?.currentUser?.mustChangePassword && (
+            <div className="rounded-lg border border-warning/35 bg-warning/10 p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-amber-200">
+                <KeyRound size={16} />
+                Troca de senha cloud obrigatória
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">Senha temporária atual</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    type="password"
+                    value={cloudPasswordForm.currentPassword}
+                    autoComplete="current-password"
+                    onChange={(event) =>
+                      setCloudPasswordForm({ ...cloudPasswordForm, currentPassword: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">Nova senha cloud</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    type="password"
+                    value={cloudPasswordForm.password}
+                    autoComplete="new-password"
+                    onChange={(event) => setCloudPasswordForm({ ...cloudPasswordForm, password: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-400">Confirmar nova senha</span>
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    type="password"
+                    value={cloudPasswordForm.confirmPassword}
+                    autoComplete="new-password"
+                    onChange={(event) =>
+                      setCloudPasswordForm({ ...cloudPasswordForm, confirmPassword: event.target.value })
+                    }
+                  />
+                </label>
+              </div>
+              <div className="mt-3">
+                <Button variant="primary" disabled={cloudBusy !== null} onClick={() => void changeCloudPassword()}>
+                  <KeyRound size={16} />
+                  {cloudBusy === "password" ? "Alterando..." : "Alterar senha cloud"}
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-2">
             <Button variant="primary" disabled={cloudBusy !== null} onClick={() => void saveCloudSyncSettings()}>
               <Save size={16} />
@@ -1644,9 +2032,20 @@ export const SettingsPage = (): JSX.Element => {
 
           {cloudCanManageUsers && (
             <div className="rounded-lg border border-line bg-panelSoft p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-sm font-semibold text-white">Usuários do workspace</div>
-                <Badge tone="cyan">{cloudMembers.length} membro(s)</Badge>
+              <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-white">Usuários do Workspace</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    Contas cloud do workspace compartilhado. Usuários locais continuam na aba Usuários e Acesso.
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge tone="cyan">{cloudMembers.length} membro(s)</Badge>
+                  <Button size="sm" variant="ghost" disabled={cloudBusy !== null} onClick={() => void refreshCloudSyncSettings()}>
+                    <RefreshCw size={14} />
+                    Atualizar
+                  </Button>
+                </div>
               </div>
 
               <div className="grid gap-3 md:grid-cols-5">
@@ -1668,7 +2067,7 @@ export const SettingsPage = (): JSX.Element => {
                   />
                 </label>
                 <label className="space-y-2">
-                  <span className="text-xs font-semibold text-slate-400">Usuário</span>
+                  <span className="text-xs font-semibold text-slate-400">Username</span>
                   <input
                     className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                     value={cloudInviteForm.username}
@@ -1677,7 +2076,7 @@ export const SettingsPage = (): JSX.Element => {
                   />
                 </label>
                 <label className="space-y-2">
-                  <span className="text-xs font-semibold text-slate-400">Senha inicial</span>
+                  <span className="text-xs font-semibold text-slate-400">Senha temporária</span>
                   <input
                     className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                     type="password"
@@ -1708,94 +2107,122 @@ export const SettingsPage = (): JSX.Element => {
               <div className="mt-3">
                 <Button variant="primary" disabled={cloudBusy !== null} onClick={() => void inviteCloudUser()}>
                   <UserPlus size={16} />
-                  {cloudBusy === "inviting" ? "Criando..." : "Criar colaborador"}
+                  {cloudBusy === "inviting" ? "Criando..." : "Criar colaborador cloud"}
                 </Button>
               </div>
 
               <div className="mt-4 overflow-x-auto rounded-lg border border-line">
-                <table className="w-full border-collapse text-left text-sm">
+                <table className="w-full min-w-[1080px] border-collapse text-left text-sm">
                   <thead className="bg-panel text-xs uppercase tracking-[0.12em] text-slate-500">
                     <tr>
-                      <th className="px-4 py-3">Usuário</th>
+                      <th className="px-4 py-3">Membro</th>
                       <th className="px-4 py-3">Papel</th>
                       <th className="px-4 py-3">Status</th>
                       <th className="px-4 py-3">Criado em</th>
+                      <th className="px-4 py-3">Último login cloud</th>
+                      <th className="px-4 py-3">Última atividade</th>
+                      <th className="px-4 py-3">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line bg-panel/40">
-                    {cloudMembers.map((member) => (
-                      <tr key={member.id} className="hover:bg-slate-900/45">
-                        <td className="px-4 py-3">
-                          <div className="font-semibold text-white">{member.name}</div>
-                          <div className="mt-1 font-mono text-xs text-slate-500">
-                            {member.email ?? member.username ?? member.id}
-                          </div>
+                    {cloudMembers.length === 0 && (
+                      <tr>
+                        <td className="px-4 py-6 text-sm text-slate-400" colSpan={7}>
+                          Nenhum membro cloud carregado para este workspace.
                         </td>
-                        <td className="px-4 py-3">
-                          {member.role === "owner" ? (
-                            <Badge tone="cyan">owner</Badge>
-                          ) : (
-                            <select
-                              className="focus-ring h-9 rounded-md border border-line bg-panel px-2 text-xs text-white"
-                              value={member.role}
-                              disabled={cloudBusy !== null}
-                              onChange={(event) =>
-                                void api.cloudSync
-                                  .updateMember({
-                                    userId: member.id,
-                                    role: event.target.value as Exclude<CloudRole, "owner">,
-                                    status: member.status
-                                  })
-                                  .then(refreshCloudSyncSettings)
-                                  .catch((updateError: unknown) =>
-                                    setCloudResult(
-                                      updateError instanceof Error
-                                        ? updateError.message
-                                        : "Falha ao atualizar membro."
-                                    )
-                                  )
-                              }
-                            >
-                              <option value="admin">admin</option>
-                              <option value="manager">manager</option>
-                              <option value="operator">operator</option>
-                              <option value="viewer">viewer</option>
-                            </select>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {member.role === "owner" ? (
-                            <Badge tone={member.status === "active" ? "success" : "neutral"}>{member.status}</Badge>
-                          ) : (
-                            <select
-                              className="focus-ring h-9 rounded-md border border-line bg-panel px-2 text-xs text-white"
-                              value={member.status}
-                              disabled={cloudBusy !== null}
-                              onChange={(event) =>
-                                void api.cloudSync
-                                  .updateMember({
-                                    userId: member.id,
-                                    role: member.role as Exclude<CloudRole, "owner">,
-                                    status: event.target.value as "active" | "disabled"
-                                  })
-                                  .then(refreshCloudSyncSettings)
-                                  .catch((updateError: unknown) =>
-                                    setCloudResult(
-                                      updateError instanceof Error
-                                        ? updateError.message
-                                        : "Falha ao atualizar membro."
-                                    )
-                                  )
-                              }
-                            >
-                              <option value="active">active</option>
-                              <option value="disabled">disabled</option>
-                            </select>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-slate-400">{formatDateTime(member.createdAt)}</td>
                       </tr>
-                    ))}
+                    )}
+                    {cloudMembers.map((member) => {
+                      const adminProtected =
+                        cloudSyncSettings?.workspaceRole === "admin" &&
+                        (member.role === "owner" || member.role === "admin");
+                      const isCurrentCloudUser = member.id === cloudSyncSettings?.currentUser?.id;
+                      return (
+                        <tr key={member.id} className="hover:bg-slate-900/45">
+                          <td className="px-4 py-3">
+                            <div className="font-semibold text-white">{member.name}</div>
+                            <div className="mt-1 font-mono text-xs text-slate-500">
+                              {member.email ?? "sem e-mail"}
+                            </div>
+                            <div className="mt-1 font-mono text-xs text-slate-500">
+                              {member.username ?? "sem username"} · {member.id.slice(0, 8)}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge tone={cloudRoleTone(member.role)}>{cloudRoleLabels[member.role]}</Badge>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge tone={member.status === "active" ? "success" : "neutral"}>
+                              {statusLabels[member.status]}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 text-slate-400">{formatDateTime(member.createdAt)}</td>
+                          <td className="px-4 py-3 text-slate-400">{formatDateTime(member.lastLoginAt)}</td>
+                          <td className="px-4 py-3 text-slate-400">{formatDateTime(member.lastActivityAt)}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={cloudBusy !== null || adminProtected}
+                                onClick={() => openCloudMemberEdit(member)}
+                              >
+                                <Edit3 size={14} />
+                                Editar
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant={member.status === "active" ? "danger" : "secondary"}
+                                disabled={cloudBusy !== null || adminProtected}
+                                onClick={() =>
+                                  setCloudMemberStatusAction({
+                                    member,
+                                    nextStatus: member.status === "active" ? "disabled" : "active"
+                                  })
+                                }
+                              >
+                                {member.status === "active" ? <UserX size={14} /> : <UserCheck size={14} />}
+                                {member.status === "active" ? "Desativar" : "Reativar"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={cloudBusy !== null || adminProtected}
+                                onClick={() =>
+                                  setCloudMemberPasswordReset({
+                                    member,
+                                    temporaryPassword: "",
+                                    confirmPassword: "",
+                                    mustChangePassword: true
+                                  })
+                                }
+                              >
+                                <KeyRound size={14} />
+                                Resetar senha cloud
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="danger"
+                                disabled={cloudBusy !== null || adminProtected || isCurrentCloudUser}
+                                onClick={() => setCloudMemberRemoval({ member, confirmation: "" })}
+                              >
+                                <Trash2 size={14} />
+                                Remover do workspace
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={cloudBusy !== null || adminProtected}
+                                onClick={() => void openCloudMemberAudit(member)}
+                              >
+                                <History size={14} />
+                                Auditoria
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2417,6 +2844,285 @@ export const SettingsPage = (): JSX.Element => {
 
       </div>
 
+      {cloudMemberEdit && (
+        <WorkspaceMemberModal
+          titleId="cloud-member-edit-title"
+          panelClassName="w-full max-w-2xl"
+          onClose={() => setCloudMemberEdit(null)}
+        >
+            <div className="flex items-center justify-between border-b border-line p-5">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">Editar membro cloud</div>
+                <h2 id="cloud-member-edit-title" className="mt-1 text-lg font-bold text-white">
+                  Editar membro do workspace
+                </h2>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={() => setCloudMemberEdit(null)}>
+                  Cancelar
+                </Button>
+                <Button variant="primary" disabled={cloudBusy !== null} onClick={() => void saveCloudMemberEdit()}>
+                  {cloudBusy === "memberSaving" ? "Salvando..." : "Salvar"}
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid gap-4 p-5 md:grid-cols-2">
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Nome</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={cloudMemberEdit.name}
+                  data-autofocus="true"
+                  onChange={(event) => setCloudMemberEdit({ ...cloudMemberEdit, name: event.target.value })}
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">E-mail</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={cloudMemberEdit.email}
+                  autoComplete="off"
+                  onChange={(event) => setCloudMemberEdit({ ...cloudMemberEdit, email: event.target.value })}
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Username</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={cloudMemberEdit.username}
+                  autoComplete="off"
+                  onChange={(event) => setCloudMemberEdit({ ...cloudMemberEdit, username: event.target.value })}
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Papel</span>
+                <select
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={cloudMemberEdit.role}
+                  onChange={(event) => setCloudMemberEdit({ ...cloudMemberEdit, role: event.target.value as CloudRole })}
+                >
+                  {cloudEditableRoles.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Status</span>
+                <select
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={cloudMemberEdit.status}
+                  onChange={(event) =>
+                    setCloudMemberEdit({ ...cloudMemberEdit, status: event.target.value as UserStatus })
+                  }
+                >
+                  <option value="active">active</option>
+                  <option value="disabled">disabled</option>
+                </select>
+              </label>
+            </div>
+        </WorkspaceMemberModal>
+      )}
+
+      {cloudMemberStatusAction && (
+        <WorkspaceMemberModal
+          titleId="cloud-member-status-title"
+          panelClassName="w-full max-w-md"
+          onClose={() => setCloudMemberStatusAction(null)}
+        >
+            <div className="border-b border-line p-5">
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">Confirmar status cloud</div>
+              <h2 id="cloud-member-status-title" className="mt-1 text-lg font-bold text-white">
+                {cloudMemberStatusAction.member.name}
+              </h2>
+            </div>
+            <div className="space-y-4 p-5">
+              <p className="text-sm leading-6 text-slate-300">
+                {cloudMemberStatusAction.nextStatus === "disabled"
+                  ? "Desativar este usuário cloud bloqueia o login cloud dele, mas mantém histórico e auditoria."
+                  : "Reativar este usuário cloud libera novamente o login cloud dele neste workspace."}
+              </p>
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" data-autofocus="true" onClick={() => setCloudMemberStatusAction(null)}>
+                  Cancelar
+                </Button>
+                <Button
+                  variant={cloudMemberStatusAction.nextStatus === "disabled" ? "danger" : "primary"}
+                  disabled={cloudBusy !== null}
+                  onClick={() => void confirmCloudMemberStatusAction()}
+                >
+                  {cloudBusy === "memberStatus"
+                    ? "Aplicando..."
+                    : cloudMemberStatusAction.nextStatus === "disabled"
+                      ? "Desativar"
+                      : "Reativar"}
+                </Button>
+              </div>
+            </div>
+        </WorkspaceMemberModal>
+      )}
+
+      {cloudMemberPasswordReset && (
+        <WorkspaceMemberModal
+          titleId="cloud-member-password-title"
+          panelClassName="w-full max-w-md"
+          onClose={() => setCloudMemberPasswordReset(null)}
+        >
+            <div className="border-b border-line p-5">
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">Resetar senha cloud</div>
+              <h2 id="cloud-member-password-title" className="mt-1 text-lg font-bold text-white">
+                {cloudMemberPasswordReset.member.name}
+              </h2>
+            </div>
+            <div className="space-y-4 p-5">
+              <label className="block space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Nova senha temporária</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  type="password"
+                  value={cloudMemberPasswordReset.temporaryPassword}
+                  autoComplete="new-password"
+                  data-autofocus="true"
+                  onChange={(event) =>
+                    setCloudMemberPasswordReset({
+                      ...cloudMemberPasswordReset,
+                      temporaryPassword: event.target.value
+                    })
+                  }
+                />
+              </label>
+              <label className="block space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Confirmar senha</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  type="password"
+                  value={cloudMemberPasswordReset.confirmPassword}
+                  autoComplete="new-password"
+                  onChange={(event) =>
+                    setCloudMemberPasswordReset({
+                      ...cloudMemberPasswordReset,
+                      confirmPassword: event.target.value
+                    })
+                  }
+                />
+              </label>
+              <label className="flex items-center justify-between rounded-lg border border-line bg-panelSoft p-3">
+                <span className="text-sm font-semibold text-white">Exigir troca no próximo login</span>
+                <input
+                  className="h-5 w-5 accent-cyan"
+                  type="checkbox"
+                  checked={cloudMemberPasswordReset.mustChangePassword}
+                  onChange={(event) =>
+                    setCloudMemberPasswordReset({
+                      ...cloudMemberPasswordReset,
+                      mustChangePassword: event.target.checked
+                    })
+                  }
+                />
+              </label>
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => setCloudMemberPasswordReset(null)}>
+                  Cancelar
+                </Button>
+                <Button variant="primary" disabled={cloudBusy !== null} onClick={() => void resetCloudMemberPassword()}>
+                  {cloudBusy === "memberPassword" ? "Resetando..." : "Resetar senha cloud"}
+                </Button>
+              </div>
+            </div>
+        </WorkspaceMemberModal>
+      )}
+
+      {cloudMemberRemoval && (
+        <WorkspaceMemberModal
+          titleId="cloud-member-removal-title"
+          panelClassName="w-full max-w-lg"
+          onClose={() => setCloudMemberRemoval(null)}
+        >
+            <div className="border-b border-line p-5">
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-red-300">Remover membro cloud</div>
+              <h2 id="cloud-member-removal-title" className="mt-1 text-lg font-bold text-white">
+                {cloudMemberRemoval.member.name}
+              </h2>
+            </div>
+            <div className="space-y-4 p-5">
+              <p className="text-sm leading-6 text-slate-300">
+                Remover este usuário do workspace? Ele perderá acesso ao workspace HzdKyx GameMarket, mas o histórico de ações será preservado.
+              </p>
+              <label className="block space-y-2">
+                <span className="text-xs font-semibold text-slate-400">
+                  Digite {cloudMemberRemovalExpected} para confirmar
+                </span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={cloudMemberRemoval.confirmation}
+                  data-autofocus="true"
+                  onChange={(event) =>
+                    setCloudMemberRemoval({ ...cloudMemberRemoval, confirmation: event.target.value })
+                  }
+                />
+              </label>
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => setCloudMemberRemoval(null)}>
+                  Cancelar
+                </Button>
+                <Button
+                  variant="danger"
+                  disabled={cloudBusy !== null || cloudMemberRemoval.confirmation !== cloudMemberRemovalExpected}
+                  onClick={() => void removeCloudMember()}
+                >
+                  {cloudBusy === "memberRemoving" ? "Removendo..." : "Remover do workspace"}
+                </Button>
+              </div>
+            </div>
+        </WorkspaceMemberModal>
+      )}
+
+      {cloudMemberAudit && (
+        <WorkspaceMemberModal
+          titleId="cloud-member-audit-title"
+          panelClassName="w-full max-w-3xl"
+          onClose={() => setCloudMemberAudit(null)}
+        >
+            <div className="flex items-center justify-between border-b border-line p-5">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">Auditoria do membro</div>
+                <h2 id="cloud-member-audit-title" className="mt-1 text-lg font-bold text-white">
+                  {cloudMemberAudit.member.name}
+                </h2>
+              </div>
+              <Button variant="ghost" data-autofocus="true" onClick={() => setCloudMemberAudit(null)}>
+                Fechar
+              </Button>
+            </div>
+            <div className="max-h-[60vh] overflow-y-auto p-5">
+              {cloudMemberAudit.logs.length === 0 ? (
+                <div className="rounded-lg border border-line bg-panelSoft p-4 text-sm text-slate-400">
+                  Nenhum evento de auditoria encontrado para este membro.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {cloudMemberAudit.logs.map((log) => (
+                    <div key={log.id} className="rounded-lg border border-line bg-panelSoft p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Badge tone="cyan">{log.action}</Badge>
+                        <span className="text-xs text-slate-500">{formatDateTime(log.createdAt)}</span>
+                      </div>
+                      <div className="mt-2 grid gap-2 text-xs text-slate-400 md:grid-cols-2">
+                        <div>Actor: {log.actorUserId ?? "-"}</div>
+                        <div>Target: {String(log.metadata.targetCloudUserId ?? log.entityId ?? "-")}</div>
+                        <div>Campos: {Array.isArray(log.metadata.changedFields) ? log.metadata.changedFields.join(", ") : "-"}</div>
+                        <div>Entidade: {log.entityType ?? "-"}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+        </WorkspaceMemberModal>
+      )}
+
       {userForm && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-6">
           <div className="modal-panel w-full max-w-2xl rounded-lg border border-line bg-background shadow-premium">
@@ -2452,6 +3158,16 @@ export const SettingsPage = (): JSX.Element => {
                   className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
                   value={userForm.username}
                   onChange={(event) => setUserForm({ ...userForm, username: event.target.value })}
+                />
+              </label>
+              <label className="space-y-2 md:col-span-2">
+                <span className="text-xs font-semibold text-slate-400">Dica de senha</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={userForm.passwordHint}
+                  maxLength={120}
+                  placeholder="Ex.: nome do cachorro + ano"
+                  onChange={(event) => setUserForm({ ...userForm, passwordHint: event.target.value })}
                 />
               </label>
               {!userForm.id && (

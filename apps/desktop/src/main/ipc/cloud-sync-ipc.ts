@@ -1,9 +1,13 @@
 import type { IpcMain } from "electron";
 import {
   cloudSyncBootstrapOwnerInputSchema,
+  cloudSyncChangePasswordInputSchema,
   cloudSyncEmptyInputSchema,
   cloudSyncInviteUserInputSchema,
   cloudSyncLoginInputSchema,
+  cloudSyncMemberActionInputSchema,
+  cloudSyncRemoveMemberInputSchema,
+  cloudSyncResetMemberPasswordInputSchema,
   cloudSyncSettingsUpdateInputSchema,
   cloudSyncUpdateMemberInputSchema
 } from "../../shared/contracts";
@@ -52,6 +56,13 @@ export const registerCloudSyncIpc = (ipcMain: IpcMain): void => {
     return result;
   });
 
+  ipcMain.handle("cloudSync:changePassword", async (_event, payload: unknown) => {
+    requireSession();
+    const result = await cloudSyncService.changePassword(cloudSyncChangePasswordInputSchema.parse(payload));
+    cloudSyncPollingService.refresh();
+    return result;
+  });
+
   ipcMain.handle("cloudSync:refreshAccount", async (_event, payload: unknown) => {
     requireSession();
     cloudSyncEmptyInputSchema.parse(payload ?? {});
@@ -59,6 +70,12 @@ export const registerCloudSyncIpc = (ipcMain: IpcMain): void => {
   });
 
   ipcMain.handle("cloudSync:listMembers", (_event, payload: unknown) => {
+    requireSession();
+    cloudSyncEmptyInputSchema.parse(payload ?? {});
+    return cloudSyncService.listMembers();
+  });
+
+  ipcMain.handle("cloudSync:listWorkspaceMembers", (_event, payload: unknown) => {
     requireSession();
     cloudSyncEmptyInputSchema.parse(payload ?? {});
     return cloudSyncService.listMembers();
@@ -72,6 +89,36 @@ export const registerCloudSyncIpc = (ipcMain: IpcMain): void => {
   ipcMain.handle("cloudSync:updateMember", (_event, payload: unknown) => {
     requireSession();
     return cloudSyncService.updateMember(cloudSyncUpdateMemberInputSchema.parse(payload));
+  });
+
+  ipcMain.handle("cloudSync:updateWorkspaceMember", (_event, payload: unknown) => {
+    requireSession();
+    return cloudSyncService.updateMember(cloudSyncUpdateMemberInputSchema.parse(payload));
+  });
+
+  ipcMain.handle("cloudSync:disableWorkspaceMember", (_event, payload: unknown) => {
+    requireSession();
+    return cloudSyncService.disableWorkspaceMember(cloudSyncMemberActionInputSchema.parse(payload));
+  });
+
+  ipcMain.handle("cloudSync:enableWorkspaceMember", (_event, payload: unknown) => {
+    requireSession();
+    return cloudSyncService.enableWorkspaceMember(cloudSyncMemberActionInputSchema.parse(payload));
+  });
+
+  ipcMain.handle("cloudSync:removeWorkspaceMember", (_event, payload: unknown) => {
+    requireSession();
+    return cloudSyncService.removeWorkspaceMember(cloudSyncRemoveMemberInputSchema.parse(payload));
+  });
+
+  ipcMain.handle("cloudSync:resetWorkspaceMemberPassword", (_event, payload: unknown) => {
+    requireSession();
+    return cloudSyncService.resetWorkspaceMemberPassword(cloudSyncResetMemberPasswordInputSchema.parse(payload));
+  });
+
+  ipcMain.handle("cloudSync:listWorkspaceMemberAudit", (_event, payload: unknown) => {
+    requireSession();
+    return cloudSyncService.listWorkspaceMemberAudit(cloudSyncMemberActionInputSchema.parse(payload));
   });
 
   ipcMain.handle("cloudSync:publishLocalData", async (_event, payload: unknown) => {

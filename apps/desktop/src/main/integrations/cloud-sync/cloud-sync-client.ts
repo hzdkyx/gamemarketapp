@@ -5,11 +5,16 @@ import {
   userStatusSchema
 } from "../../../shared/contracts";
 import type {
+  CloudAuditLogView,
   CloudSyncBootstrapOwnerInput,
+  CloudSyncChangePasswordInput,
   CloudSyncEntityType,
   CloudSyncEntityView,
   CloudSyncInviteUserInput,
   CloudSyncLoginInput,
+  CloudSyncMemberActionInput,
+  CloudSyncRemoveMemberInput,
+  CloudSyncResetMemberPasswordInput,
   CloudSyncUpdateMemberInput,
   CloudUserView,
   CloudWorkspaceMemberView,
@@ -73,6 +78,9 @@ const userSchema = z.object({
   username: z.string().nullable(),
   role: cloudRoleSchema,
   status: userStatusSchema,
+  mustChangePassword: z.boolean().default(false),
+  lastLoginAt: z.string().nullable().default(null),
+  lastActivityAt: z.string().nullable().default(null),
   createdAt: z.string(),
   updatedAt: z.string()
 });
@@ -88,6 +96,17 @@ const workspaceSchema = z.object({
 const memberSchema = userSchema.extend({
   membershipId: z.string(),
   workspaceId: z.string()
+});
+
+const auditLogSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string().nullable(),
+  actorUserId: z.string().nullable(),
+  action: z.string(),
+  entityType: z.string().nullable(),
+  entityId: z.string().nullable(),
+  metadata: z.record(z.string(), z.unknown()),
+  createdAt: z.string()
 });
 
 const syncEntitySchema = z.object({
@@ -124,6 +143,11 @@ const membersResponseSchema = z.object({
 const memberResponseSchema = z.object({
   ok: z.literal(true),
   member: memberSchema
+});
+
+const auditLogsResponseSchema = z.object({
+  ok: z.literal(true),
+  auditLogs: z.array(auditLogSchema)
 });
 
 const pullResponseSchema = z.object({
@@ -182,6 +206,8 @@ const toSafeJson = async (response: Response): Promise<unknown> => {
   }
 };
 
+const isRouteNotFound = (message: string): boolean => /route\s+\w+:.*not found/i.test(message);
+
 export class CloudSyncClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -218,6 +244,11 @@ export class CloudSyncClient {
         json && typeof json === "object" && "message" in json && typeof json.message === "string"
           ? json.message
           : `Cloud sync HTTP ${response.status}`;
+      if (response.status === 404 && path.includes("/reset-password") && isRouteNotFound(message)) {
+        throw new Error(
+          "Não foi possível resetar a senha cloud. O backend pode estar desatualizado ou a rota não está disponível. Atualize o backend e tente novamente."
+        );
+      }
       throw new Error(`Cloud sync HTTP ${response.status}: ${message}`);
     }
     return json;
@@ -261,6 +292,16 @@ export class CloudSyncClient {
     return parsed;
   }
 
+  async changePassword(input: CloudSyncChangePasswordInput): Promise<Omit<CloudAuthResponse, "token">> {
+    const parsed = meResponseSchema.parse(
+      await this.request("/api/auth/change-password", {
+        method: "POST",
+        body: JSON.stringify(input)
+      })
+    );
+    return parsed;
+  }
+
   async listMembers(workspaceId: string): Promise<CloudWorkspaceMemberView[]> {
     const parsed = membersResponseSchema.parse(
       await this.request(`/api/workspaces/${encodeURIComponent(workspaceId)}/members`, { method: "GET" })
@@ -279,13 +320,85 @@ export class CloudSyncClient {
   }
 
   async updateMember(workspaceId: string, input: CloudSyncUpdateMemberInput): Promise<CloudWorkspaceMemberView> {
+    const { userId, ...payload } = input;
     const parsed = memberResponseSchema.parse(
-      await this.request(`/api/workspaces/${encodeURIComponent(workspaceId)}/members`, {
-        method: "PATCH",
-        body: JSON.stringify(input)
-      })
+      await this.request(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(payload)
+        }
+      )
     );
     return parsed.member as CloudWorkspaceMemberView;
+  }
+
+  async disableMember(workspaceId: string, input: CloudSyncMemberActionInput): Promise<CloudWorkspaceMemberView> {
+    const parsed = memberResponseSchema.parse(
+      await this.request(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(input.userId)}/disable`,
+        {
+          method: "POST",
+          body: "{}"
+        }
+      )
+    );
+    return parsed.member as CloudWorkspaceMemberView;
+  }
+
+  async enableMember(workspaceId: string, input: CloudSyncMemberActionInput): Promise<CloudWorkspaceMemberView> {
+    const parsed = memberResponseSchema.parse(
+      await this.request(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(input.userId)}/enable`,
+        {
+          method: "POST",
+          body: "{}"
+        }
+      )
+    );
+    return parsed.member as CloudWorkspaceMemberView;
+  }
+
+  async removeMember(workspaceId: string, input: CloudSyncRemoveMemberInput): Promise<CloudWorkspaceMemberView> {
+    const parsed = memberResponseSchema.parse(
+      await this.request(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(input.userId)}`,
+        {
+          method: "DELETE",
+          body: JSON.stringify({ confirmation: input.confirmation })
+        }
+      )
+    );
+    return parsed.member as CloudWorkspaceMemberView;
+  }
+
+  async resetMemberPassword(
+    workspaceId: string,
+    input: CloudSyncResetMemberPasswordInput
+  ): Promise<CloudWorkspaceMemberView> {
+    const parsed = memberResponseSchema.parse(
+      await this.request(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(input.userId)}/reset-password`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            temporaryPassword: input.temporaryPassword,
+            requireChange: input.mustChangePassword
+          })
+        }
+      )
+    );
+    return parsed.member as CloudWorkspaceMemberView;
+  }
+
+  async listMemberAudit(workspaceId: string, userId: string): Promise<CloudAuditLogView[]> {
+    const parsed = auditLogsResponseSchema.parse(
+      await this.request(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}/audit`,
+        { method: "GET" }
+      )
+    );
+    return parsed.auditLogs as CloudAuditLogView[];
   }
 
   async bootstrap(workspaceId: string): Promise<CloudSyncPullResponse> {

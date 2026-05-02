@@ -16,6 +16,8 @@ export const cloudSyncStatusValues = ["synced", "conflict"] as const;
 const identifierSchema = z.string().trim().min(3).max(160);
 const passwordSchema = z.string().min(8).max(200);
 const nullableDateTimeSchema = z.string().trim().datetime().nullable().optional();
+const nullableEmailSchema = z.string().trim().email().max(160).nullable().optional();
+const nullableUsernameSchema = z.string().trim().min(3).max(80).nullable().optional();
 
 export const cloudRoleSchema = z.enum(cloudRoleValues);
 export const cloudUserStatusSchema = z.enum(cloudUserStatusValues);
@@ -28,11 +30,23 @@ export const cloudLoginInputSchema = z
   })
   .strict();
 
+export const cloudChangePasswordInputSchema = z
+  .object({
+    currentPassword: passwordSchema,
+    password: passwordSchema,
+    confirmPassword: passwordSchema,
+  })
+  .strict()
+  .refine((input) => input.password === input.confirmPassword, {
+    message: "As senhas não conferem.",
+    path: ["confirmPassword"],
+  });
+
 export const cloudBootstrapOwnerInputSchema = z
   .object({
     name: z.string().trim().min(2).max(120),
-    email: z.string().trim().email().max(160).optional(),
-    username: z.string().trim().min(3).max(80).optional(),
+    email: nullableEmailSchema,
+    username: nullableUsernameSchema,
     password: passwordSchema,
     workspaceName: z.string().trim().min(2).max(120).default("HzdKyx GameMarket"),
   })
@@ -49,12 +63,18 @@ export const cloudCreateWorkspaceInputSchema = z
   .strict();
 
 export const cloudWorkspaceParamsSchema = z.object({ id: z.string().trim().min(1) }).strict();
+export const cloudWorkspaceMemberParamsSchema = z
+  .object({
+    id: z.string().trim().min(1),
+    memberId: z.string().trim().min(1),
+  })
+  .strict();
 
 export const cloudInviteUserInputSchema = z
   .object({
     name: z.string().trim().min(2).max(120),
-    email: z.string().trim().email().max(160).optional(),
-    username: z.string().trim().min(3).max(80).optional(),
+    email: nullableEmailSchema,
+    username: nullableUsernameSchema,
     password: passwordSchema,
     role: cloudRoleSchema.exclude(["owner"]).default("manager"),
   })
@@ -64,13 +84,76 @@ export const cloudInviteUserInputSchema = z
     path: ["identifier"],
   });
 
-export const cloudUpdateMemberInputSchema = z
+const cloudWorkspaceMemberUpdateFieldsSchema = z
   .object({
-    userId: z.string().trim().min(1),
-    role: cloudRoleSchema.exclude(["owner"]),
-    status: cloudUserStatusSchema.default("active"),
+    name: z.string().trim().min(2).max(120).optional(),
+    email: nullableEmailSchema,
+    username: nullableUsernameSchema,
+    role: cloudRoleSchema.optional(),
+    status: cloudUserStatusSchema.optional(),
   })
   .strict();
+
+const hasWorkspaceMemberUpdates = (input: {
+  name?: string;
+  email?: string | null;
+  username?: string | null;
+  role?: CloudRole;
+  status?: CloudUserStatus;
+}): boolean => Object.values(input).some((value) => value !== undefined);
+
+export const cloudWorkspaceMemberUpdateInputSchema = cloudWorkspaceMemberUpdateFieldsSchema
+  .refine((input) => Object.values(input).some((value) => value !== undefined), {
+    message: "Informe pelo menos um campo para atualizar.",
+  });
+
+export const cloudUpdateMemberInputSchema = cloudWorkspaceMemberUpdateFieldsSchema
+  .extend({
+    userId: z.string().trim().min(1),
+  })
+  .refine(
+    (input) =>
+      hasWorkspaceMemberUpdates({
+        name: input.name,
+        email: input.email,
+        username: input.username,
+        role: input.role,
+        status: input.status,
+      }),
+    {
+      message: "Informe pelo menos um campo para atualizar.",
+    },
+  );
+
+export const cloudRemoveMemberInputSchema = z
+  .object({
+    confirmation: z.string().trim().min(1).max(160).optional(),
+  })
+  .strict()
+  .optional()
+  .default({});
+
+export const cloudResetMemberPasswordInputSchema = z
+  .object({
+    temporaryPassword: passwordSchema,
+    confirmPassword: passwordSchema.optional(),
+    mustChangePassword: z.boolean().optional(),
+    requireChange: z.boolean().optional(),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (input.confirmPassword !== undefined && input.temporaryPassword !== input.confirmPassword) {
+      context.addIssue({
+        code: "custom",
+        message: "As senhas não conferem.",
+        path: ["confirmPassword"],
+      });
+    }
+  })
+  .transform((input) => ({
+    temporaryPassword: input.temporaryPassword,
+    mustChangePassword: input.requireChange ?? input.mustChangePassword ?? true,
+  }));
 
 export const cloudSyncPullQuerySchema = z
   .object({
@@ -123,6 +206,9 @@ export interface CloudUserView {
   username: string | null;
   role: CloudRole;
   status: CloudUserStatus;
+  mustChangePassword: boolean;
+  lastLoginAt: string | null;
+  lastActivityAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -138,6 +224,17 @@ export interface CloudWorkspaceView {
 export interface CloudWorkspaceMemberView extends CloudUserView {
   membershipId: string;
   workspaceId: string;
+}
+
+export interface CloudAuditLogView {
+  id: string;
+  workspaceId: string | null;
+  actorUserId: string | null;
+  action: string;
+  entityType: string | null;
+  entityId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
 }
 
 export interface CloudSessionView {
@@ -179,10 +276,14 @@ export type CloudRole = (typeof cloudRoleValues)[number];
 export type CloudUserStatus = (typeof cloudUserStatusValues)[number];
 export type CloudSyncEntityType = (typeof cloudSyncEntityTypeValues)[number];
 export type CloudLoginInput = z.infer<typeof cloudLoginInputSchema>;
+export type CloudChangePasswordInput = z.infer<typeof cloudChangePasswordInputSchema>;
 export type CloudBootstrapOwnerInput = z.infer<typeof cloudBootstrapOwnerInputSchema>;
 export type CloudCreateWorkspaceInput = z.infer<typeof cloudCreateWorkspaceInputSchema>;
 export type CloudInviteUserInput = z.infer<typeof cloudInviteUserInputSchema>;
 export type CloudUpdateMemberInput = z.infer<typeof cloudUpdateMemberInputSchema>;
+export type CloudWorkspaceMemberUpdateInput = z.infer<typeof cloudWorkspaceMemberUpdateInputSchema>;
+export type CloudRemoveMemberInput = z.infer<typeof cloudRemoveMemberInputSchema>;
+export type CloudResetMemberPasswordInput = z.infer<typeof cloudResetMemberPasswordInputSchema>;
 export type CloudSyncPushInput = z.infer<typeof cloudSyncPushInputSchema>;
 export type CloudSyncEntityChange = z.infer<typeof cloudSyncEntityChangeSchema>;
 export type CloudSyncStatusQuery = z.infer<typeof cloudSyncStatusQuerySchema>;

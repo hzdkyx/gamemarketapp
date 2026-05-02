@@ -1,12 +1,22 @@
 import { getSqliteDatabase } from "../database/database";
-import { toSqliteBoolean, toSqliteDate, toSqliteNullable } from "../database/sqlite-values";
-import type { UserRecord, UserRole, UserStatus } from "../../shared/contracts";
+import {
+  toSqliteBoolean,
+  toSqliteDate,
+  toSqliteNullable,
+} from "../database/sqlite-values";
+import type {
+  LocalRecoveryUserRecord,
+  UserRecord,
+  UserRole,
+  UserStatus,
+} from "../../shared/contracts";
 
 interface UserRow {
   id: string;
   name: string;
   username: string;
   password_hash: string;
+  password_hint: string | null;
   role: UserRole;
   status: UserStatus;
   last_login_at: string | null;
@@ -27,6 +37,7 @@ export interface UserWriteRecord {
   name: string;
   username: string;
   passwordHash: string;
+  passwordHint: string | null;
   role: UserRole;
   status: UserStatus;
   lastLoginAt: string | null;
@@ -43,6 +54,7 @@ interface UserSqliteWriteRecord {
   name: string | null;
   username: string | null;
   passwordHash: string | null;
+  passwordHint: string | null;
   role: string | null;
   status: string | null;
   lastLoginAt: string | null;
@@ -61,7 +73,9 @@ const toSqliteText = (value: unknown): string | null => {
     return null;
   }
 
-  return Buffer.isBuffer(sqliteValue) ? sqliteValue.toString("utf8") : String(sqliteValue);
+  return Buffer.isBuffer(sqliteValue)
+    ? sqliteValue.toString("utf8")
+    : String(sqliteValue);
 };
 
 const toSqliteNumber = (value: unknown): number => {
@@ -83,11 +97,14 @@ const toSqliteNumber = (value: unknown): number => {
   return 0;
 };
 
-export const toSqliteUserWriteRecord = (user: UserWriteRecord): UserSqliteWriteRecord => ({
+export const toSqliteUserWriteRecord = (
+  user: UserWriteRecord,
+): UserSqliteWriteRecord => ({
   id: toSqliteText(user.id),
   name: toSqliteText(user.name),
   username: toSqliteText(user.username),
   passwordHash: toSqliteText(user.passwordHash),
+  passwordHint: toSqliteText(user.passwordHint),
   role: toSqliteText(user.role),
   status: toSqliteText(user.status),
   lastLoginAt: toSqliteDate(user.lastLoginAt),
@@ -96,7 +113,7 @@ export const toSqliteUserWriteRecord = (user: UserWriteRecord): UserSqliteWriteR
   mustChangePassword: toSqliteBoolean(user.mustChangePassword),
   allowRevealSecrets: toSqliteBoolean(user.allowRevealSecrets),
   createdAt: toSqliteDate(user.createdAt),
-  updatedAt: toSqliteDate(user.updatedAt)
+  updatedAt: toSqliteDate(user.updatedAt),
 });
 
 const mapUserRow = (row: UserRow): UserWithPasswordHash => ({
@@ -104,6 +121,7 @@ const mapUserRow = (row: UserRow): UserWithPasswordHash => ({
   name: row.name,
   username: row.username,
   passwordHash: row.password_hash,
+  passwordHint: row.password_hint,
   role: row.role,
   status: row.status,
   lastLoginAt: row.last_login_at,
@@ -112,7 +130,7 @@ const mapUserRow = (row: UserRow): UserWithPasswordHash => ({
   mustChangePassword: Boolean(row.must_change_password),
   allowRevealSecrets: Boolean(row.allow_reveal_secrets),
   createdAt: row.created_at,
-  updatedAt: row.updated_at
+  updatedAt: row.updated_at,
 });
 
 const withoutPasswordHash = (user: UserWithPasswordHash): UserRecord => {
@@ -120,6 +138,7 @@ const withoutPasswordHash = (user: UserWithPasswordHash): UserRecord => {
     id: user.id,
     name: user.name,
     username: user.username,
+    passwordHint: user.passwordHint,
     role: user.role,
     status: user.status,
     lastLoginAt: user.lastLoginAt,
@@ -128,9 +147,25 @@ const withoutPasswordHash = (user: UserWithPasswordHash): UserRecord => {
     mustChangePassword: user.mustChangePassword,
     allowRevealSecrets: user.allowRevealSecrets,
     createdAt: user.createdAt,
-    updatedAt: user.updatedAt
+    updatedAt: user.updatedAt,
   };
 };
+
+const toLocalRecoveryUser = (
+  user: UserWithPasswordHash,
+): LocalRecoveryUserRecord => ({
+  id: user.id,
+  name: user.name,
+  username: user.username,
+  passwordHint: user.passwordHint,
+  role: user.role,
+  status: user.status,
+  lastLoginAt: user.lastLoginAt,
+  failedLoginAttempts: user.failedLoginAttempts,
+  lockedUntil: user.lockedUntil,
+  mustChangePassword: user.mustChangePassword,
+  createdAt: user.createdAt,
+});
 
 const userSelect = `
   SELECT
@@ -138,6 +173,7 @@ const userSelect = `
     name,
     username,
     password_hash,
+    password_hint,
     role,
     status,
     last_login_at,
@@ -153,21 +189,33 @@ const userSelect = `
 export const userRepository = {
   list(): UserRecord[] {
     const db = getSqliteDatabase();
-    const rows = db.prepare(`${userSelect} ORDER BY LOWER(name), LOWER(username)`).all() as UserRow[];
+    const rows = db
+      .prepare(`${userSelect} ORDER BY LOWER(name), LOWER(username)`)
+      .all() as UserRow[];
     return rows.map(mapUserRow).map(withoutPasswordHash);
+  },
+
+  listLocalRecoveryUsers(): LocalRecoveryUserRecord[] {
+    const db = getSqliteDatabase();
+    const rows = db
+      .prepare(`${userSelect} ORDER BY LOWER(name), LOWER(username)`)
+      .all() as UserRow[];
+    return rows.map(mapUserRow).map(toLocalRecoveryUser);
   },
 
   getById(id: string): UserWithPasswordHash | null {
     const db = getSqliteDatabase();
-    const row = db.prepare(`${userSelect} WHERE id = ?`).get(id) as UserRow | undefined;
+    const row = db.prepare(`${userSelect} WHERE id = ?`).get(id) as
+      | UserRow
+      | undefined;
     return row ? mapUserRow(row) : null;
   },
 
   getByUsername(username: string): UserWithPasswordHash | null {
     const db = getSqliteDatabase();
-    const row = db
-      .prepare(`${userSelect} WHERE username = ?`)
-      .get(username) as UserRow | undefined;
+    const row = db.prepare(`${userSelect} WHERE username = ?`).get(username) as
+      | UserRow
+      | undefined;
     return row ? mapUserRow(row) : null;
   },
 
@@ -181,18 +229,20 @@ export const userRepository = {
           WHERE role = 'admin'
             AND status = 'active'
             AND (@exceptUserId IS NULL OR id != @exceptUserId)
-        `
+        `,
       )
-      .get({ exceptUserId: exceptUserId ?? null }) as { total: number } | undefined;
+      .get({ exceptUserId: exceptUserId ?? null }) as
+      | { total: number }
+      | undefined;
 
     return row?.total ?? 0;
   },
 
   hasAnyAdmin(): boolean {
     const db = getSqliteDatabase();
-    const row = db.prepare("SELECT COUNT(*) AS total FROM users WHERE role = 'admin'").get() as
-      | { total: number }
-      | undefined;
+    const row = db
+      .prepare("SELECT COUNT(*) AS total FROM users WHERE role = 'admin'")
+      .get() as { total: number } | undefined;
     return (row?.total ?? 0) > 0;
   },
 
@@ -205,6 +255,7 @@ export const userRepository = {
           name,
           username,
           password_hash,
+          password_hint,
           role,
           status,
           last_login_at,
@@ -220,6 +271,7 @@ export const userRepository = {
           @name,
           @username,
           @passwordHash,
+          @passwordHint,
           @role,
           @status,
           @lastLoginAt,
@@ -230,7 +282,7 @@ export const userRepository = {
           @createdAt,
           @updatedAt
         )
-      `
+      `,
     ).run(toSqliteUserWriteRecord(user));
 
     const created = this.getById(user.id);
@@ -250,6 +302,7 @@ export const userRepository = {
           name = @name,
           username = @username,
           password_hash = @passwordHash,
+          password_hint = @passwordHint,
           role = @role,
           status = @status,
           last_login_at = @lastLoginAt,
@@ -259,7 +312,7 @@ export const userRepository = {
           allow_reveal_secrets = @allowRevealSecrets,
           updated_at = @updatedAt
         WHERE id = @id
-      `
+      `,
     ).run(toSqliteUserWriteRecord(user));
 
     const updated = this.getById(user.id);
@@ -268,5 +321,5 @@ export const userRepository = {
     }
 
     return withoutPasswordHash(updated);
-  }
+  },
 };

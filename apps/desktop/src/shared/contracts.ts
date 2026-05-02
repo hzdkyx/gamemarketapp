@@ -122,6 +122,7 @@ export const eventSeverityValues = [
   "critical",
 ] as const;
 export const eventTypeValues = [
+  "auth.local_password_reset",
   "order.created",
   "order.payment_confirmed",
   "order.awaiting_delivery",
@@ -240,6 +241,7 @@ export const inventorySecretFieldValues = [
 ] as const;
 export const userRoleValues = ["admin", "operator", "viewer"] as const;
 export const userStatusValues = ["active", "disabled"] as const;
+export const LOCAL_RECOVERY_TEMPORARY_PASSWORD = "admin123!" as const;
 export const permissionKeyValues = [
   "canManageUsers",
   "canManageSettings",
@@ -259,6 +261,24 @@ const nullableTextSchema = z.preprocess((value) => {
   return trimmed.length === 0 ? null : trimmed;
 }, z.string().or(z.null()).optional());
 
+const nullableEmailSchema = z.preprocess((value) => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}, z.string().email("Informe um e-mail válido.").max(160).or(z.null()).optional());
+
+const nullableCloudUsernameSchema = z.preprocess((value) => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}, z.string().min(3, "Usuário deve ter pelo menos 3 caracteres.").max(80).or(z.null()).optional());
+
 const requiredTextSchema = z.string().trim().min(1, "Campo obrigatório.");
 const nonNegativeMoneySchema = z.number().finite().nonnegative();
 const nonNegativeIntegerSchema = z.number().int().nonnegative();
@@ -275,6 +295,108 @@ const usernameSchema = z
 const passwordSchema = z
   .string()
   .min(8, "Senha deve ter pelo menos 8 caracteres.");
+const passwordHintSchema = z.preprocess((value) => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}, z.string().max(120, "Dica de senha deve ter no máximo 120 caracteres.").or(z.null()).optional());
+
+const normalizePasswordComparable = (value: string): string =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+const editDistance = (left: string, right: string): number => {
+  const previous = Array.from(
+    { length: right.length + 1 },
+    (_, index) => index,
+  );
+  const current = Array.from({ length: right.length + 1 }, () => 0);
+
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    current[0] = leftIndex;
+
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const cost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      current[rightIndex] = Math.min(
+        (current[rightIndex - 1] ?? 0) + 1,
+        (previous[rightIndex] ?? 0) + 1,
+        (previous[rightIndex - 1] ?? 0) + cost,
+      );
+    }
+
+    for (let index = 0; index < previous.length; index += 1) {
+      previous[index] = current[index] ?? 0;
+    }
+  }
+
+  return previous[right.length] ?? 0;
+};
+
+export const isPasswordHintTooSimilar = (
+  password: string,
+  passwordHint: string | null | undefined,
+): boolean => {
+  if (!passwordHint) {
+    return false;
+  }
+
+  const passwordComparable = normalizePasswordComparable(password);
+  const hintComparable = normalizePasswordComparable(passwordHint);
+
+  if (!passwordComparable || !hintComparable) {
+    return false;
+  }
+
+  if (passwordComparable === hintComparable) {
+    return true;
+  }
+
+  const shorter =
+    passwordComparable.length <= hintComparable.length
+      ? passwordComparable
+      : hintComparable;
+  const longer =
+    passwordComparable.length > hintComparable.length
+      ? passwordComparable
+      : hintComparable;
+
+  if (
+    shorter.length >= 6 &&
+    longer.includes(shorter) &&
+    shorter.length / longer.length >= 0.75
+  ) {
+    return true;
+  }
+
+  const maxLength = Math.max(passwordComparable.length, hintComparable.length);
+  const minLength = Math.min(passwordComparable.length, hintComparable.length);
+  if (minLength < 6 || minLength / maxLength < 0.7) {
+    return false;
+  }
+
+  return (
+    1 - editDistance(passwordComparable, hintComparable) / maxLength >= 0.82
+  );
+};
+
+const validatePasswordHintSafety = (
+  input: { password: string; passwordHint?: string | null | undefined },
+  context: z.RefinementCtx,
+): void => {
+  if (isPasswordHintTooSimilar(input.password, input.passwordHint)) {
+    context.addIssue({
+      code: "custom",
+      path: ["passwordHint"],
+      message: "A dica não pode ser igual ou muito parecida com a senha.",
+    });
+  }
+};
 
 const enumWithDefaultSchema = <T extends readonly [string, ...string[]]>(
   values: T,
@@ -783,12 +905,21 @@ export const cloudSyncSettingsUpdateInputSchema = z
 export const cloudSyncBootstrapOwnerInputSchema = z
   .object({
     name: requiredTextSchema,
-    email: nullableTextSchema,
-    username: nullableTextSchema,
+    email: nullableEmailSchema,
+    username: nullableCloudUsernameSchema,
     password: passwordSchema,
-    workspaceName: z.string().trim().min(2).max(120).default("HzdKyx GameMarket"),
+    workspaceName: z
+      .string()
+      .trim()
+      .min(2)
+      .max(120)
+      .default("HzdKyx GameMarket"),
   })
-  .strict();
+  .strict()
+  .refine((input) => Boolean(input.email || input.username), {
+    message: "Informe e-mail ou usuário.",
+    path: ["identifier"],
+  });
 
 export const cloudSyncLoginInputSchema = z
   .object({
@@ -797,23 +928,88 @@ export const cloudSyncLoginInputSchema = z
   })
   .strict();
 
+export const cloudSyncChangePasswordInputSchema = z
+  .object({
+    currentPassword: passwordSchema,
+    password: passwordSchema,
+    confirmPassword: passwordSchema,
+  })
+  .strict()
+  .refine((input) => input.password === input.confirmPassword, {
+    message: "As senhas não conferem.",
+    path: ["confirmPassword"],
+  });
+
 export const cloudSyncInviteUserInputSchema = z
   .object({
     name: requiredTextSchema,
-    email: nullableTextSchema,
-    username: nullableTextSchema,
+    email: nullableEmailSchema,
+    username: nullableCloudUsernameSchema,
     password: passwordSchema,
     role: cloudRoleSchema.exclude(["owner"]).default("manager"),
   })
-  .strict();
+  .strict()
+  .refine((input) => Boolean(input.email || input.username), {
+    message: "Informe e-mail ou usuário.",
+    path: ["identifier"],
+  });
 
-export const cloudSyncUpdateMemberInputSchema = z
+const cloudSyncMemberUpdateFieldsSchema = z
   .object({
-    userId: idSchema,
-    role: cloudRoleSchema.exclude(["owner"]),
-    status: userStatusSchema.default("active"),
+    name: requiredTextSchema.optional(),
+    email: nullableEmailSchema,
+    username: nullableCloudUsernameSchema,
+    role: cloudRoleSchema.optional(),
+    status: userStatusSchema.optional(),
   })
   .strict();
+
+const hasCloudMemberUpdates = (input: Record<string, unknown>): boolean =>
+  Object.values(input).some((value) => value !== undefined);
+
+export const cloudSyncUpdateMemberInputSchema = cloudSyncMemberUpdateFieldsSchema
+  .extend({
+    userId: idSchema,
+  })
+  .refine(
+    (input) =>
+      hasCloudMemberUpdates({
+        name: input.name,
+        email: input.email,
+        username: input.username,
+        role: input.role,
+        status: input.status,
+      }),
+    {
+      message: "Informe pelo menos um campo para atualizar.",
+    },
+  );
+
+export const cloudSyncMemberActionInputSchema = z
+  .object({
+    userId: idSchema,
+  })
+  .strict();
+
+export const cloudSyncRemoveMemberInputSchema = z
+  .object({
+    userId: idSchema,
+    confirmation: z.string().trim().min(1).max(160),
+  })
+  .strict();
+
+export const cloudSyncResetMemberPasswordInputSchema = z
+  .object({
+    userId: idSchema,
+    temporaryPassword: passwordSchema,
+    confirmPassword: passwordSchema,
+    mustChangePassword: z.boolean().default(true),
+  })
+  .strict()
+  .refine((input) => input.temporaryPassword === input.confirmPassword, {
+    message: "As senhas não conferem.",
+    path: ["confirmPassword"],
+  });
 
 export const cloudSyncEmptyInputSchema = z.object({}).strict();
 
@@ -830,12 +1026,14 @@ export const authSetupAdminInputSchema = z
     username: usernameSchema,
     password: passwordSchema,
     confirmPassword: z.string().min(1, "Campo obrigatório."),
+    passwordHint: passwordHintSchema,
   })
   .strict()
   .refine((input) => input.password === input.confirmPassword, {
     path: ["confirmPassword"],
     message: "As senhas não conferem.",
-  });
+  })
+  .superRefine(validatePasswordHintSafety);
 
 export const authChangePasswordInputSchema = z
   .object({
@@ -855,6 +1053,7 @@ export const userCreateInputSchema = z
     username: usernameSchema,
     password: passwordSchema,
     confirmPassword: z.string().min(1, "Campo obrigatório."),
+    passwordHint: passwordHintSchema,
     role: userRoleSchema.default("operator"),
     status: userStatusSchema.default("active"),
     allowRevealSecrets: z.boolean().default(false),
@@ -864,7 +1063,8 @@ export const userCreateInputSchema = z
   .refine((input) => input.password === input.confirmPassword, {
     path: ["confirmPassword"],
     message: "As senhas não conferem.",
-  });
+  })
+  .superRefine(validatePasswordHintSafety);
 
 export const userUpdateInputSchema = z
   .object({
@@ -873,6 +1073,7 @@ export const userUpdateInputSchema = z
       .object({
         name: requiredTextSchema.optional(),
         username: usernameSchema.optional(),
+        passwordHint: passwordHintSchema,
         role: userRoleSchema.optional(),
         status: userStatusSchema.optional(),
         allowRevealSecrets: z.boolean().optional(),
@@ -894,6 +1095,15 @@ export const userResetPasswordInputSchema = z
     path: ["confirmPassword"],
     message: "As senhas não conferem.",
   });
+
+export const authLocalPasswordResetInputSchema = z
+  .object({
+    userId: idSchema,
+    usernameConfirmation: usernameSchema,
+    confirmLocalOnly: z.literal(true),
+    confirmTemporaryPassword: z.literal(true),
+  })
+  .strict();
 
 export type ProductStatus = (typeof productStatusValues)[number];
 export type DeliveryType = (typeof deliveryTypeValues)[number];
@@ -1010,16 +1220,31 @@ export type CloudSyncBootstrapOwnerInput = z.infer<
   typeof cloudSyncBootstrapOwnerInputSchema
 >;
 export type CloudSyncLoginInput = z.infer<typeof cloudSyncLoginInputSchema>;
+export type CloudSyncChangePasswordInput = z.infer<
+  typeof cloudSyncChangePasswordInputSchema
+>;
 export type CloudSyncInviteUserInput = z.infer<
   typeof cloudSyncInviteUserInputSchema
 >;
 export type CloudSyncUpdateMemberInput = z.infer<
   typeof cloudSyncUpdateMemberInputSchema
 >;
+export type CloudSyncMemberActionInput = z.infer<
+  typeof cloudSyncMemberActionInputSchema
+>;
+export type CloudSyncRemoveMemberInput = z.infer<
+  typeof cloudSyncRemoveMemberInputSchema
+>;
+export type CloudSyncResetMemberPasswordInput = z.infer<
+  typeof cloudSyncResetMemberPasswordInputSchema
+>;
 export type AuthLoginInput = z.infer<typeof authLoginInputSchema>;
 export type AuthSetupAdminInput = z.infer<typeof authSetupAdminInputSchema>;
 export type AuthChangePasswordInput = z.infer<
   typeof authChangePasswordInputSchema
+>;
+export type AuthLocalPasswordResetInput = z.infer<
+  typeof authLocalPasswordResetInputSchema
 >;
 export type UserCreateInput = z.infer<typeof userCreateInputSchema>;
 export type UserUpdateInput = z.infer<typeof userUpdateInputSchema>;
@@ -1031,6 +1256,7 @@ export interface UserRecord {
   id: string;
   name: string;
   username: string;
+  passwordHint: string | null;
   role: UserRole;
   status: UserStatus;
   lastLoginAt: string | null;
@@ -1050,6 +1276,25 @@ export interface AuthSession {
 export interface AuthBootstrap {
   hasAdmin: boolean;
   session: AuthSession | null;
+}
+
+export interface LocalRecoveryUserRecord {
+  id: string;
+  name: string;
+  username: string;
+  passwordHint: string | null;
+  role: UserRole;
+  status: UserStatus;
+  lastLoginAt: string | null;
+  failedLoginAttempts: number;
+  lockedUntil: string | null;
+  mustChangePassword: boolean;
+  createdAt: string;
+}
+
+export interface AuthLocalPasswordResetResult {
+  user: LocalRecoveryUserRecord;
+  mustChangePassword: true;
 }
 
 export interface ProductRecord {
@@ -1675,6 +1920,9 @@ export interface CloudUserView {
   username: string | null;
   role: CloudRole;
   status: UserStatus;
+  mustChangePassword: boolean;
+  lastLoginAt: string | null;
+  lastActivityAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1690,6 +1938,17 @@ export interface CloudWorkspaceView {
 export interface CloudWorkspaceMemberView extends CloudUserView {
   membershipId: string;
   workspaceId: string;
+}
+
+export interface CloudAuditLogView {
+  id: string;
+  workspaceId: string | null;
+  actorUserId: string | null;
+  action: string;
+  entityType: string | null;
+  entityId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
 }
 
 export interface CloudSyncSettingsView {

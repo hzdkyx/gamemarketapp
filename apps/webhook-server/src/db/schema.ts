@@ -37,6 +37,8 @@ export const cloudPostgresSchema = `
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'manager', 'operator', 'viewer')),
     status TEXT NOT NULL CHECK (status IN ('active', 'disabled')),
+    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+    last_login_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
   );
@@ -57,6 +59,7 @@ export const cloudPostgresSchema = `
     status TEXT NOT NULL CHECK (status IN ('active', 'disabled')),
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
+    removed_at TIMESTAMPTZ,
     UNIQUE (workspace_id, user_id)
   );
 
@@ -126,6 +129,8 @@ export const cloudPostgresSchema = `
     ON cloud_sync_entities(workspace_id, updated_at);
   CREATE INDEX IF NOT EXISTS idx_cloud_sync_entities_workspace_type
     ON cloud_sync_entities(workspace_id, entity_type);
+  CREATE INDEX IF NOT EXISTS idx_cloud_sync_entities_updated_by
+    ON cloud_sync_entities(workspace_id, updated_by_user_id, updated_at);
   CREATE INDEX IF NOT EXISTS idx_cloud_sync_conflicts_workspace
     ON cloud_sync_conflicts(workspace_id, resolved_at);
   CREATE INDEX IF NOT EXISTS idx_cloud_audit_logs_workspace_created

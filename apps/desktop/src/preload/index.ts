@@ -6,13 +6,20 @@ import type {
   AppNotificationRecord,
   AuthBootstrap,
   AuthChangePasswordInput,
+  AuthLocalPasswordResetInput,
+  AuthLocalPasswordResetResult,
   AuthLoginInput,
   AuthSession,
   AuthSetupAdminInput,
+  CloudAuditLogView,
   CloudSyncBootstrapOwnerInput,
   CloudSyncAutoSyncStatus,
+  CloudSyncChangePasswordInput,
   CloudSyncInviteUserInput,
   CloudSyncLoginInput,
+  CloudSyncMemberActionInput,
+  CloudSyncRemoveMemberInput,
+  CloudSyncResetMemberPasswordInput,
   CloudSyncSettingsUpdateInput,
   CloudSyncSettingsView,
   CloudSyncSummary,
@@ -35,6 +42,7 @@ import type {
   InventoryRecord,
   InventoryRevealSecretInput,
   InventoryUpdateInput,
+  LocalRecoveryUserRecord,
   NotificationSettings,
   NotificationSettingsUpdateInput,
   OrderChangeStatusInput,
@@ -87,7 +95,12 @@ const api = {
       reason?: string;
     }>,
   startup: {
-    markRendererReady: (name: "login_rendered" | "initial_setup_rendered" | "authenticated_shell_rendered") => {
+    markRendererReady: (
+      name:
+        | "login_rendered"
+        | "initial_setup_rendered"
+        | "authenticated_shell_rendered",
+    ) => {
       ipcRenderer.send("startup:renderer-mark", { name });
     },
   },
@@ -152,10 +165,9 @@ const api = {
         payload,
       ) as Promise<AppNotificationListResult>,
     markRead: (id: string) =>
-      ipcRenderer.invoke(
-        "appNotifications:markRead",
-        { id },
-      ) as Promise<AppNotificationRecord>,
+      ipcRenderer.invoke("appNotifications:markRead", {
+        id,
+      }) as Promise<AppNotificationRecord>,
     markAllRead: () =>
       ipcRenderer.invoke("appNotifications:markAllRead") as Promise<{
         updated: number;
@@ -182,6 +194,15 @@ const api = {
         "auth:changeOwnPassword",
         payload,
       ) as Promise<AuthSession>,
+    listLocalRecoveryUsers: () =>
+      ipcRenderer.invoke("auth:listLocalRecoveryUsers") as Promise<
+        LocalRecoveryUserRecord[]
+      >,
+    resetLocalPassword: (payload: AuthLocalPasswordResetInput) =>
+      ipcRenderer.invoke(
+        "auth:resetLocalPassword",
+        payload,
+      ) as Promise<AuthLocalPasswordResetResult>,
   },
   users: {
     list: () => ipcRenderer.invoke("users:list") as Promise<UserRecord[]>,
@@ -445,42 +466,126 @@ const api = {
   },
   cloudSync: {
     getSettings: () =>
-      ipcRenderer.invoke("cloudSync:getSettings") as Promise<CloudSyncSettingsView>,
+      ipcRenderer.invoke(
+        "cloudSync:getSettings",
+      ) as Promise<CloudSyncSettingsView>,
     updateSettings: (payload: CloudSyncSettingsUpdateInput) =>
-      ipcRenderer.invoke("cloudSync:updateSettings", payload) as Promise<CloudSyncSettingsView>,
+      ipcRenderer.invoke(
+        "cloudSync:updateSettings",
+        payload,
+      ) as Promise<CloudSyncSettingsView>,
     testConnection: () =>
       ipcRenderer.invoke("cloudSync:testConnection", {}) as Promise<{
         ok: boolean;
         safeMessage: string;
       }>,
     bootstrapOwner: (payload: CloudSyncBootstrapOwnerInput) =>
-      ipcRenderer.invoke("cloudSync:bootstrapOwner", payload) as Promise<CloudSyncSettingsView>,
+      ipcRenderer.invoke(
+        "cloudSync:bootstrapOwner",
+        payload,
+      ) as Promise<CloudSyncSettingsView>,
     login: (payload: CloudSyncLoginInput) =>
-      ipcRenderer.invoke("cloudSync:login", payload) as Promise<CloudSyncSettingsView>,
+      ipcRenderer.invoke(
+        "cloudSync:login",
+        payload,
+      ) as Promise<CloudSyncSettingsView>,
     logout: () =>
-      ipcRenderer.invoke("cloudSync:logout", {}) as Promise<CloudSyncSettingsView>,
+      ipcRenderer.invoke(
+        "cloudSync:logout",
+        {},
+      ) as Promise<CloudSyncSettingsView>,
+    changePassword: (payload: CloudSyncChangePasswordInput) =>
+      ipcRenderer.invoke(
+        "cloudSync:changePassword",
+        payload,
+      ) as Promise<CloudSyncSettingsView>,
     refreshAccount: () =>
-      ipcRenderer.invoke("cloudSync:refreshAccount", {}) as Promise<CloudSyncSettingsView>,
+      ipcRenderer.invoke(
+        "cloudSync:refreshAccount",
+        {},
+      ) as Promise<CloudSyncSettingsView>,
     listMembers: () =>
-      ipcRenderer.invoke("cloudSync:listMembers", {}) as Promise<CloudWorkspaceMemberView[]>,
+      ipcRenderer.invoke("cloudSync:listMembers", {}) as Promise<
+        CloudWorkspaceMemberView[]
+      >,
+    listWorkspaceMembers: () =>
+      ipcRenderer.invoke("cloudSync:listWorkspaceMembers", {}) as Promise<
+        CloudWorkspaceMemberView[]
+      >,
     inviteUser: (payload: CloudSyncInviteUserInput) =>
-      ipcRenderer.invoke("cloudSync:inviteUser", payload) as Promise<CloudWorkspaceMemberView>,
+      ipcRenderer.invoke(
+        "cloudSync:inviteUser",
+        payload,
+      ) as Promise<CloudWorkspaceMemberView>,
     updateMember: (payload: CloudSyncUpdateMemberInput) =>
-      ipcRenderer.invoke("cloudSync:updateMember", payload) as Promise<CloudWorkspaceMemberView>,
+      ipcRenderer.invoke(
+        "cloudSync:updateMember",
+        payload,
+      ) as Promise<CloudWorkspaceMemberView>,
+    updateWorkspaceMember: (payload: CloudSyncUpdateMemberInput) =>
+      ipcRenderer.invoke(
+        "cloudSync:updateWorkspaceMember",
+        payload,
+      ) as Promise<CloudWorkspaceMemberView>,
+    disableWorkspaceMember: (payload: CloudSyncMemberActionInput) =>
+      ipcRenderer.invoke(
+        "cloudSync:disableWorkspaceMember",
+        payload,
+      ) as Promise<CloudWorkspaceMemberView>,
+    enableWorkspaceMember: (payload: CloudSyncMemberActionInput) =>
+      ipcRenderer.invoke(
+        "cloudSync:enableWorkspaceMember",
+        payload,
+      ) as Promise<CloudWorkspaceMemberView>,
+    removeWorkspaceMember: (payload: CloudSyncRemoveMemberInput) =>
+      ipcRenderer.invoke(
+        "cloudSync:removeWorkspaceMember",
+        payload,
+      ) as Promise<CloudWorkspaceMemberView>,
+    resetWorkspaceMemberPassword: (
+      payload: CloudSyncResetMemberPasswordInput,
+    ) =>
+      ipcRenderer.invoke(
+        "cloudSync:resetWorkspaceMemberPassword",
+        payload,
+      ) as Promise<CloudWorkspaceMemberView>,
+    listWorkspaceMemberAudit: (payload: CloudSyncMemberActionInput) =>
+      ipcRenderer.invoke(
+        "cloudSync:listWorkspaceMemberAudit",
+        payload,
+      ) as Promise<CloudAuditLogView[]>,
     publishLocalData: () =>
-      ipcRenderer.invoke("cloudSync:publishLocalData", {}) as Promise<CloudSyncSummary>,
+      ipcRenderer.invoke(
+        "cloudSync:publishLocalData",
+        {},
+      ) as Promise<CloudSyncSummary>,
     downloadWorkspace: () =>
-      ipcRenderer.invoke("cloudSync:downloadWorkspace", {}) as Promise<CloudSyncSummary>,
+      ipcRenderer.invoke(
+        "cloudSync:downloadWorkspace",
+        {},
+      ) as Promise<CloudSyncSummary>,
     syncNow: () =>
       ipcRenderer.invoke("cloudSync:syncNow", {}) as Promise<CloudSyncSummary>,
     getLastSyncSummary: () =>
-      ipcRenderer.invoke("cloudSync:getLastSyncSummary", {}) as Promise<CloudSyncSummary | null>,
+      ipcRenderer.invoke(
+        "cloudSync:getLastSyncSummary",
+        {},
+      ) as Promise<CloudSyncSummary | null>,
     getAutoSyncStatus: () =>
-      ipcRenderer.invoke("cloudSync:getAutoSyncStatus", {}) as Promise<CloudSyncAutoSyncStatus>,
+      ipcRenderer.invoke(
+        "cloudSync:getAutoSyncStatus",
+        {},
+      ) as Promise<CloudSyncAutoSyncStatus>,
     pauseAutoSync: () =>
-      ipcRenderer.invoke("cloudSync:pauseAutoSync", {}) as Promise<CloudSyncAutoSyncStatus>,
+      ipcRenderer.invoke(
+        "cloudSync:pauseAutoSync",
+        {},
+      ) as Promise<CloudSyncAutoSyncStatus>,
     resumeAutoSync: () =>
-      ipcRenderer.invoke("cloudSync:resumeAutoSync", {}) as Promise<CloudSyncAutoSyncStatus>,
+      ipcRenderer.invoke(
+        "cloudSync:resumeAutoSync",
+        {},
+      ) as Promise<CloudSyncAutoSyncStatus>,
   },
 };
 

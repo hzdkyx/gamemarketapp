@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   cloudSyncInviteUserInputSchema,
+  cloudSyncChangePasswordInputSchema,
   cloudSyncLoginInputSchema,
+  cloudSyncMemberActionInputSchema,
+  cloudSyncRemoveMemberInputSchema,
+  cloudSyncResetMemberPasswordInputSchema,
   cloudSyncSettingsUpdateInputSchema,
+  cloudSyncUpdateMemberInputSchema,
   eventCreateManualInputSchema,
   appNotificationListInputSchema,
+  authLocalPasswordResetInputSchema,
   authSetupAdminInputSchema,
   gamemarketRevealTokenInputSchema,
   gamemarketSettingsUpdateInputSchema,
@@ -19,6 +25,7 @@ import {
   productVariantUpdateInputSchema,
   notificationSettingsSchema,
   userCreateInputSchema,
+  userUpdateInputSchema,
   webhookServerRevealTokenInputSchema,
   webhookServerSettingsUpdateInputSchema,
 } from "./contracts";
@@ -288,7 +295,9 @@ describe("Cloud sync contracts", () => {
     expect(parsed.workspaceId).toBeNull();
     expect(parsed.autoSyncEnabled).toBe(false);
     expect(parsed.syncIntervalSeconds).toBe(10);
-    expect(() => cloudSyncSettingsUpdateInputSchema.parse({ syncIntervalSeconds: 9 })).toThrow();
+    expect(() =>
+      cloudSyncSettingsUpdateInputSchema.parse({ syncIntervalSeconds: 9 }),
+    ).toThrow();
   });
 
   it("validates cloud login and collaborator creation without exposing raw token contracts", () => {
@@ -306,12 +315,67 @@ describe("Cloud sync contracts", () => {
 
     expect(login.identifier).toBe("operadora@example.com");
     expect(invite.role).toBe("manager");
+    expect(
+      cloudSyncChangePasswordInputSchema.parse({
+        currentPassword: "senha-forte-2",
+        password: "senha-forte-3",
+        confirmPassword: "senha-forte-3",
+      }).password,
+    ).toBe("senha-forte-3");
     expect(() =>
       cloudSyncInviteUserInputSchema.parse({
         name: "Leitura",
         email: "viewer@example.com",
         password: "senha-forte-3",
         role: "owner",
+      }),
+    ).toThrow();
+    expect(() =>
+      cloudSyncChangePasswordInputSchema.parse({
+        currentPassword: "senha-forte-2",
+        password: "senha-forte-3",
+        confirmPassword: "senha-diferente-3",
+      }),
+    ).toThrow();
+  });
+
+  it("validates workspace member administration payloads", () => {
+    const update = cloudSyncUpdateMemberInputSchema.parse({
+      userId: "cloud-user-1",
+      name: "Manager Editado",
+      email: "manager.editado@example.com",
+      username: "manager-editado",
+      role: "owner",
+      status: "disabled",
+    });
+    const action = cloudSyncMemberActionInputSchema.parse({ userId: "cloud-user-1" });
+    const remove = cloudSyncRemoveMemberInputSchema.parse({
+      userId: "cloud-user-1",
+      confirmation: "manager-editado",
+    });
+    const reset = cloudSyncResetMemberPasswordInputSchema.parse({
+      userId: "cloud-user-1",
+      temporaryPassword: "senha-temporaria-123",
+      confirmPassword: "senha-temporaria-123",
+    });
+
+    expect(update.role).toBe("owner");
+    expect(update.status).toBe("disabled");
+    expect(action.userId).toBe("cloud-user-1");
+    expect(remove.confirmation).toBe("manager-editado");
+    expect(reset.mustChangePassword).toBe(true);
+    expect(() =>
+      cloudSyncUpdateMemberInputSchema.parse({
+        userId: "cloud-user-1",
+        email: "email-invalido",
+      }),
+    ).toThrow();
+    expect(() => cloudSyncUpdateMemberInputSchema.parse({ userId: "cloud-user-1" })).toThrow();
+    expect(() =>
+      cloudSyncResetMemberPasswordInputSchema.parse({
+        userId: "cloud-user-1",
+        temporaryPassword: "senha-temporaria-123",
+        confirmPassword: "outra-senha-123",
       }),
     ).toThrow();
   });
@@ -334,7 +398,9 @@ describe("local notification contracts", () => {
 
   it("validates app notification list bounds", () => {
     expect(appNotificationListInputSchema.parse({}).limit).toBe(20);
-    expect(() => appNotificationListInputSchema.parse({ limit: 101 })).toThrow();
+    expect(() =>
+      appNotificationListInputSchema.parse({ limit: 101 }),
+    ).toThrow();
   });
 });
 
@@ -345,10 +411,12 @@ describe("auth and user contracts", () => {
       username: "Admin.Local",
       password: "senha-forte-1",
       confirmPassword: "senha-forte-1",
+      passwordHint: " senha que uso no app ",
     });
 
     expect(parsed.name).toBe("Admin");
     expect(parsed.username).toBe("Admin.Local");
+    expect(parsed.passwordHint).toBe("senha que uso no app");
   });
 
   it("rejects invalid initial admin setup payloads", () => {
@@ -379,6 +447,16 @@ describe("auth and user contracts", () => {
         role: "viewer",
       }),
     ).toThrow();
+
+    expect(() =>
+      authSetupAdminInputSchema.parse({
+        name: "Admin",
+        username: "admin.local",
+        password: "senha-forte-1",
+        confirmPassword: "senha-forte-1",
+        passwordHint: "senha forte 1",
+      }),
+    ).toThrow();
   });
 
   it("rejects mismatched user creation passwords", () => {
@@ -388,6 +466,55 @@ describe("auth and user contracts", () => {
         username: "operador1",
         password: "senha-forte-1",
         confirmPassword: "senha-diferente",
+      }),
+    ).toThrow();
+  });
+
+  it("rejects password hints equal or too similar to the typed password", () => {
+    expect(() =>
+      userCreateInputSchema.parse({
+        name: "Operador",
+        username: "operador1",
+        password: "empresa-2026",
+        confirmPassword: "empresa-2026",
+        passwordHint: "empresa 2026",
+      }),
+    ).toThrow();
+  });
+
+  it("accepts safe password hints and clears empty hints on update", () => {
+    const created = userCreateInputSchema.parse({
+      name: "Operador",
+      username: "operador1",
+      password: "senha-forte-1",
+      confirmPassword: "senha-forte-1",
+      passwordHint: "nome do cachorro + ano",
+    });
+    const updated = userUpdateInputSchema.parse({
+      id: "user-1",
+      data: {
+        passwordHint: "",
+      },
+    });
+
+    expect(created.passwordHint).toBe("nome do cachorro + ano");
+    expect(updated.data.passwordHint).toBeNull();
+  });
+
+  it("requires double confirmation for local password reset recovery", () => {
+    const parsed = authLocalPasswordResetInputSchema.parse({
+      userId: "user-1",
+      usernameConfirmation: "operador1",
+      confirmLocalOnly: true,
+      confirmTemporaryPassword: true,
+    });
+
+    expect(parsed.usernameConfirmation).toBe("operador1");
+    expect(() =>
+      authLocalPasswordResetInputSchema.parse({
+        userId: "user-1",
+        usernameConfirmation: "operador1",
+        confirmLocalOnly: true,
       }),
     ).toThrow();
   });
