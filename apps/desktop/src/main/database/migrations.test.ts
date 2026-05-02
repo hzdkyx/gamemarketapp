@@ -93,6 +93,19 @@ describe("runtime migrations", () => {
     expect(migration?.sql).not.toContain("cloud_workspaces");
   });
 
+  it("defines backup and restore audit event migration", () => {
+    const migration = runtimeMigrations.find(
+      (item) => item.id === "0011_backup_restore_audit_events",
+    );
+
+    expect(migration).toBeTruthy();
+    expect(migration?.sql).toContain("system.backup_created");
+    expect(migration?.sql).toContain("system.backup_failed");
+    expect(migration?.sql).toContain("system.restore_completed");
+    expect(migration?.sql).toContain("system.restore_safety_backup_created");
+    expect(migration?.sql).toContain("CREATE TABLE events_new");
+  });
+
   it("applies the local password recovery migration to an existing SQLite database", () => {
     const migration = runtimeMigrations.find((item) => item.id === "0010_local_password_recovery");
     const db = new DatabaseSync(":memory:");
@@ -162,6 +175,63 @@ describe("runtime migrations", () => {
           `
         )
         .run()
+    ).not.toThrow();
+
+    db.close();
+  });
+
+  it("applies the backup audit migration to an existing SQLite database", () => {
+    const migration = runtimeMigrations.find((item) => item.id === "0011_backup_restore_audit_events");
+    const db = new DatabaseSync(":memory:");
+
+    db.exec(`
+      CREATE TABLE users (id TEXT PRIMARY KEY);
+      CREATE TABLE products (id TEXT PRIMARY KEY);
+      CREATE TABLE orders (id TEXT PRIMARY KEY);
+      CREATE TABLE inventory_items (id TEXT PRIMARY KEY);
+      CREATE TABLE events (
+        id TEXT PRIMARY KEY,
+        event_code TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('system.notification_test')),
+        severity TEXT NOT NULL DEFAULT 'info',
+        title TEXT NOT NULL,
+        message TEXT,
+        order_id TEXT,
+        product_id TEXT,
+        inventory_item_id TEXT,
+        actor_user_id TEXT,
+        read_at TEXT,
+        raw_payload TEXT,
+        created_at TEXT NOT NULL,
+        cloud_id TEXT,
+        workspace_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_cloud_synced_at TEXT,
+        sync_revision INTEGER NOT NULL DEFAULT 0,
+        updated_by_cloud_user_id TEXT,
+        deleted_at TEXT
+      );
+    `);
+
+    expect(() => db.exec(migration?.sql ?? "")).not.toThrow();
+    expect(() =>
+      db
+        .prepare(
+          `
+            INSERT INTO events (
+              id,
+              event_code,
+              source,
+              type,
+              severity,
+              title,
+              created_at
+            )
+            VALUES ('evt-backup-1', 'EVT-SYSTEM-BACKUP-CREATED-1', 'system', 'system.backup_created', 'success', 'Backup local criado', '2026-05-02T00:00:00.000Z')
+          `,
+        )
+        .run(),
     ).not.toThrow();
 
     db.close();

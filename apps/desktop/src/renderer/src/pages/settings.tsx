@@ -3,11 +3,14 @@ import { createPortal } from "react-dom";
 import {
   BellRing,
   Cloud,
+  Copy,
   Database,
   DownloadCloud,
   Edit3,
   Eye,
   FileText,
+  FolderOpen,
+  HardDrive,
   History,
   KeyRound,
   Link2,
@@ -15,6 +18,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  RotateCcw,
   Save,
   Server,
   ShieldCheck,
@@ -33,6 +37,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/u
 import { getDesktopApi } from "@renderer/lib/desktop-api";
 import { playSaleAlertSound } from "@renderer/lib/notification-sound";
 import type {
+  BackupRecord,
+  BackupSettingsUpdateInput,
+  BackupStatus,
   CloudAuditLogView,
   EventType,
   CloudSyncAutoSyncStatus,
@@ -113,6 +120,13 @@ const eventLabels: Record<EventType, string> = {
   "integration.webhook_server.review_received": "Avaliação GameMarket recebida",
   "integration.webhook_server.variant_sold_out": "Variante GameMarket esgotada",
   "integration.webhook_server.unknown_event": "Evento GameMarket desconhecido",
+  "system.backup_created": "Backup local criado",
+  "system.backup_failed": "Backup local falhou",
+  "system.backup_deleted": "Backup local excluído",
+  "system.restore_started": "Restauração iniciada",
+  "system.restore_completed": "Restauração concluída",
+  "system.restore_failed": "Restauração falhou",
+  "system.restore_safety_backup_created": "Backup de segurança criado",
   "system.notification_test": "Teste de notificação"
 };
 
@@ -249,6 +263,22 @@ const isUserLocked = (user: UserRecord): boolean =>
 
 const formatDateTime = (value: string | null | undefined): string =>
   value ? new Date(value).toLocaleString("pt-BR") : "-";
+
+const formatFileSize = (bytes: number): string => {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB"] as const;
+  let size = bytes;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex] ?? "B"}`;
+};
 
 const getCloudMemberConfirmation = (member: CloudWorkspaceMemberView): string =>
   member.username ?? member.email ?? member.name;
@@ -614,16 +644,24 @@ export const SettingsPage = (): JSX.Element => {
   const [resetConfirmPassword, setResetConfirmPassword] = useState("");
   const [savingUser, setSavingUser] = useState(false);
   const [notificationResult, setNotificationResult] = useState<string>("");
+  const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null);
+  const [backupBusy, setBackupBusy] = useState<
+    "creating" | "restoring" | "deleting" | "opening" | "saving" | null
+  >(null);
+  const [backupResult, setBackupResult] = useState("");
+  const [restoreBackupTarget, setRestoreBackupTarget] = useState<BackupRecord | null>(null);
+  const [restoreConfirmation, setRestoreConfirmation] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const loadSettings = useCallback(async (): Promise<void> => {
     setError(null);
     try {
-      const [dbStatus, meta, notificationSettings, userList] = await Promise.all([
+      const [dbStatus, meta, notificationSettings, userList, loadedBackupStatus] = await Promise.all([
         api.getDatabaseStatus(),
         api.getAppMeta(),
         api.settings.getNotificationSettings(),
-        api.users.list()
+        api.users.list(),
+        api.backup.getStatus()
       ]);
       const [loadedGameMarketSettings, syncSummary, pollingStatus] = await Promise.all([
         api.gamemarket.getSettings(),
@@ -643,6 +681,7 @@ export const SettingsPage = (): JSX.Element => {
       setAppMeta(meta);
       setSettings(notificationSettings);
       setUsers(userList);
+      setBackupStatus(loadedBackupStatus);
       setGameMarketSettings(loadedGameMarketSettings);
       setGameMarketForm({
         apiBaseUrl: loadedGameMarketSettings.apiBaseUrl,
@@ -1453,6 +1492,126 @@ export const SettingsPage = (): JSX.Element => {
       await loadSettings();
     } catch (forceError) {
       setError(forceError instanceof Error ? forceError.message : "Falha ao exigir troca de senha.");
+    }
+  };
+
+  const refreshBackupStatus = async (): Promise<void> => {
+    setBackupStatus(await api.backup.getStatus());
+  };
+
+  const createBackupNow = async (): Promise<void> => {
+    setBackupBusy("creating");
+    setBackupResult("");
+    setError(null);
+    try {
+      await api.backup.create();
+      await refreshBackupStatus();
+      setBackupResult("Backup criado com sucesso.");
+    } catch (backupError) {
+      setBackupResult(backupError instanceof Error ? backupError.message : "Falha ao criar backup.");
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const openBackupFolder = async (): Promise<void> => {
+    setBackupBusy("opening");
+    try {
+      const result = await api.backup.openFolder();
+      setBackupResult(result.safeMessage);
+    } catch (openError) {
+      setBackupResult(openError instanceof Error ? openError.message : "Falha ao abrir pasta de backups.");
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const openBackupLocation = async (backup: BackupRecord): Promise<void> => {
+    setBackupBusy("opening");
+    try {
+      const result = await api.backup.openLocation(backup.filename);
+      setBackupResult(result.safeMessage);
+    } catch (openError) {
+      setBackupResult(openError instanceof Error ? openError.message : "Falha ao abrir localização.");
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const copyBackupPath = async (backup: BackupRecord): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(backup.path);
+      setBackupResult("Caminho copiado.");
+    } catch {
+      setBackupResult("Não foi possível copiar o caminho automaticamente.");
+    }
+  };
+
+  const deleteBackup = async (backup: BackupRecord): Promise<void> => {
+    const confirmed = window.confirm(`Excluir o backup ${backup.filename}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setBackupBusy("deleting");
+    setBackupResult("");
+    try {
+      await api.backup.delete(backup.filename);
+      await refreshBackupStatus();
+      setBackupResult("Backup excluído.");
+    } catch (deleteError) {
+      setBackupResult(deleteError instanceof Error ? deleteError.message : "Falha ao excluir backup.");
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const updateBackupSettings = async (next: BackupSettingsUpdateInput): Promise<void> => {
+    setBackupBusy("saving");
+    setBackupResult("");
+    try {
+      const updated = await api.backup.updateSettings(next);
+      setBackupStatus((current) => (current ? { ...current, settings: updated } : current));
+      await refreshBackupStatus();
+      setBackupResult("Configurações de backup salvas.");
+    } catch (settingsError) {
+      setBackupResult(settingsError instanceof Error ? settingsError.message : "Falha ao salvar backup automático.");
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const startRestoreBackup = (backup: BackupRecord): void => {
+    setRestoreBackupTarget(backup);
+    setRestoreConfirmation("");
+    setBackupResult("");
+  };
+
+  const confirmRestoreBackup = async (): Promise<void> => {
+    if (!restoreBackupTarget) {
+      return;
+    }
+
+    if (restoreConfirmation !== "RESTAURAR") {
+      setBackupResult("Digite RESTAURAR para confirmar a restauração.");
+      return;
+    }
+
+    setBackupBusy("restoring");
+    setBackupResult("");
+    try {
+      const result = await api.backup.restore({
+        filename: restoreBackupTarget.filename,
+        confirmation: restoreConfirmation
+      });
+      await refreshBackupStatus();
+      setRestoreBackupTarget(null);
+      setRestoreConfirmation("");
+      setBackupResult(result.safeMessage);
+    } catch (restoreError) {
+      setBackupResult(restoreError instanceof Error ? restoreError.message : "Falha ao restaurar backup.");
+    } finally {
+      setBackupBusy(null);
     }
   };
 
@@ -2271,6 +2430,187 @@ export const SettingsPage = (): JSX.Element => {
                   {migration}
                 </Badge>
               )) ?? <Badge>aguardando</Badge>}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-cyan/20 bg-panelSoft p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                  <HardDrive size={16} className="text-cyan" />
+                  Backup e Restauração
+                </div>
+                <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-400">
+                  Backups podem conter dados sensíveis. Guarde em local seguro. O backup local não é enviado para a nuvem e não substitui o cloud sync.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="primary" disabled={backupBusy !== null} onClick={() => void createBackupNow()}>
+                  <Database size={16} />
+                  {backupBusy === "creating" ? "Criando..." : "Criar backup agora"}
+                </Button>
+                <Button variant="secondary" disabled={backupBusy !== null} onClick={() => void openBackupFolder()}>
+                  <FolderOpen size={16} />
+                  Abrir pasta
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-3">
+              <div className="rounded-md border border-line bg-background/50 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Banco atual</div>
+                <div className="mt-2 break-all font-mono text-xs text-slate-300">
+                  {backupStatus?.databasePath ?? databaseStatus?.path ?? "Inicializando"}
+                </div>
+              </div>
+              <div className="rounded-md border border-line bg-background/50 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Pasta de backups</div>
+                <div className="mt-2 break-all font-mono text-xs text-slate-300">
+                  {backupStatus?.backupsPath ?? "Carregando"}
+                </div>
+              </div>
+              <div className="rounded-md border border-line bg-background/50 p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Último backup</div>
+                <div className="mt-2 text-sm font-semibold text-white">
+                  {backupStatus?.lastBackup ? formatDateTime(backupStatus.lastBackup.createdAt) : "Nenhum backup criado"}
+                </div>
+                {backupStatus?.lastBackup && (
+                  <div className="mt-1 text-xs text-slate-500">
+                    {formatFileSize(backupStatus.lastBackup.sizeBytes)} · {backupStatus.lastBackup.type}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-[1.2fr_1fr_1fr]">
+              <label className="flex items-center justify-between gap-3 rounded-md border border-line bg-background/50 p-3">
+                <span>
+                  <span className="block text-sm font-semibold text-white">Backup automático</span>
+                  <span className="text-xs text-slate-500">Padrão recomendado: diário, manter últimos 10.</span>
+                </span>
+                <input
+                  className="h-5 w-5 accent-cyan"
+                  type="checkbox"
+                  checked={backupStatus?.settings.automaticEnabled ?? true}
+                  disabled={backupBusy !== null}
+                  onChange={(event) => void updateBackupSettings({ automaticEnabled: event.target.checked })}
+                />
+              </label>
+              <label className="space-y-2 rounded-md border border-line bg-background/50 p-3">
+                <span className="text-xs font-semibold text-slate-400">Frequência</span>
+                <select
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={backupStatus?.settings.frequency ?? "daily"}
+                  disabled={backupBusy !== null}
+                  onChange={(event) =>
+                    void updateBackupSettings({ frequency: event.target.value as BackupStatus["settings"]["frequency"] })
+                  }
+                >
+                  <option value="startup">Ao iniciar app</option>
+                  <option value="daily">Diário</option>
+                  <option value="weekly">Semanal</option>
+                </select>
+              </label>
+              <label className="space-y-2 rounded-md border border-line bg-background/50 p-3">
+                <span className="text-xs font-semibold text-slate-400">Retenção</span>
+                <select
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={[5, 10, 20].includes(backupStatus?.settings.retentionCount ?? 10) ? String(backupStatus?.settings.retentionCount ?? 10) : "custom"}
+                  disabled={backupBusy !== null}
+                  onChange={(event) => {
+                    if (event.target.value !== "custom") {
+                      void updateBackupSettings({ retentionCount: Number(event.target.value) });
+                    }
+                  }}
+                >
+                  <option value="5">Manter últimos 5</option>
+                  <option value="10">Manter últimos 10</option>
+                  <option value="20">Manter últimos 20</option>
+                  <option value="custom">Custom</option>
+                </select>
+                {![5, 10, 20].includes(backupStatus?.settings.retentionCount ?? 10) && (
+                  <input
+                    className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={backupStatus?.settings.retentionCount ?? 10}
+                    disabled={backupBusy !== null}
+                    onChange={(event) => void updateBackupSettings({ retentionCount: Number(event.target.value) })}
+                  />
+                )}
+              </label>
+            </div>
+
+            {backupResult && (
+              <div className="mt-4 rounded-md border border-cyan/20 bg-cyan/10 p-3 text-sm text-cyan-100">
+                {backupResult}
+              </div>
+            )}
+
+            <div className="mt-4 overflow-x-auto rounded-md border border-line">
+              <table className="min-w-full divide-y divide-line text-sm">
+                <thead className="bg-background/70 text-left text-xs uppercase tracking-[0.14em] text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Arquivo</th>
+                    <th className="px-4 py-3">Criado em</th>
+                    <th className="px-4 py-3">Tamanho</th>
+                    <th className="px-4 py-3">Schema</th>
+                    <th className="px-4 py-3">Origem</th>
+                    <th className="px-4 py-3 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {backupStatus?.backups.length ? (
+                    backupStatus.backups.map((backup) => (
+                      <tr key={backup.id} className="hover:bg-slate-900/45">
+                        <td className="max-w-[280px] px-4 py-3">
+                          <div className="truncate font-mono text-xs text-slate-200" title={backup.filename}>
+                            {backup.filename}
+                          </div>
+                          <div className="mt-1 truncate text-[11px] text-slate-500" title={backup.checksumSha256}>
+                            sha256 {backup.checksumSha256.slice(0, 12)}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-300">{formatDateTime(backup.createdAt)}</td>
+                        <td className="px-4 py-3 text-slate-300">{formatFileSize(backup.sizeBytes)}</td>
+                        <td className="px-4 py-3 text-slate-400">{backup.dbSchemaVersion ?? "-"}</td>
+                        <td className="px-4 py-3">
+                          <Badge tone={backup.type === "manual" ? "cyan" : backup.type === "automatic" ? "success" : "warning"}>
+                            {backup.type === "manual" ? "manual" : backup.type === "automatic" ? "automático" : "segurança"}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-2">
+                            <Button size="sm" variant="secondary" disabled={backupBusy !== null} onClick={() => startRestoreBackup(backup)}>
+                              <RotateCcw size={14} />
+                              Restaurar
+                            </Button>
+                            <Button size="sm" variant="ghost" disabled={backupBusy !== null} onClick={() => void copyBackupPath(backup)}>
+                              <Copy size={14} />
+                              Copiar caminho
+                            </Button>
+                            <Button size="sm" variant="ghost" disabled={backupBusy !== null} onClick={() => void openBackupLocation(backup)}>
+                              <FolderOpen size={14} />
+                              Local
+                            </Button>
+                            <Button size="sm" variant="danger" disabled={backupBusy !== null} onClick={() => void deleteBackup(backup)}>
+                              <Trash2 size={14} />
+                              Excluir
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-400">
+                        Nenhum backup local encontrado. Crie um backup manual para proteger este computador.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </CardContent>
@@ -3120,6 +3460,57 @@ export const SettingsPage = (): JSX.Element => {
                 </div>
               )}
             </div>
+        </WorkspaceMemberModal>
+      )}
+
+      {restoreBackupTarget && (
+        <WorkspaceMemberModal
+          titleId="backup-restore-title"
+          panelClassName="w-full max-w-xl"
+          onClose={() => (backupBusy === "restoring" ? undefined : setRestoreBackupTarget(null))}
+        >
+          <div className="border-b border-line p-5">
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-red-300">Restauração segura</div>
+            <h2 id="backup-restore-title" className="mt-1 text-lg font-bold text-white">
+              Restaurar backup local
+            </h2>
+          </div>
+          <div className="space-y-4 p-5">
+            <div className="rounded-md border border-warning/30 bg-warning/10 p-4 text-sm leading-6 text-amber-100">
+              Isso vai substituir os dados locais deste computador pelo backup selecionado. O workspace cloud não será apagado. Um backup de segurança do estado atual será criado antes da restauração.
+            </div>
+            <div className="rounded-md border border-line bg-panelSoft p-3">
+              <div className="break-all font-mono text-xs text-slate-300">{restoreBackupTarget.filename}</div>
+              <div className="mt-2 text-xs text-slate-500">
+                {formatDateTime(restoreBackupTarget.createdAt)} · {formatFileSize(restoreBackupTarget.sizeBytes)}
+              </div>
+            </div>
+            <label className="block space-y-2">
+              <span className="text-xs font-semibold text-slate-400">Digite RESTAURAR para confirmar</span>
+              <input
+                className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                value={restoreConfirmation}
+                data-autofocus="true"
+                disabled={backupBusy === "restoring"}
+                onChange={(event) => setRestoreConfirmation(event.target.value)}
+              />
+            </label>
+            <p className="text-xs leading-5 text-slate-500">
+              Depois da restauração, revise os dados antes de reativar a sincronização. O app pode pedir reinício para garantir que todos os módulos reabram o SQLite restaurado.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" disabled={backupBusy === "restoring"} onClick={() => setRestoreBackupTarget(null)}>
+                Cancelar
+              </Button>
+              <Button
+                variant="danger"
+                disabled={backupBusy !== null || restoreConfirmation !== "RESTAURAR"}
+                onClick={() => void confirmRestoreBackup()}
+              >
+                {backupBusy === "restoring" ? "Restaurando..." : "Restaurar backup"}
+              </Button>
+            </div>
+          </div>
         </WorkspaceMemberModal>
       )}
 

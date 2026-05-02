@@ -4,6 +4,11 @@ import type {
   AppNotificationListInput,
   AppNotificationListResult,
   AppNotificationRecord,
+  BackupRecord,
+  BackupRestoreResult,
+  BackupSettings,
+  BackupSettingsUpdateInput,
+  BackupStatus,
   AuthBootstrap,
   AuthChangePasswordInput,
   AuthLocalPasswordResetInput,
@@ -177,6 +182,29 @@ const api = {
         shown: boolean;
         reason?: string;
       }>,
+  },
+  backup: {
+    getStatus: () =>
+      ipcRenderer.invoke("backup:getStatus") as Promise<BackupStatus>,
+    list: () => ipcRenderer.invoke("backup:list") as Promise<BackupRecord[]>,
+    create: () =>
+      ipcRenderer.invoke("backup:create", { type: "manual" }) as Promise<BackupRecord>,
+    restore: (payload: { filename: string; confirmation: "RESTAURAR" }) =>
+      ipcRenderer.invoke("backup:restore", payload) as Promise<BackupRestoreResult>,
+    delete: (filename: string) =>
+      ipcRenderer.invoke("backup:delete", { filename }) as Promise<{ deleted: true }>,
+    openFolder: () =>
+      ipcRenderer.invoke("backup:openFolder") as Promise<{
+        opened: boolean;
+        safeMessage: string;
+      }>,
+    openLocation: (filename: string) =>
+      ipcRenderer.invoke("backup:openLocation", { filename }) as Promise<{
+        opened: boolean;
+        safeMessage: string;
+      }>,
+    updateSettings: (payload: BackupSettingsUpdateInput) =>
+      ipcRenderer.invoke("backup:updateSettings", payload) as Promise<BackupSettings>,
   },
   auth: {
     getBootstrap: () =>

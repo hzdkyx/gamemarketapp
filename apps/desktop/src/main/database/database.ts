@@ -118,6 +118,15 @@ export const getSqliteDatabase = (): Database.Database => {
   return sqlite;
 };
 
+export const closeDatabase = (): void => {
+  if (sqlite?.open) {
+    sqlite.close();
+  }
+
+  sqlite = undefined;
+  orm = undefined;
+};
+
 export const getDatabaseStatus = (): DatabaseStatus => {
   if (!sqlite) {
     return initializeDatabase();

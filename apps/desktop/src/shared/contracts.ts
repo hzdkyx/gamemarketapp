@@ -164,6 +164,13 @@ export const eventTypeValues = [
   "integration.webhook_server.review_received",
   "integration.webhook_server.variant_sold_out",
   "integration.webhook_server.unknown_event",
+  "system.backup_created",
+  "system.backup_failed",
+  "system.backup_deleted",
+  "system.restore_started",
+  "system.restore_completed",
+  "system.restore_failed",
+  "system.restore_safety_backup_created",
   "system.notification_test",
 ] as const;
 export const eventReadFilterValues = ["all", "read", "unread"] as const;
@@ -817,6 +824,52 @@ export const notificationSettingsUpdateInputSchema = notificationSettingsSchema
   .partial()
   .strict();
 
+export const backupOriginValues = ["manual", "automatic", "safety"] as const;
+export const backupFrequencyValues = ["startup", "daily", "weekly"] as const;
+
+export const backupOriginSchema = z.enum(backupOriginValues);
+export const backupFrequencySchema = z.enum(backupFrequencyValues);
+
+export const backupCreateInputSchema = z
+  .object({
+    type: backupOriginSchema.default("manual"),
+  })
+  .strict();
+
+export const backupFileInputSchema = z
+  .object({
+    filename: z
+      .string()
+      .trim()
+      .min(1)
+      .max(180)
+      .regex(/^[a-zA-Z0-9._-]+\.sqlite$/, "Backup inválido."),
+  })
+  .strict();
+
+export const backupRestoreInputSchema = backupFileInputSchema
+  .extend({
+    confirmation: z.literal("RESTAURAR"),
+  })
+  .strict();
+
+export const backupSettingsSchema = z
+  .object({
+    automaticEnabled: z.boolean().default(true),
+    frequency: backupFrequencySchema.default("daily"),
+    retentionCount: z.number().int().min(1).max(100).default(10),
+    lastAutomaticBackupAt: z.string().nullable().default(null),
+  })
+  .strict();
+
+export const backupSettingsUpdateInputSchema = z
+  .object({
+    automaticEnabled: z.boolean().optional(),
+    frequency: backupFrequencySchema.optional(),
+    retentionCount: z.number().int().min(1).max(100).optional(),
+  })
+  .strict();
+
 export const gamemarketSettingsUpdateInputSchema = z
   .object({
     apiBaseUrl: z
@@ -1201,6 +1254,13 @@ export type NotificationSettings = z.infer<typeof notificationSettingsSchema>;
 export type NotificationSettingsUpdateInput = z.infer<
   typeof notificationSettingsUpdateInputSchema
 >;
+export type BackupOrigin = (typeof backupOriginValues)[number];
+export type BackupFrequency = (typeof backupFrequencyValues)[number];
+export type BackupCreateInput = z.infer<typeof backupCreateInputSchema>;
+export type BackupFileInput = z.infer<typeof backupFileInputSchema>;
+export type BackupRestoreInput = z.infer<typeof backupRestoreInputSchema>;
+export type BackupSettings = z.infer<typeof backupSettingsSchema>;
+export type BackupSettingsUpdateInput = z.infer<typeof backupSettingsUpdateInputSchema>;
 export type GameMarketSettingsUpdateInput = z.infer<
   typeof gamemarketSettingsUpdateInputSchema
 >;
@@ -1692,6 +1752,42 @@ export interface AppNotificationSummary {
 export interface AppNotificationListResult {
   items: AppNotificationRecord[];
   summary: AppNotificationSummary;
+}
+
+export interface BackupRecord {
+  id: string;
+  filename: string;
+  path: string;
+  createdAt: string;
+  sizeBytes: number;
+  type: BackupOrigin;
+  appVersion: string;
+  dbSchemaVersion: string | null;
+  checksumSha256: string;
+}
+
+export interface BackupValidationResult {
+  valid: boolean;
+  safeMessage: string;
+  dbSchemaVersion: string | null;
+}
+
+export interface BackupStatus {
+  databasePath: string;
+  backupsPath: string;
+  settings: BackupSettings;
+  lastBackup: BackupRecord | null;
+  backups: BackupRecord[];
+  cloudSyncPausedAfterRestore: boolean;
+}
+
+export interface BackupRestoreResult {
+  restored: boolean;
+  requiresRestart: boolean;
+  restoredBackup: BackupRecord;
+  safetyBackup: BackupRecord;
+  cloudSyncPaused: boolean;
+  safeMessage: string;
 }
 
 export interface OrderListResult {

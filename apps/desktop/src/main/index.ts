@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { initializeDatabase, getDatabaseStatus } from "./database/database";
 import { registerAppNotificationsIpc } from "./ipc/app-notifications-ipc";
 import { registerAuthIpc } from "./ipc/auth-ipc";
+import { registerBackupIpc } from "./ipc/backup-ipc";
 import { registerCloudSyncIpc } from "./ipc/cloud-sync-ipc";
 import { registerDashboardIpc } from "./ipc/dashboard-ipc";
 import { registerEventsIpc } from "./ipc/events-ipc";
@@ -22,12 +23,14 @@ import {
   configureNotificationWindow,
   notificationService,
 } from "./services/notification-service";
+import { backupService } from "./services/backup-service";
 import { createSplashWindow, type SplashWindowController } from "./splash-window";
 import { startupProfiler } from "./startup-profiler";
 
 let mainWindow: BrowserWindow | undefined;
 let splashWindow: SplashWindowController | undefined;
 let backgroundServicesStarted = false;
+let automaticBackupTimer: NodeJS.Timeout | null = null;
 const rendererStartupMarks = new Set<string>();
 const appUserModelId = "com.hzdk.gamemarket.manager";
 const minimumProductionSplashMs = 1200;
@@ -61,6 +64,14 @@ const startBackgroundServices = (): void => {
     webhookServerPollingService.refresh();
     gameMarketPollingService.refresh();
     cloudSyncPollingService.refresh({ runInitial: true });
+    void backupService.runAutomaticBackupIfDue().catch((error) => {
+      logger.warn({ error }, "Automatic local backup failed");
+    });
+    automaticBackupTimer = setInterval(() => {
+      void backupService.runAutomaticBackupIfDue().catch((error) => {
+        logger.warn({ error }, "Automatic local backup failed");
+      });
+    }, 30 * 60 * 1000);
     startupProfiler.mark("background_services_end");
   }, 0);
 };
@@ -165,6 +176,7 @@ const registerIpcHandlers = (): void => {
   registerProfitIpc(ipcMain);
   registerDashboardIpc(ipcMain);
   registerSettingsIpc(ipcMain);
+  registerBackupIpc(ipcMain);
   registerAppNotificationsIpc(ipcMain);
   registerGameMarketIpc(ipcMain);
   registerWebhookServerIpc(ipcMain);
@@ -231,6 +243,10 @@ app.on("window-all-closed", () => {
   webhookServerPollingService.stop();
   gameMarketPollingService.stop();
   cloudSyncPollingService.stop();
+  if (automaticBackupTimer) {
+    clearInterval(automaticBackupTimer);
+    automaticBackupTimer = null;
+  }
   if (process.platform !== "darwin") {
     app.quit();
   }

@@ -1,6 +1,7 @@
 import type { HzdKyxDesktopApi } from "../../../preload";
 import type {
   AppNotificationListResult,
+  BackupStatus,
   CloudSyncAutoSyncStatus,
   CloudSyncSettingsView,
   GameMarketSettingsView,
@@ -74,6 +75,39 @@ const fallbackApi: HzdKyxDesktopApi = {
     testNotification: async () => ({
       shown: false,
       reason: "Notificações locais exigem execução no Electron.",
+    }),
+  },
+  backup: {
+    getStatus: async (): Promise<BackupStatus> => ({
+      databasePath: "Electron preload indisponível no preview web.",
+      backupsPath: "Electron preload indisponível no preview web.",
+      settings: {
+        automaticEnabled: true,
+        frequency: "daily",
+        retentionCount: 10,
+        lastAutomaticBackupAt: null,
+      },
+      lastBackup: null,
+      backups: [],
+      cloudSyncPausedAfterRestore: false,
+    }),
+    list: async () => [],
+    create: unavailable,
+    restore: unavailable,
+    delete: unavailable,
+    openFolder: async () => ({
+      opened: false,
+      safeMessage: "Pasta de backups exige execução no Electron.",
+    }),
+    openLocation: async () => ({
+      opened: false,
+      safeMessage: "Localização de backup exige execução no Electron.",
+    }),
+    updateSettings: async (payload) => ({
+      automaticEnabled: payload.automaticEnabled ?? true,
+      frequency: payload.frequency ?? "daily",
+      retentionCount: payload.retentionCount ?? 10,
+      lastAutomaticBackupAt: null,
     }),
   },
   auth: {
@@ -561,6 +595,10 @@ const mergeDesktopApi = (
   appNotifications: {
     ...fallbackApi.appNotifications,
     ...api?.appNotifications,
+  },
+  backup: {
+    ...fallbackApi.backup,
+    ...api?.backup,
   },
   auth: {
     ...fallbackApi.auth,

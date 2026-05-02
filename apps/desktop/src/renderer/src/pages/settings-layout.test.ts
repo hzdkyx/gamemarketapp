@@ -31,6 +31,12 @@ describe("settings page scroll layout", () => {
     expect(settingsPage).toContain("<CardTitle>Conta e Sincronização</CardTitle>");
     expect(settingsPage).toContain("<CardTitle>Webhook Server / Tempo Real</CardTitle>");
     expect(settingsPage).toContain("<CardTitle>Notificações Locais</CardTitle>");
+    expect(settingsPage).toContain("Backup e Restauração");
+    expect(settingsPage).toContain("Nenhum backup local encontrado.");
+    expect(settingsPage).toContain("Digite RESTAURAR para confirmar");
+    expect(settingsPage).toContain("document.body");
+    expect(settingsPage).toContain("backup.restore");
+    expect(settingsPage).toContain("backup.openFolder");
     expect(settingsPage).toContain("Usuários do Workspace");
     expect(settingsPage).toContain("Editar membro do workspace");
     expect(settingsPage).toContain("Resetar senha cloud");

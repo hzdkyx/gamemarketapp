@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  backupFileInputSchema,
+  backupRestoreInputSchema,
+  backupSettingsSchema,
+  backupSettingsUpdateInputSchema,
   cloudSyncInviteUserInputSchema,
   cloudSyncChangePasswordInputSchema,
   cloudSyncLoginInputSchema,
@@ -401,6 +405,44 @@ describe("local notification contracts", () => {
     expect(() =>
       appNotificationListInputSchema.parse({ limit: 101 }),
     ).toThrow();
+  });
+});
+
+describe("backup contracts", () => {
+  it("defaults automatic backup settings", () => {
+    const parsed = backupSettingsSchema.parse({});
+
+    expect(parsed.automaticEnabled).toBe(true);
+    expect(parsed.frequency).toBe("daily");
+    expect(parsed.retentionCount).toBe(10);
+    expect(parsed.lastAutomaticBackupAt).toBeNull();
+  });
+
+  it("validates backup filenames and restore confirmation", () => {
+    expect(
+      backupFileInputSchema.parse({
+        filename: "hzdk-gamemarket-backup-20260502-120000.sqlite",
+      }).filename,
+    ).toBe("hzdk-gamemarket-backup-20260502-120000.sqlite");
+    expect(() => backupFileInputSchema.parse({ filename: "../backup.sqlite" })).toThrow();
+    expect(() =>
+      backupRestoreInputSchema.parse({
+        filename: "hzdk-gamemarket-backup-20260502-120000.sqlite",
+        confirmation: "restaurar",
+      }),
+    ).toThrow();
+  });
+
+  it("validates automatic backup setting updates", () => {
+    const parsed = backupSettingsUpdateInputSchema.parse({
+      automaticEnabled: false,
+      frequency: "weekly",
+      retentionCount: 20,
+    });
+
+    expect(parsed.frequency).toBe("weekly");
+    expect(parsed.retentionCount).toBe(20);
+    expect(() => backupSettingsUpdateInputSchema.parse({ retentionCount: 0 })).toThrow();
   });
 });
 

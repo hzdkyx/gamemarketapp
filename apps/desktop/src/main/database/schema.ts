@@ -272,6 +272,13 @@ export const events = sqliteTable("events", {
       "integration.webhook_server.review_received",
       "integration.webhook_server.variant_sold_out",
       "integration.webhook_server.unknown_event",
+      "system.backup_created",
+      "system.backup_failed",
+      "system.backup_deleted",
+      "system.restore_started",
+      "system.restore_completed",
+      "system.restore_failed",
+      "system.restore_safety_backup_created",
       "system.notification_test"
     ]
   }).notNull(),
