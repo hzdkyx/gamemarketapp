@@ -20,6 +20,7 @@ import {
   gamemarketSettingsUpdateInputSchema,
   inventoryCreateInputSchema,
   inventoryRevealSecretInputSchema,
+  listAuditHistoryInputSchema,
   orderChangeStatusInputSchema,
   orderCreateInputSchema,
   profitListInputSchema,
@@ -222,6 +223,43 @@ describe("event contracts", () => {
     });
 
     expect(parsed.type).toBe("order.status_corrected");
+  });
+
+  it("accepts audit event names and validates audit history filters", () => {
+    const event = eventCreateManualInputSchema.parse({
+      type: "audit.order_status_changed",
+      severity: "info",
+      title: "Status auditado",
+    });
+    const filter = listAuditHistoryInputSchema.parse({
+      entityType: "order",
+      entityId: "order-1",
+      source: "webhook",
+      limit: 50,
+      offset: 10,
+    });
+
+    expect(event.type).toBe("audit.order_status_changed");
+    expect(filter).toMatchObject({
+      entityType: "order",
+      entityId: "order-1",
+      source: "webhook",
+      limit: 50,
+      offset: 10,
+    });
+    expect(() =>
+      listAuditHistoryInputSchema.parse({
+        entityType: "user",
+        entityId: "user-1",
+      }),
+    ).toThrow();
+    expect(() =>
+      listAuditHistoryInputSchema.parse({
+        entityType: "product",
+        entityId: "product-1",
+        source: "telegram",
+      }),
+    ).toThrow();
   });
 
   it("rejects invented marketplace event names", () => {

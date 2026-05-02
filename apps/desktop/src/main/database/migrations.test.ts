@@ -118,6 +118,20 @@ describe("runtime migrations", () => {
     expect(migration?.sql).toContain("idx_cloud_sync_conflicts_status");
   });
 
+  it("defines visual audit history event migration without dropping old event types", () => {
+    const migration = runtimeMigrations.find(
+      (item) => item.id === "0013_visual_audit_history_events",
+    );
+
+    expect(migration).toBeTruthy();
+    expect(migration?.sql).toContain("audit.product_updated");
+    expect(migration?.sql).toContain("audit.variant_updated");
+    expect(migration?.sql).toContain("audit.inventory_updated");
+    expect(migration?.sql).toContain("audit.order_status_changed");
+    expect(migration?.sql).toContain("CREATE TABLE events_new");
+    expect(migration?.sql).toContain("INSERT INTO events_new");
+  });
+
   it("applies the local password recovery migration to an existing SQLite database", () => {
     const migration = runtimeMigrations.find((item) => item.id === "0010_local_password_recovery");
     const db = new DatabaseSync(":memory:");
@@ -351,6 +365,84 @@ describe("runtime migrations", () => {
     };
     expect(conflict.status).toBe("pending");
     expect(conflict.updated_at).toBe("2026-05-01T00:00:00.000Z");
+
+    db.close();
+  });
+
+  it("applies visual audit event migration to an existing SQLite database", () => {
+    const migration = runtimeMigrations.find((item) => item.id === "0013_visual_audit_history_events");
+    const db = new DatabaseSync(":memory:");
+
+    db.exec(`
+      CREATE TABLE users (id TEXT PRIMARY KEY);
+      CREATE TABLE products (id TEXT PRIMARY KEY);
+      CREATE TABLE orders (id TEXT PRIMARY KEY);
+      CREATE TABLE inventory_items (id TEXT PRIMARY KEY);
+      CREATE TABLE events (
+        id TEXT PRIMARY KEY,
+        event_code TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('system.notification_test', 'system.backup_created')),
+        severity TEXT NOT NULL DEFAULT 'info',
+        title TEXT NOT NULL,
+        message TEXT,
+        order_id TEXT,
+        product_id TEXT,
+        inventory_item_id TEXT,
+        actor_user_id TEXT,
+        read_at TEXT,
+        raw_payload TEXT,
+        created_at TEXT NOT NULL,
+        cloud_id TEXT,
+        workspace_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_cloud_synced_at TEXT,
+        sync_revision INTEGER NOT NULL DEFAULT 0,
+        updated_by_cloud_user_id TEXT,
+        deleted_at TEXT
+      );
+      INSERT INTO events (
+        id,
+        event_code,
+        source,
+        type,
+        severity,
+        title,
+        created_at
+      )
+      VALUES (
+        'evt-old-1',
+        'EVT-OLD-1',
+        'system',
+        'system.backup_created',
+        'success',
+        'Backup antigo preservado',
+        '2026-05-02T00:00:00.000Z'
+      );
+    `);
+
+    expect(() => db.exec(migration?.sql ?? "")).not.toThrow();
+    expect(() =>
+      db
+        .prepare(
+          `
+            INSERT INTO events (
+              id,
+              event_code,
+              source,
+              type,
+              severity,
+              title,
+              created_at
+            )
+            VALUES ('evt-audit-1', 'EVT-AUDIT-PRODUCT-1', 'manual', 'audit.product_updated', 'info', 'Produto auditado', '2026-05-02T00:01:00.000Z')
+          `,
+        )
+        .run(),
+    ).not.toThrow();
+
+    const oldEvent = db.prepare("SELECT type FROM events WHERE id = 'evt-old-1'").get() as { type: string };
+    expect(oldEvent.type).toBe("system.backup_created");
 
     db.close();
   });

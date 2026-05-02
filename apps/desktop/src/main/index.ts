@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { initializeDatabase, getDatabaseStatus } from "./database/database";
 import { registerAppNotificationsIpc } from "./ipc/app-notifications-ipc";
+import { registerAuditHistoryIpc } from "./ipc/audit-history-ipc";
 import { registerAuthIpc } from "./ipc/auth-ipc";
 import { registerBackupIpc } from "./ipc/backup-ipc";
 import { registerCloudSyncIpc } from "./ipc/cloud-sync-ipc";
@@ -173,6 +174,7 @@ const registerIpcHandlers = (): void => {
   registerInventoryIpc(ipcMain);
   registerOrdersIpc(ipcMain);
   registerEventsIpc(ipcMain);
+  registerAuditHistoryIpc(ipcMain);
   registerProfitIpc(ipcMain);
   registerDashboardIpc(ipcMain);
   registerSettingsIpc(ipcMain);

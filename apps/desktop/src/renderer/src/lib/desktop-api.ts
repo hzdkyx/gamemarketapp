@@ -9,6 +9,7 @@ import type {
   CloudSyncSettingsView,
   GameMarketSettingsView,
   GameMarketPollingStatus,
+  ListAuditHistoryResult,
   WebhookServerSettingsView,
 } from "../../../shared/contracts";
 import { emptyProfitListResult } from "../../../shared/profit-analysis";
@@ -260,6 +261,40 @@ const fallbackApi: HzdKyxDesktopApi = {
     exportCsv: async () => ({
       filename: "hzdk-events.csv",
       content: "",
+    }),
+  },
+  audit: {
+    listEntityHistory: async (): Promise<ListAuditHistoryResult> => ({
+      items: [],
+      total: 0,
+      limit: 30,
+      offset: 0,
+      nextOffset: null,
+      sources: [],
+    }),
+    listProductHistory: async (): Promise<ListAuditHistoryResult> => ({
+      items: [],
+      total: 0,
+      limit: 30,
+      offset: 0,
+      nextOffset: null,
+      sources: [],
+    }),
+    listVariantHistory: async (): Promise<ListAuditHistoryResult> => ({
+      items: [],
+      total: 0,
+      limit: 30,
+      offset: 0,
+      nextOffset: null,
+      sources: [],
+    }),
+    listOrderHistory: async (): Promise<ListAuditHistoryResult> => ({
+      items: [],
+      total: 0,
+      limit: 30,
+      offset: 0,
+      nextOffset: null,
+      sources: [],
     }),
   },
   profit: {
@@ -651,6 +686,10 @@ const mergeDesktopApi = (
   events: {
     ...fallbackApi.events,
     ...api?.events,
+  },
+  audit: {
+    ...fallbackApi.audit,
+    ...api?.audit,
   },
   profit: buildProfitApi(api),
   dashboard: {

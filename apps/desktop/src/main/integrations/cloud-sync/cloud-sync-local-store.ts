@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CloudSyncEntityType, CloudSyncEntityView } from "../../../shared/contracts";
+import type { AuditEntityType, EventType, CloudSyncEntityType, CloudSyncEntityView } from "../../../shared/contracts";
 import { getSqliteDatabase } from "../../database/database";
 import { logger } from "../../logger";
 import type { CloudSyncChange } from "./cloud-sync-client";
@@ -444,6 +444,78 @@ const highRiskFields = new Set([
   "value_json"
 ]);
 
+const auditEntityTypeByCloudType: Partial<Record<CloudSyncEntityType, AuditEntityType>> = {
+  products: "product",
+  product_variants: "variant",
+  inventory_items: "inventory",
+  orders: "order"
+};
+
+const auditEventTypeByCloudType: Partial<Record<CloudSyncEntityType, EventType>> = {
+  products: "audit.product_updated",
+  product_variants: "audit.variant_updated",
+  inventory_items: "audit.inventory_updated",
+  orders: "audit.order_updated"
+};
+
+const auditFieldLabels: Record<string, string> = {
+  name: "Nome",
+  category: "Categoria",
+  game: "Jogo",
+  platform: "Plataforma",
+  listing_url: "URL do anúncio",
+  sale_price_cents: "Preço de venda",
+  unit_cost_cents: "Custo unitário",
+  fee_percent: "Taxa GameMarket %",
+  stock_current: "Estoque atual",
+  stock_min: "Estoque mínimo",
+  status: "Status",
+  external_status: "Status externo GameMarket",
+  delivery_type: "Tipo de entrega",
+  supplier_id: "Fornecedor",
+  supplier_name: "Fornecedor",
+  supplier_url: "URL do fornecedor",
+  notes: "Observações",
+  variant_code: "Código/SKU",
+  description: "Descrição",
+  needs_review: "Precisa revisar",
+  purchase_cost_cents: "Custo de compra",
+  public_notes: "Observações públicas",
+  order_code: "Código do pedido",
+  action_required: "Ação pendente",
+  net_value_cents: "Valor líquido",
+  estimated_profit_cents: "Lucro estimado",
+  profit_cents: "Lucro snapshot",
+  buyer_name: "Comprador",
+  product_id: "Produto vinculado",
+  product_variant_id: "Variação vinculada",
+  inventory_item_id: "Item de estoque",
+  completed_at: "Concluído em",
+  delivered_at: "Entregue em"
+};
+
+const sensitiveValuePattern =
+  /(gm_[a-z0-9._:-]+|gm[k_][a-z0-9._:-]+|bearer\s+[a-z0-9._:-]+|app_sync_token[a-z0-9._:-]*|webhook_ingest_secret[a-z0-9._:-]*|database_url[a-z0-9._:-]*)/gi;
+
+const normalizeAuditValue = (value: unknown): string | number | boolean | null => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    return value.replace(sensitiveValuePattern, "[mascarado]");
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  return JSON.stringify(value).replace(sensitiveValuePattern, "[mascarado]");
+};
+
+const valuesEqual = (left: unknown, right: unknown): boolean =>
+  normalizeAuditValue(left) === normalizeAuditValue(right);
+
 const getConflictSeverity = (entityType: CloudSyncEntityType, changedFields: string[]): "low" | "medium" | "high" | "critical" => {
   if (changedFields.some((field) => isSensitiveSyncKey(field))) {
     return "critical";
@@ -498,8 +570,31 @@ const selectRows = (config: SyncTableConfig, includeAll: boolean): Row[] => {
   return includeAll ? rows : rows.filter((row) => isDirtyRow(row, config.updatedAtColumn));
 };
 
-const shouldSkipLocalRow = (config: SyncTableConfig, row: Row): boolean =>
-  config.entityType === "settings" && isSensitiveSettingKey(row.key);
+const isCloudAppliedAuditEvent = (row: Row): boolean => {
+  if (typeof row.raw_payload !== "string" || !String(row.type ?? "").startsWith("audit.")) {
+    return false;
+  }
+
+  try {
+    const payload = JSON.parse(row.raw_payload) as unknown;
+    return (
+      Boolean(payload) &&
+      typeof payload === "object" &&
+      !Array.isArray(payload) &&
+      (payload as Record<string, unknown>).source === "cloud_sync"
+    );
+  } catch {
+    return false;
+  }
+};
+
+const shouldSkipLocalRow = (config: SyncTableConfig, row: Row): boolean => {
+  if (config.entityType === "settings" && isSensitiveSettingKey(row.key)) {
+    return true;
+  }
+
+  return config.entityType === "events" && isCloudAppliedAuditEvent(row);
+};
 
 const getExistingRow = (config: SyncTableConfig, entity: CloudSyncEntityView): Row | null => {
   const db = getSqliteDatabase();
@@ -917,6 +1012,123 @@ const upsertEntity = (config: SyncTableConfig, entity: CloudSyncEntityView, sync
   ).run(values);
 };
 
+const recordCloudAuditApplied = (
+  config: SyncTableConfig,
+  before: Row | null,
+  entity: CloudSyncEntityView,
+  syncedAt: string
+): void => {
+  const auditEntityType = auditEntityTypeByCloudType[config.entityType];
+  const eventType = auditEventTypeByCloudType[config.entityType];
+  if (!auditEntityType || !eventType || !before) {
+    return;
+  }
+
+  const changes = config.columns
+    .filter((column) => !protectedColumns.has(column) && !isSensitiveSyncKey(column))
+    .filter((column) => !valuesEqual(before[column], entity.payload[column] ?? null))
+    .map((column) => ({
+      field: column,
+      label: auditFieldLabels[column] ?? column,
+      before: normalizeAuditValue(before[column]),
+      after: normalizeAuditValue(entity.payload[column] ?? null),
+      sensitive: false
+    }));
+
+  if (changes.length === 0) {
+    return;
+  }
+
+  const productId =
+    config.entityType === "products"
+      ? entity.localId
+      : typeof entity.payload.product_id === "string"
+        ? entity.payload.product_id
+        : null;
+  const orderId = config.entityType === "orders" ? entity.localId : null;
+  const inventoryItemId = config.entityType === "inventory_items" ? entity.localId : null;
+
+  getSqliteDatabase()
+    .prepare(
+      `
+        INSERT INTO events (
+          id,
+          event_code,
+          source,
+          type,
+          severity,
+          title,
+          message,
+          order_id,
+          product_id,
+          inventory_item_id,
+          actor_user_id,
+          read_at,
+          raw_payload,
+          created_at,
+          cloud_id,
+          workspace_id,
+          sync_status,
+          last_cloud_synced_at,
+          sync_revision,
+          updated_by_cloud_user_id,
+          deleted_at
+        )
+        VALUES (
+          @id,
+          @eventCode,
+          'system',
+          @type,
+          'info',
+          @title,
+          @message,
+          @orderId,
+          @productId,
+          @inventoryItemId,
+          NULL,
+          NULL,
+          @rawPayload,
+          @createdAt,
+          NULL,
+          @workspaceId,
+          'synced',
+          @lastCloudSyncedAt,
+          0,
+          @updatedByCloudUserId,
+          NULL
+        )
+      `
+    )
+    .run({
+      id: randomUUID(),
+      eventCode: `EVT-CLOUD-AUDIT-${randomUUID().slice(0, 8).toUpperCase()}`,
+      type: eventType,
+      title: "Alteração aplicada pela nuvem",
+      message: `${config.entityType} ${entity.localId} recebeu alteração do workspace.`,
+      orderId,
+      productId,
+      inventoryItemId,
+      rawPayload: JSON.stringify({
+        audit: true,
+        source: "cloud_sync",
+        action: "updated",
+        entityType: auditEntityType,
+        entityId: entity.localId,
+        relatedProductId: productId,
+        relatedVariantId: config.entityType === "product_variants" ? entity.localId : entity.payload.product_variant_id ?? null,
+        relatedOrderId: orderId,
+        actorName: entity.updatedByUserId ? "Cloud workspace" : "Cloud",
+        cloudUserId: entity.updatedByUserId,
+        changes,
+        timestamp: syncedAt
+      }),
+      createdAt: syncedAt,
+      workspaceId: entity.workspaceId,
+      lastCloudSyncedAt: syncedAt,
+      updatedByCloudUserId: entity.updatedByUserId
+    });
+};
+
 export const cloudSyncLocalStore = {
   collectChanges(includeAll = false): CloudSyncLocalCollection {
     let ignored = 0;
@@ -1053,7 +1265,9 @@ export const cloudSyncLocalStore = {
     }
 
     try {
+      const localRow = getExistingRow(config, normalized.entity);
       upsertEntity(config, normalized.entity, syncedAt);
+      recordCloudAuditApplied(config, localRow, normalized.entity, syncedAt);
       const deferred = applyDeferredForeignKeys(normalized.deferred);
       return {
         applied: 1,
@@ -1148,6 +1362,7 @@ export const cloudSyncLocalStore = {
         }
         try {
           upsertEntity(config, normalized.entity, syncedAt);
+          recordCloudAuditApplied(config, localRow, normalized.entity, syncedAt);
           deferredForeignKeys.push(...normalized.deferred);
           applied += 1;
         } catch (error) {

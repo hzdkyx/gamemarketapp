@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { OrderStatus } from "../../../shared/contracts";
+import type { OrderRecord, OrderStatus, ProductRecord } from "../../../shared/contracts";
 import type { GameMarketOrderListItem } from "./gamemarket-contracts";
 
 interface SyncedOrderRow {
@@ -44,6 +44,88 @@ const state = vi.hoisted(() => ({
 
 const findOrderById = (id: string): SyncedOrderRow | undefined =>
   [...state.ordersByExternalId.values()].find((order) => order.id === id);
+
+const productRecordByExternalId = (externalProductId: string): ProductRecord | null => {
+  const product = state.productsByExternalId.get(externalProductId);
+  if (!product) {
+    return null;
+  }
+
+  return {
+    id: product.id,
+    internalCode: `GMK-PRD-${externalProductId}`,
+    name: product.name,
+    category: product.category,
+    game: product.game,
+    platform: null,
+    listingUrl: null,
+    salePrice: 15,
+    unitCost: product.unit_cost_cents / 100,
+    feePercent: product.fee_percent,
+    netValue: 13.05,
+    estimatedProfit: 13.05 - product.unit_cost_cents / 100,
+    marginPercent: 0.87,
+    stockCurrent: 0,
+    stockMin: 1,
+    status: "active",
+    deliveryType: "manual",
+    supplierId: null,
+    notes: null,
+    externalMarketplace: "gamemarket",
+    externalProductId,
+    externalStatus: "active",
+    externalPayloadHash: null,
+    lastSyncedAt: null,
+    createdByUserId: null,
+    updatedByUserId: null,
+    createdAt: "2026-04-29T12:00:00.000Z",
+    updatedAt: "2026-04-29T12:00:00.000Z"
+  };
+};
+
+const orderRecordFromSynced = (row: SyncedOrderRow): OrderRecord => {
+  const product = productRecordByExternalId("15");
+  return {
+    id: row.id,
+    orderCode: row.order_code,
+    externalOrderId: row.external_order_id,
+    marketplace: "gamemarket",
+    externalMarketplace: "gamemarket",
+    externalStatus: row.external_status,
+    externalPayloadHash: row.external_payload_hash,
+    lastSyncedAt: row.last_synced_at,
+    productId: product?.id ?? "product-15",
+    productVariantId: null,
+    productVariantCode: null,
+    productVariantName: null,
+    variantPending: false,
+    inventoryItemId: null,
+    inventoryCode: null,
+    buyerName: "comprador",
+    buyerContact: null,
+    productNameSnapshot: product?.name ?? "Produto GameMarket",
+    categorySnapshot: product?.game ?? product?.category ?? "Contas",
+    salePrice: 15,
+    unitCost: product?.unitCost ?? 0,
+    feePercent: product?.feePercent ?? 13,
+    netValue: 13.05,
+    profit: 13.05 - (product?.unitCost ?? 0),
+    marginPercent: 0.87,
+    status: row.status,
+    actionRequired: Boolean(row.action_required),
+    marketplaceUrl: null,
+    notes: null,
+    createdByUserId: null,
+    updatedByUserId: null,
+    createdAt: "2026-04-29T12:00:00.000Z",
+    updatedAt: row.last_synced_at ?? "2026-04-29T12:00:00.000Z",
+    confirmedAt: row.confirmed_at,
+    deliveredAt: row.delivered_at,
+    completedAt: row.completed_at,
+    cancelledAt: null,
+    refundedAt: null
+  };
+};
 
 vi.mock("../../database/database", () => ({
   getSqliteDatabase: () => ({
@@ -200,6 +282,24 @@ vi.mock("../../services/event-service", () => ({
     createInternal: (input: { type: string; orderId?: string | null; rawPayload?: unknown }) => {
       state.events.push(input);
       return { id: `event-${state.events.length}`, ...input };
+    }
+  }
+}));
+
+vi.mock("../../repositories/order-repository", () => ({
+  orderRepository: {
+    getById: (id: string) => {
+      const order = findOrderById(id);
+      return order ? orderRecordFromSynced(order) : null;
+    }
+  }
+}));
+
+vi.mock("../../repositories/product-repository", () => ({
+  productRepository: {
+    getById: (id: string) => {
+      const product = [...state.productsByExternalId.entries()].find(([, value]) => value.id === id);
+      return product ? productRecordByExternalId(product[0]) : null;
     }
   }
 }));

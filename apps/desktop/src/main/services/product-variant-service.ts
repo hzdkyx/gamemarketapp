@@ -14,6 +14,7 @@ import {
   type ProductVariantWriteRecord
 } from "../repositories/product-variant-repository";
 import { productRepository } from "../repositories/product-repository";
+import { auditHistoryService, type AuditFieldDefinition } from "./audit-history-service";
 import { moneyToCents } from "./money";
 
 const nowIso = (): string => new Date().toISOString();
@@ -116,6 +117,23 @@ const makeDuplicateCode = (variantCode: string): string => {
   return normalizeVariantCode(`${variantCode}-COPY-${randomUUID().slice(0, 6)}`, variantCode);
 };
 
+const variantAuditFields: Array<AuditFieldDefinition<ProductVariantRecord>> = [
+  { field: "title", label: "Nome da variação", read: (variant) => variant.name },
+  { field: "sku", label: "Código/SKU", read: (variant) => variant.variantCode },
+  { field: "description", label: "Descrição", read: (variant) => variant.description },
+  { field: "salePrice", label: "Preço de venda", read: (variant) => variant.salePrice },
+  { field: "unitCost", label: "Custo unitário", read: (variant) => variant.unitCost },
+  { field: "marketplaceFeePercent", label: "Taxa GameMarket %", read: (variant) => variant.feePercent },
+  { field: "currentStock", label: "Estoque atual", read: (variant) => variant.stockCurrent },
+  { field: "minimumStock", label: "Estoque mínimo", read: (variant) => variant.stockMin },
+  { field: "supplier", label: "Fornecedor", read: (variant) => variant.supplierName },
+  { field: "supplierUrl", label: "URL do fornecedor", read: (variant) => variant.supplierUrl },
+  { field: "status", label: "Status", read: (variant) => variant.status },
+  { field: "deliveryType", label: "Tipo de entrega", read: (variant) => variant.deliveryType },
+  { field: "needsReview", label: "Precisa revisar", read: (variant) => variant.needsReview },
+  { field: "notes", label: "Observações", read: (variant) => variant.notes }
+];
+
 export const productVariantService = {
   listByProduct(productId: string): ProductVariantListResult {
     assertProductExists(productId);
@@ -133,13 +151,13 @@ export const productVariantService = {
     return variant;
   },
 
-  create(input: ProductVariantCreateInput): ProductVariantRecord {
+  create(input: ProductVariantCreateInput, actorUserId: string | null = null): ProductVariantRecord {
     assertProductExists(input.productId);
     const timestamp = nowIso();
     const variantCode = normalizeVariantCode(input.variantCode, input.name);
     assertUniqueCode(variantCode, null);
 
-    return productVariantRepository.insert(
+    const created = productVariantRepository.insert(
       makeWriteRecord({
         id: randomUUID(),
         productId: input.productId,
@@ -163,9 +181,25 @@ export const productVariantService = {
         updatedAt: timestamp
       })
     );
+
+    auditHistoryService.record({
+      entityType: "variant",
+      entityId: created.id,
+      source: created.source === "gamemarket_sync" ? "gamemarket_api" : "manual",
+      action: "created",
+      title: "Variação criada",
+      message: `Variação ${created.name} criada para o produto vinculado.`,
+      actorUserId,
+      relatedProductId: created.productId,
+      relatedVariantId: created.id,
+      createdAt: timestamp,
+      changes: auditHistoryService.buildChanges(null, created, variantAuditFields)
+    });
+
+    return created;
   },
 
-  update(id: string, data: ProductVariantUpdateData): ProductVariantRecord {
+  update(id: string, data: ProductVariantUpdateData, actorUserId: string | null = null): ProductVariantRecord {
     const current = this.get(id);
     const name = data.name ?? current.name;
     const variantCode = normalizeVariantCode(
@@ -174,7 +208,7 @@ export const productVariantService = {
     );
     assertUniqueCode(variantCode, id);
 
-    return productVariantRepository.update(
+    const updated = productVariantRepository.update(
       makeWriteRecord({
         id,
         productId: current.productId,
@@ -198,14 +232,30 @@ export const productVariantService = {
         updatedAt: nowIso()
       })
     );
+
+    auditHistoryService.record({
+      entityType: "variant",
+      entityId: id,
+      source: "manual",
+      action: "updated",
+      title: "Variação atualizada",
+      message: `Variação ${updated.name} teve dados operacionais alterados.`,
+      actorUserId,
+      relatedProductId: updated.productId,
+      relatedVariantId: updated.id,
+      createdAt: updated.updatedAt,
+      changes: auditHistoryService.buildChanges(current, updated, variantAuditFields)
+    });
+
+    return updated;
   },
 
-  duplicate(id: string): ProductVariantRecord {
+  duplicate(id: string, actorUserId: string | null = null): ProductVariantRecord {
     const current = this.get(id);
     const timestamp = nowIso();
     const variantCode = makeDuplicateCode(current.variantCode);
 
-    return productVariantRepository.insert(
+    const duplicated = productVariantRepository.insert(
       makeWriteRecord({
         id: randomUUID(),
         productId: current.productId,
@@ -229,18 +279,34 @@ export const productVariantService = {
         updatedAt: timestamp
       })
     );
+
+    auditHistoryService.record({
+      entityType: "variant",
+      entityId: duplicated.id,
+      source: "manual",
+      action: "created",
+      title: "Variação duplicada",
+      message: `Variação ${duplicated.name} criada a partir de ${current.name}.`,
+      actorUserId,
+      relatedProductId: duplicated.productId,
+      relatedVariantId: duplicated.id,
+      createdAt: timestamp,
+      changes: auditHistoryService.buildChanges(null, duplicated, variantAuditFields)
+    });
+
+    return duplicated;
   },
 
-  archive(id: string): ProductVariantRecord {
+  archive(id: string, actorUserId: string | null = null): ProductVariantRecord {
     return this.update(id, {
       status: "archived"
-    });
+    }, actorUserId);
   },
 
-  markNeedsReview(id: string): ProductVariantRecord {
+  markNeedsReview(id: string, actorUserId: string | null = null): ProductVariantRecord {
     return this.update(id, {
       needsReview: true
-    });
+    }, actorUserId);
   },
 
   delete(id: string): void {

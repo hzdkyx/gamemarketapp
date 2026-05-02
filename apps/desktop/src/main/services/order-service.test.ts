@@ -461,6 +461,7 @@ describe("order service", () => {
     expect(inventory?.orderId).toBe(order.id);
     expect(state.events.map((event) => event.type)).toContain("order.payment_confirmed");
     expect(state.events.map((event) => event.type)).toContain("inventory.reserved");
+    expect(state.events.map((event) => event.type)).toContain("audit.order_updated");
   });
 
   it("uses the selected product variant cost and sale price in order financials", () => {
@@ -513,6 +514,7 @@ describe("order service", () => {
     expect(delivered.completedAt).toBeNull();
     expect(state.inventory.get("inventory-1")?.status).toBe("delivered");
     expect(state.events.map((event) => event.type)).toContain("order.delivered");
+    expect(state.events.map((event) => event.type)).toContain("audit.order_status_changed");
     expect(state.events.map((event) => event.type)).not.toContain("order.completed");
   });
 

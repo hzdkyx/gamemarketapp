@@ -170,6 +170,12 @@ export const eventTypeValues = [
   "cloud.conflict_resolved_manual",
   "cloud.conflict_ignored",
   "cloud.conflict_resolution_failed",
+  "audit.product_updated",
+  "audit.variant_updated",
+  "audit.inventory_updated",
+  "audit.order_updated",
+  "audit.order_status_changed",
+  "audit.entity_history_recorded",
   "system.backup_created",
   "system.backup_failed",
   "system.backup_deleted",
@@ -180,6 +186,23 @@ export const eventTypeValues = [
   "system.notification_test",
 ] as const;
 export const eventReadFilterValues = ["all", "read", "unread"] as const;
+export const auditSourceValues = [
+  "manual",
+  "cloud_sync",
+  "gamemarket_api",
+  "webhook",
+  "backup_restore",
+  "system",
+  "migration",
+  "local_auth",
+  "unknown",
+] as const;
+export const auditEntityTypeValues = [
+  "product",
+  "variant",
+  "order",
+  "inventory",
+] as const;
 export const appNotificationTypeValues = [
   "new_sale",
   "mediation_problem",
@@ -466,6 +489,8 @@ export const manualOrderInitialStatusSchema = z.enum(
 export const eventSourceSchema = z.enum(eventSourceValues);
 export const eventSeveritySchema = z.enum(eventSeverityValues);
 export const eventTypeSchema = z.enum(eventTypeValues);
+export const auditSourceSchema = z.enum(auditSourceValues);
+export const auditEntityTypeSchema = z.enum(auditEntityTypeValues);
 export const appNotificationTypeSchema = z.enum(appNotificationTypeValues);
 export const userRoleSchema = z.enum(userRoleValues);
 export const userStatusSchema = z.enum(userStatusValues);
@@ -833,6 +858,17 @@ export const eventListInputSchema = z
     read: z.enum(eventReadFilterValues).default("all"),
     dateFrom: nullableTextSchema,
     dateTo: nullableTextSchema,
+  })
+  .strict();
+
+export const listAuditHistoryInputSchema = z
+  .object({
+    entityType: auditEntityTypeSchema,
+    entityId: idSchema,
+    source: auditSourceSchema.or(z.literal("all")).default("all"),
+    search: nullableTextSchema,
+    limit: z.number().int().positive().max(100).default(30),
+    offset: z.number().int().nonnegative().default(0),
   })
   .strict();
 
@@ -1268,6 +1304,8 @@ export type EventSource = (typeof eventSourceValues)[number];
 export type EventSeverity = (typeof eventSeverityValues)[number];
 export type EventType = (typeof eventTypeValues)[number];
 export type EventReadFilter = (typeof eventReadFilterValues)[number];
+export type AuditSource = (typeof auditSourceValues)[number];
+export type AuditEntityType = (typeof auditEntityTypeValues)[number];
 export type AppNotificationType = (typeof appNotificationTypeValues)[number];
 export type GameMarketEnvironment =
   (typeof gamemarketEnvironmentValues)[number];
@@ -1333,6 +1371,9 @@ export type EventCreateManualInput = z.infer<
   typeof eventCreateManualInputSchema
 >;
 export type EventListInput = z.infer<typeof eventListInputSchema>;
+export type ListAuditHistoryInput = z.infer<
+  typeof listAuditHistoryInputSchema
+>;
 export type AppNotificationListInput = z.infer<
   typeof appNotificationListInputSchema
 >;
@@ -1823,6 +1864,43 @@ export interface EventSummary {
   unread: number;
   critical: number;
   warnings: number;
+}
+
+export interface AuditChange {
+  field: string;
+  label: string;
+  before: string | number | boolean | null;
+  after: string | number | boolean | null;
+  sensitive: boolean;
+}
+
+export interface AuditHistoryEntry {
+  id: string;
+  eventCode: string;
+  eventType: EventType;
+  title: string;
+  message: string | null;
+  source: AuditSource;
+  sourceLabel: string;
+  entityType: AuditEntityType;
+  entityId: string;
+  relatedProductId: string | null;
+  relatedVariantId: string | null;
+  relatedOrderId: string | null;
+  actorId: string | null;
+  actorName: string | null;
+  createdAt: string;
+  changes: AuditChange[];
+  detailUnavailable: boolean;
+}
+
+export interface ListAuditHistoryResult {
+  items: AuditHistoryEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+  nextOffset: number | null;
+  sources: AuditSource[];
 }
 
 export interface AppNotificationRecord {

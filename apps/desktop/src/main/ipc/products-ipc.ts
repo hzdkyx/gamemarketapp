@@ -71,32 +71,32 @@ export const registerProductsIpc = (ipcMain: IpcMain): void => {
   });
 
   ipcMain.handle("productVariants:create", (_event, payload: unknown) => {
-    requirePermission("canEditProducts");
-    return scheduleCloudPush(productVariantService.create(productVariantCreateInputSchema.parse(payload)));
+    const session = requirePermission("canEditProducts");
+    return scheduleCloudPush(productVariantService.create(productVariantCreateInputSchema.parse(payload), session.user.id));
   });
 
   ipcMain.handle("productVariants:update", (_event, payload: unknown) => {
-    requirePermission("canEditProducts");
+    const session = requirePermission("canEditProducts");
     const parsed = productVariantUpdateInputSchema.parse(payload);
-    return scheduleCloudPush(productVariantService.update(parsed.id, parsed.data));
+    return scheduleCloudPush(productVariantService.update(parsed.id, parsed.data, session.user.id));
   });
 
   ipcMain.handle("productVariants:duplicate", (_event, payload: unknown) => {
-    requirePermission("canEditProducts");
+    const session = requirePermission("canEditProducts");
     const parsed = productVariantDuplicateInputSchema.parse(payload);
-    return scheduleCloudPush(productVariantService.duplicate(parsed.id));
+    return scheduleCloudPush(productVariantService.duplicate(parsed.id, session.user.id));
   });
 
   ipcMain.handle("productVariants:archive", (_event, payload: unknown) => {
-    requirePermission("canEditProducts");
+    const session = requirePermission("canEditProducts");
     const parsed = productVariantDuplicateInputSchema.parse(payload);
-    return scheduleCloudPush(productVariantService.archive(parsed.id));
+    return scheduleCloudPush(productVariantService.archive(parsed.id, session.user.id));
   });
 
   ipcMain.handle("productVariants:markNeedsReview", (_event, payload: unknown) => {
-    requirePermission("canEditProducts");
+    const session = requirePermission("canEditProducts");
     const parsed = productVariantDuplicateInputSchema.parse(payload);
-    return scheduleCloudPush(productVariantService.markNeedsReview(parsed.id));
+    return scheduleCloudPush(productVariantService.markNeedsReview(parsed.id, session.user.id));
   });
 
   ipcMain.handle("productVariants:delete", (_event, payload: unknown) => {

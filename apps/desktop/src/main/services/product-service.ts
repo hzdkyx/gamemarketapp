@@ -11,6 +11,7 @@ import type {
   ProductUpdateData
 } from "../../shared/contracts";
 import { productRepository, type ProductWriteRecord } from "../repositories/product-repository";
+import { auditHistoryService, type AuditFieldDefinition } from "./audit-history-service";
 import { centsToMoney, moneyToCents } from "./money";
 
 const nowIso = (): string => new Date().toISOString();
@@ -105,6 +106,24 @@ const mapSummary = (summary: ReturnType<typeof productRepository.getSummary>): P
   averageEstimatedProfit: centsToMoney(summary.average_estimated_profit_cents)
 });
 
+const productAuditFields: Array<AuditFieldDefinition<ProductRecord>> = [
+  { field: "internalCode", label: "ID interno", read: (product) => product.internalCode },
+  { field: "name", label: "Nome", read: (product) => product.name },
+  { field: "category", label: "Categoria", read: (product) => product.category },
+  { field: "game", label: "Jogo", read: (product) => product.game },
+  { field: "platform", label: "Plataforma", read: (product) => product.platform },
+  { field: "salePrice", label: "Preço de venda", read: (product) => product.salePrice },
+  { field: "unitCost", label: "Custo unitário", read: (product) => product.unitCost },
+  { field: "marketplaceFeePercent", label: "Taxa GameMarket %", read: (product) => product.feePercent },
+  { field: "stockCurrent", label: "Estoque atual", read: (product) => product.stockCurrent },
+  { field: "stockMin", label: "Estoque mínimo", read: (product) => product.stockMin },
+  { field: "status", label: "Status", read: (product) => product.status },
+  { field: "deliveryType", label: "Tipo de entrega", read: (product) => product.deliveryType },
+  { field: "supplier", label: "Fornecedor", read: (product) => product.supplierId },
+  { field: "announcementUrl", label: "URL do anúncio", read: (product) => product.listingUrl },
+  { field: "notes", label: "Observações", read: (product) => product.notes }
+];
+
 export const productService = {
   list(filters: ProductListInput): ProductListResult {
     return {
@@ -132,7 +151,7 @@ export const productService = {
       throw new Error("Já existe um produto com este ID interno.");
     }
 
-    return productRepository.insert(
+    const created = productRepository.insert(
       makeWriteRecord({
         id: randomUUID(),
         internalCode,
@@ -161,6 +180,21 @@ export const productService = {
         updatedAt: timestamp
       })
     );
+
+    auditHistoryService.record({
+      entityType: "product",
+      entityId: created.id,
+      source: "manual",
+      action: "created",
+      title: "Produto criado",
+      message: `Produto ${created.name} criado localmente.`,
+      actorUserId,
+      relatedProductId: created.id,
+      createdAt: timestamp,
+      changes: auditHistoryService.buildChanges(null, created, productAuditFields)
+    });
+
+    return created;
   },
 
   update(id: string, data: ProductUpdateData, actorUserId: string | null = null): ProductRecord {
@@ -175,7 +209,7 @@ export const productService = {
       throw new Error("Já existe outro produto com este ID interno.");
     }
 
-    return productRepository.update(
+    const updated = productRepository.update(
       makeWriteRecord({
         id,
         internalCode,
@@ -204,6 +238,21 @@ export const productService = {
         updatedAt: nowIso()
       })
     );
+
+    auditHistoryService.record({
+      entityType: "product",
+      entityId: id,
+      source: "manual",
+      action: "updated",
+      title: "Produto atualizado",
+      message: `Produto ${updated.name} teve dados operacionais alterados.`,
+      actorUserId,
+      relatedProductId: id,
+      createdAt: updated.updatedAt,
+      changes: auditHistoryService.buildChanges(current, updated, productAuditFields)
+    });
+
+    return updated;
   },
 
   delete(id: string): void {

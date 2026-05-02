@@ -19,6 +19,7 @@ import {
 import { productVariantRepository } from "../repositories/product-variant-repository";
 import { productRepository } from "../repositories/product-repository";
 import { decryptLocalSecret, encryptLocalSecret } from "../security/secrets";
+import { auditHistoryService, type AuditFieldDefinition } from "./audit-history-service";
 import { eventService } from "./event-service";
 import { centsToMoney, moneyToCents } from "./money";
 import { summarizeOperationalStock } from "./stock-rules";
@@ -107,6 +108,73 @@ const secretColumnByField: Record<InventorySecretField, SecretColumn> = {
   accountEmailPassword: "account_email_password_encrypted",
   accessNotes: "access_notes_encrypted"
 };
+
+interface InventoryAuditSnapshot {
+  inventoryCode: string;
+  productId: string | null;
+  productVariantId: string | null;
+  supplierId: string | null;
+  purchaseCost: number;
+  status: InventoryRecord["status"];
+  publicNotes: string | null;
+  boughtAt: string | null;
+  soldAt: string | null;
+  deliveredAt: string | null;
+  orderId: string | null;
+}
+
+const inventoryAuditFields: Array<AuditFieldDefinition<InventoryAuditSnapshot>> = [
+  { field: "inventoryCode", label: "ID interno do estoque", read: (item) => item.inventoryCode },
+  { field: "productId", label: "Produto vinculado", read: (item) => item.productId },
+  { field: "variantId", label: "Variação vinculada", read: (item) => item.productVariantId },
+  { field: "supplier", label: "Fornecedor", read: (item) => item.supplierId },
+  { field: "purchaseCost", label: "Custo de compra", read: (item) => item.purchaseCost },
+  { field: "status", label: "Status do estoque", read: (item) => item.status },
+  { field: "publicNotes", label: "Observações públicas", read: (item) => item.publicNotes },
+  { field: "boughtAt", label: "Data de compra", read: (item) => item.boughtAt },
+  { field: "soldAt", label: "Data de venda", read: (item) => item.soldAt },
+  { field: "deliveredAt", label: "Data de entrega", read: (item) => item.deliveredAt },
+  { field: "orderId", label: "Pedido vinculado", read: (item) => item.orderId }
+];
+
+const encryptedInventoryToAuditSnapshot = (item: ReturnType<typeof inventoryRepository.getEncryptedById> extends infer T ? NonNullable<T> : never): InventoryAuditSnapshot => ({
+  inventoryCode: item.inventory_code,
+  productId: item.product_id,
+  productVariantId: item.product_variant_id,
+  supplierId: item.supplier_id,
+  purchaseCost: centsToMoney(item.purchase_cost_cents),
+  status: item.status,
+  publicNotes: item.public_notes,
+  boughtAt: item.bought_at,
+  soldAt: item.sold_at,
+  deliveredAt: item.delivered_at,
+  orderId: item.order_id
+});
+
+const inventoryRecordToAuditSnapshot = (item: InventoryRecord): InventoryAuditSnapshot => ({
+  inventoryCode: item.inventoryCode,
+  productId: item.productId,
+  productVariantId: item.productVariantId,
+  supplierId: item.supplierId,
+  purchaseCost: item.purchaseCost,
+  status: item.status,
+  publicNotes: item.publicNotes,
+  boughtAt: item.boughtAt,
+  soldAt: item.soldAt,
+  deliveredAt: item.deliveredAt,
+  orderId: item.orderId
+});
+
+const sensitiveInventoryChanges = (data: InventoryUpdateData) =>
+  (["accountLogin", "accountPassword", "accountEmail", "accountEmailPassword", "accessNotes"] as const)
+    .filter((field) => Object.hasOwn(data, field))
+    .map((field) => ({
+      field,
+      label: "Campo sensível alterado",
+      before: null,
+      after: null,
+      sensitive: true
+    }));
 
 export const inventoryService = {
   list(filters: InventoryListInput): InventoryListResult {
@@ -229,7 +297,33 @@ export const inventoryService = {
       updatedAt: nowIso()
     };
 
-    return inventoryRepository.update(writeRecord);
+    const updated = inventoryRepository.update(writeRecord);
+    const changes = [
+      ...auditHistoryService.buildChanges(
+        encryptedInventoryToAuditSnapshot(current),
+        inventoryRecordToAuditSnapshot(updated),
+        inventoryAuditFields
+      ),
+      ...sensitiveInventoryChanges(data)
+    ];
+
+    auditHistoryService.record({
+      entityType: "inventory",
+      entityId: updated.id,
+      source: "manual",
+      action: "updated",
+      title: "Estoque atualizado",
+      message: `${updated.inventoryCode} teve dados operacionais alterados.`,
+      actorUserId,
+      relatedProductId: updated.productId,
+      relatedVariantId: updated.productVariantId,
+      relatedOrderId: updated.orderId,
+      inventoryItemId: updated.id,
+      createdAt: updated.updatedAt,
+      changes
+    });
+
+    return updated;
   },
 
   delete(id: string): void {

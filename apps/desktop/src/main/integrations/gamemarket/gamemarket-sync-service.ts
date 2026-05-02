@@ -1,7 +1,10 @@
 import { GAMEMARKET_FEE_PERCENT } from "@hzdk/shared";
 import { randomUUID } from "node:crypto";
-import type { GameMarketSyncSummary, OrderStatus } from "../../../shared/contracts";
+import type { GameMarketSyncSummary, OrderRecord, OrderStatus, ProductRecord } from "../../../shared/contracts";
 import { getSqliteDatabase } from "../../database/database";
+import { orderRepository } from "../../repositories/order-repository";
+import { productRepository } from "../../repositories/product-repository";
+import { auditHistoryService, type AuditFieldDefinition } from "../../services/audit-history-service";
 import { eventService } from "../../services/event-service";
 import { localNotificationService } from "../../services/local-notification-service";
 import { GameMarketClient } from "./gamemarket-client";
@@ -65,6 +68,93 @@ interface OrderSyncResult {
   result: "imported" | "updated" | "unchanged";
   orderId: string;
 }
+
+const productAuditFields: Array<AuditFieldDefinition<ProductRecord>> = [
+  { field: "name", label: "Nome", read: (product) => product.name },
+  { field: "category", label: "Categoria", read: (product) => product.category },
+  { field: "game", label: "Jogo", read: (product) => product.game },
+  { field: "salePrice", label: "Preço de venda", read: (product) => product.salePrice },
+  { field: "status", label: "Status", read: (product) => product.status },
+  { field: "deliveryType", label: "Tipo de entrega", read: (product) => product.deliveryType },
+  { field: "externalStatus", label: "Status externo GameMarket", read: (product) => product.externalStatus },
+  { field: "notes", label: "Observações", read: (product) => product.notes }
+];
+
+const orderAuditFields: Array<AuditFieldDefinition<OrderRecord>> = [
+  { field: "status", label: "Status local", read: (order) => order.status },
+  { field: "externalStatus", label: "Status externo GameMarket", read: (order) => order.externalStatus },
+  { field: "action", label: "Ação pendente", read: (order) => order.actionRequired },
+  { field: "grossAmount", label: "Valor bruto", read: (order) => order.salePrice },
+  { field: "netAmount", label: "Valor líquido", read: (order) => order.netValue },
+  { field: "profitAmount", label: "Lucro snapshot", read: (order) => order.profit },
+  { field: "buyerName", label: "Comprador", read: (order) => order.buyerName },
+  { field: "productId", label: "Produto vinculado", read: (order) => order.productId },
+  { field: "variantId", label: "Variação vinculada", read: (order) => order.productVariantId },
+  { field: "completedAt", label: "Concluído em", read: (order) => order.completedAt },
+  { field: "deliveredAt", label: "Entregue em", read: (order) => order.deliveredAt },
+  { field: "notes", label: "Observações", read: (order) => order.notes }
+];
+
+const recordGameMarketProductAudit = (
+  before: ProductRecord | null,
+  after: ProductRecord | null,
+  input: {
+    action: "created" | "updated";
+    title: string;
+    message: string;
+    actorUserId: string | null;
+    syncedAt: string;
+  }
+): void => {
+  if (!after) {
+    return;
+  }
+
+  auditHistoryService.record({
+    entityType: "product",
+    entityId: after.id,
+    source: "gamemarket_api",
+    action: input.action,
+    title: input.title,
+    message: input.message,
+    actorUserId: input.actorUserId,
+    relatedProductId: after.id,
+    createdAt: input.syncedAt,
+    changes: auditHistoryService.buildChanges(before, after, productAuditFields)
+  });
+};
+
+const recordGameMarketOrderAudit = (
+  before: OrderRecord | null,
+  after: OrderRecord | null,
+  input: {
+    action: "created" | "updated" | "status_changed";
+    title: string;
+    message: string;
+    actorUserId: string | null;
+    syncedAt: string;
+  }
+): void => {
+  if (!after) {
+    return;
+  }
+
+  auditHistoryService.record({
+    entityType: "order",
+    entityId: after.id,
+    source: "gamemarket_api",
+    action: input.action,
+    title: input.title,
+    message: input.message,
+    actorUserId: input.actorUserId,
+    relatedProductId: after.productId,
+    relatedVariantId: after.productVariantId,
+    relatedOrderId: after.id,
+    inventoryItemId: after.inventoryItemId,
+    createdAt: input.syncedAt,
+    changes: auditHistoryService.buildChanges(before, after, orderAuditFields)
+  });
+};
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -286,6 +376,7 @@ const upsertProduct = (
       return "unchanged";
     }
 
+    const before = productRepository.getById(existing.id);
     db.prepare(
       `
         UPDATE products
@@ -319,6 +410,13 @@ const upsertProduct = (
         externalStatus: product.status,
         externalPayloadHash: hash
       }
+    });
+    recordGameMarketProductAudit(before, productRepository.getById(existing.id), {
+      action: "updated",
+      title: "Produto atualizado pela GameMarket",
+      message: `Produto externo ${externalId} teve metadados auditados após sincronização.`,
+      actorUserId,
+      syncedAt
     });
     return "updated";
   }
@@ -429,6 +527,13 @@ const upsertProduct = (
       externalPayloadHash: hash
     }
   });
+  recordGameMarketProductAudit(null, productRepository.getById(id), {
+    action: "created",
+    title: "Produto importado da GameMarket",
+    message: `Produto externo ${externalId} foi registrado no histórico local.`,
+    actorUserId,
+    syncedAt
+  });
 
   return "imported";
 };
@@ -441,6 +546,7 @@ const syncExistingOrder = (input: {
   syncedAt: string;
 }): OrderSyncResult => {
   const { existing, order, hash, actorUserId, syncedAt } = input;
+  const before = orderRepository.getById(existing.id);
   const mappedStatus = mapGameMarketOrderStatus(order.status);
   const shouldApplyStatus = shouldApplyGameMarketOrderStatus(existing.status, mappedStatus.status);
   const shouldCorrectReleaseState =
@@ -497,6 +603,13 @@ const syncExistingOrder = (input: {
         correctedLocalStatus: "delivered",
         previousCompletedAt: existing.completed_at
       }
+    });
+    recordGameMarketOrderAudit(before, orderRepository.getById(existing.id), {
+      action: "status_changed",
+      title: "Status corrigido pela GameMarket",
+      message: `Pedido externo ${getGameMarketOrderExternalId(order)} voltou para aguardando liberação.`,
+      actorUserId,
+      syncedAt
     });
 
     return { result: "updated", orderId: existing.id };
@@ -582,6 +695,13 @@ const syncExistingOrder = (input: {
         actionRequired: mappedStatus.actionRequired
       }
     });
+    recordGameMarketOrderAudit(before, orderRepository.getById(existing.id), {
+      action: "status_changed",
+      title: "Status atualizado pela GameMarket",
+      message: `Pedido externo ${getGameMarketOrderExternalId(order)} mudou para ${mappedStatus.status}.`,
+      actorUserId,
+      syncedAt
+    });
 
     return { result: "updated", orderId: existing.id };
   }
@@ -607,6 +727,14 @@ const syncExistingOrder = (input: {
       updatedByUserId: actorUserId,
       updatedAt: syncedAt
     });
+
+  recordGameMarketOrderAudit(before, orderRepository.getById(existing.id), {
+    action: "updated",
+    title: "Pedido atualizado pela GameMarket",
+    message: `Pedido externo ${getGameMarketOrderExternalId(order)} teve metadados auditados sem rebaixar status local.`,
+    actorUserId,
+    syncedAt
+  });
 
   return { result: "updated", orderId: existing.id };
 };
@@ -808,6 +936,13 @@ const upsertOrder = (
       variantLinked,
       actionRequired
     }
+  });
+  recordGameMarketOrderAudit(null, orderRepository.getById(id), {
+    action: "created",
+    title: "Pedido importado da GameMarket",
+    message: `Pedido externo ${externalId} foi registrado no histórico local.`,
+    actorUserId,
+    syncedAt
   });
 
   return { result: "imported", orderId: id };

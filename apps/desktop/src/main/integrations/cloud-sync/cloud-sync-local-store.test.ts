@@ -313,6 +313,39 @@ describe("cloudSyncLocalStore.collectChanges", () => {
     expect(collection.ignored).toBe(1);
     expect(serialized).not.toContain("gm_sk_should_not_sync_123456");
   });
+
+  it("does not re-upload audit rows created while applying cloud changes", () => {
+    rowsFor("events").push({
+      id: "event-cloud-audit-1",
+      event_code: "EVT-CLOUD-AUDIT-1",
+      source: "system",
+      type: "audit.product_updated",
+      severity: "info",
+      title: "Alteração aplicada pela nuvem",
+      message: "Produto recebeu alteração do workspace.",
+      order_id: null,
+      product_id: "product-1",
+      inventory_item_id: null,
+      actor_user_id: null,
+      read_at: null,
+      raw_payload: JSON.stringify({
+        audit: true,
+        source: "cloud_sync",
+        entityType: "product",
+        entityId: "product-1",
+        changes: [{ field: "name", label: "Nome", before: "A", after: "B" }]
+      }),
+      created_at: now,
+      sync_status: "synced",
+      last_cloud_synced_at: now,
+      sync_revision: 0
+    });
+
+    const collection = cloudSyncLocalStore.collectChanges(true);
+
+    expect(collection.changes).toHaveLength(0);
+    expect(collection.ignored).toBe(1);
+  });
 });
 
 describe("cloudSyncLocalStore.applyRemote", () => {
@@ -841,5 +874,43 @@ describe("cloudSyncLocalStore.applyRemote", () => {
     expect(result).toEqual({ applied: 0, conflicts: 1, ignored: 0, skipped: 0 });
     expect(rowsFor("product_variants")[0]?.unit_cost_cents).toBe(9900);
     expect(state.conflicts).toHaveLength(1);
+  });
+
+  it("records local audit when an existing clean product receives a cloud update", () => {
+    rowsFor("products").push({
+      ...productPayload(1),
+      name: "Produto local",
+      cloud_id: "cloud-products-product-1",
+      workspace_id: "workspace-1",
+      sync_revision: 1,
+      sync_status: "synced",
+      last_cloud_synced_at: "2026-05-01T12:00:00.000Z"
+    });
+
+    const result = cloudSyncLocalStore.applyRemote(
+      [
+        remoteEntity("products", "product-1", {
+          ...productPayload(1),
+          name: "Produto cloud",
+          updated_at: "2026-05-01T12:01:00.000Z"
+        }, {
+          cloudId: "cloud-products-product-1",
+          version: 2,
+          updatedAt: "2026-05-01T12:01:00.000Z"
+        })
+      ],
+      now
+    );
+
+    const audit = rowsFor("events").find((event) => event.type === "audit.product_updated");
+
+    expect(result).toMatchObject({ applied: 1, conflicts: 0, skipped: 0 });
+    expect(audit).toMatchObject({
+      productId: "product-1",
+      workspaceId: "workspace-1",
+      lastCloudSyncedAt: now
+    });
+    expect(JSON.stringify(audit?.rawPayload)).toContain("cloud_sync");
+    expect(JSON.stringify(audit?.rawPayload)).not.toContain("remote-login");
   });
 });

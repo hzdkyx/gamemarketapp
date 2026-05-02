@@ -28,6 +28,7 @@ import {
 import { MetricCard as Metric } from "@renderer/components/ui/metric-card";
 import { Table, Td, Th } from "@renderer/components/ui/table";
 import { ProductVariantsPanel } from "@renderer/components/products/product-variants-panel";
+import { AuditHistoryPanel } from "@renderer/components/audit/audit-history-panel";
 import { useAuth } from "@renderer/lib/auth-context";
 import { downloadCsv } from "@renderer/lib/csv";
 import { getDesktopApi } from "@renderer/lib/desktop-api";
@@ -264,6 +265,7 @@ const ProductForm = ({
   onClose,
   onSubmit,
   onApplyToVariants,
+  auditEntityId,
   saving,
   applyingVariants,
   variantCount,
@@ -275,6 +277,7 @@ const ProductForm = ({
   onClose: () => void;
   onSubmit: () => void;
   onApplyToVariants: () => void;
+  auditEntityId: string | null;
   saving: boolean;
   applyingVariants: boolean;
   variantCount: number;
@@ -619,6 +622,14 @@ const ProductForm = ({
               placeholder="Notas internas do produto"
             />
           </label>
+
+          {mode === "edit" && auditEntityId && (
+            <AuditHistoryPanel
+              entityType="product"
+              entityId={auditEntityId}
+              title="Histórico do produto"
+            />
+          )}
         </div>
       </div>
     </div>
@@ -1156,6 +1167,7 @@ export const ProductsPage = (): JSX.Element => {
           onClose={closeForm}
           onSubmit={() => void saveProduct()}
           onApplyToVariants={() => void applyParentPricingToVariants()}
+          auditEntityId={editingId}
           saving={saving}
           applyingVariants={applyingVariants}
           variantCount={editingProduct?.variantCount ?? 0}

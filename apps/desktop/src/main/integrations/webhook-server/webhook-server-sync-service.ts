@@ -1,6 +1,7 @@
 import { getSqliteDatabase } from "../../database/database";
 import { eventService } from "../../services/event-service";
 import { localNotificationService } from "../../services/local-notification-service";
+import { auditHistoryService, type AuditFieldDefinition } from "../../services/audit-history-service";
 import type {
   EventSeverity,
   EventType,
@@ -27,7 +28,29 @@ interface ExternalReferences {
   productId: string | null;
 }
 
+interface WebhookOrderAuditSnapshot {
+  id: string;
+  orderCode: string;
+  externalOrderId: string | null;
+  status: string;
+  externalStatus: string | null;
+  actionRequired: boolean;
+  grossAmount: number;
+  netAmount: number;
+  profitAmount: number;
+  buyerName: string | null;
+  productId: string;
+  variantId: string | null;
+  inventoryItemId: string | null;
+  completedAt: string | null;
+  deliveredAt: string | null;
+  notes: string | null;
+  updatedAt: string;
+}
+
 const nowIso = (): string => new Date().toISOString();
+
+const centsToMoney = (value: number | null): number => Math.round(value ?? 0) / 100;
 
 const mappingByRemoteType: Record<string, LocalEventMapping> = {
   "gamemarket.order.sale_confirmed": {
@@ -255,14 +278,162 @@ const findLocalProductId = (externalProductId: string | null): string | null => 
   return row?.id ?? null;
 };
 
-const markOrderActionRequired = (orderId: string | null, actionRequired: boolean): void => {
+const webhookOrderAuditFields: Array<AuditFieldDefinition<WebhookOrderAuditSnapshot>> = [
+  { field: "status", label: "Status local", read: (order) => order.status },
+  { field: "externalStatus", label: "Status externo GameMarket", read: (order) => order.externalStatus },
+  { field: "action", label: "Ação pendente", read: (order) => order.actionRequired },
+  { field: "grossAmount", label: "Valor bruto", read: (order) => order.grossAmount },
+  { field: "netAmount", label: "Valor líquido", read: (order) => order.netAmount },
+  { field: "profitAmount", label: "Lucro snapshot", read: (order) => order.profitAmount },
+  { field: "buyerName", label: "Comprador", read: (order) => order.buyerName },
+  { field: "productId", label: "Produto vinculado", read: (order) => order.productId },
+  { field: "variantId", label: "Variação vinculada", read: (order) => order.variantId },
+  { field: "inventoryItemId", label: "Item de estoque", read: (order) => order.inventoryItemId },
+  { field: "completedAt", label: "Concluído em", read: (order) => order.completedAt },
+  { field: "deliveredAt", label: "Entregue em", read: (order) => order.deliveredAt },
+  { field: "notes", label: "Observações", read: (order) => order.notes }
+];
+
+const getOrderAuditSnapshot = (orderId: string | null): WebhookOrderAuditSnapshot | null => {
+  if (!orderId) {
+    return null;
+  }
+
+  const row = getSqliteDatabase()
+    .prepare(
+      `
+        SELECT
+          id,
+          order_code,
+          external_order_id,
+          status,
+          external_status,
+          action_required,
+          sale_price_cents,
+          net_value_cents,
+          profit_cents,
+          buyer_name,
+          product_id,
+          product_variant_id,
+          inventory_item_id,
+          completed_at,
+          delivered_at,
+          notes,
+          updated_at
+        FROM orders
+        WHERE id = ?
+      `
+    )
+    .get(orderId) as
+    | {
+        id: string;
+        order_code: string;
+        external_order_id: string | null;
+        status: string;
+        external_status: string | null;
+        action_required: number;
+        sale_price_cents: number | null;
+        net_value_cents: number | null;
+        profit_cents: number | null;
+        buyer_name: string | null;
+        product_id: string;
+        product_variant_id: string | null;
+        inventory_item_id: string | null;
+        completed_at: string | null;
+        delivered_at: string | null;
+        notes: string | null;
+        updated_at: string;
+      }
+    | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    orderCode: row.order_code,
+    externalOrderId: row.external_order_id,
+    status: row.status,
+    externalStatus: row.external_status,
+    actionRequired: Boolean(row.action_required),
+    grossAmount: centsToMoney(row.sale_price_cents),
+    netAmount: centsToMoney(row.net_value_cents),
+    profitAmount: centsToMoney(row.profit_cents),
+    buyerName: row.buyer_name,
+    productId: row.product_id,
+    variantId: row.product_variant_id,
+    inventoryItemId: row.inventory_item_id,
+    completedAt: row.completed_at,
+    deliveredAt: row.delivered_at,
+    notes: row.notes,
+    updatedAt: row.updated_at
+  };
+};
+
+const recordWebhookOrderAudit = (
+  before: WebhookOrderAuditSnapshot | null,
+  after: WebhookOrderAuditSnapshot | null,
+  input: {
+    action: "updated" | "status_changed";
+    title: string;
+    message: string;
+    actorUserId: string | null;
+    remoteEvent: WebhookServerEventItem;
+  }
+): void => {
+  if (!after) {
+    return;
+  }
+
+  auditHistoryService.record({
+    entityType: "order",
+    entityId: after.id,
+    source: "webhook",
+    action: input.action,
+    title: input.title,
+    message: input.message,
+    actorUserId: input.actorUserId,
+    relatedProductId: after.productId,
+    relatedVariantId: after.variantId,
+    relatedOrderId: after.id,
+    inventoryItemId: after.inventoryItemId,
+    createdAt: after.updatedAt,
+    changes: [
+      ...auditHistoryService.buildChanges(before, after, webhookOrderAuditFields),
+      {
+        field: "webhookEvent",
+        label: "Evento webhook",
+        before: null,
+        after: input.remoteEvent.eventType,
+        sensitive: false
+      }
+    ]
+  });
+};
+
+const markOrderActionRequired = (
+  orderId: string | null,
+  actionRequired: boolean,
+  actorUserId: string | null,
+  remoteEvent: WebhookServerEventItem
+): void => {
   if (!orderId || !actionRequired) {
     return;
   }
 
+  const before = getOrderAuditSnapshot(orderId);
+  const timestamp = nowIso();
   getSqliteDatabase()
     .prepare("UPDATE orders SET action_required = 1, updated_at = ? WHERE id = ?")
-    .run(nowIso(), orderId);
+    .run(timestamp, orderId);
+  recordWebhookOrderAudit(before, getOrderAuditSnapshot(orderId), {
+    action: "updated",
+    title: "Pedido marcado para ação pelo webhook",
+    message: "Evento recebido pelo webhook exigiu revisão operacional do pedido.",
+    actorUserId,
+    remoteEvent
+  });
 };
 
 const completionRemoteTypes = new Set([
@@ -290,6 +461,7 @@ const promoteOrderCompleted = (
   }
 
   const timestamp = nowIso();
+  const before = getOrderAuditSnapshot(orderId);
   getSqliteDatabase()
     .prepare(
       `
@@ -310,6 +482,13 @@ const promoteOrderCompleted = (
       updatedByUserId: actorUserId,
       updatedAt: timestamp
     });
+  recordWebhookOrderAudit(before, getOrderAuditSnapshot(orderId), {
+    action: "status_changed",
+    title: "Pedido concluído pelo webhook",
+    message: "Webhook indicou conclusão/liberação financeira pela GameMarket.",
+    actorUserId,
+    remoteEvent
+  });
 };
 
 const makeFailedSummary = (startedAt: string, error: string): WebhookServerSyncSummary => {
@@ -491,7 +670,7 @@ export const webhookServerSyncService = {
           }
           const productId = findLocalProductId(references.productId);
           const mapping = getMapping(remoteEvent);
-          markOrderActionRequired(orderId, mapping.actionRequired);
+          markOrderActionRequired(orderId, mapping.actionRequired, actorUserId, remoteEvent);
           promoteOrderCompleted(orderId, remoteEvent, actorUserId);
           const imported = eventService.createInternal({
             source: "webhook_server",

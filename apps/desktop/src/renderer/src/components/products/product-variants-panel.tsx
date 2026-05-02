@@ -9,11 +9,13 @@ import {
   Download,
   Edit3,
   Flag,
+  History,
   Plus,
   Save,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AuditHistoryPanel } from "@renderer/components/audit/audit-history-panel";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { Table, Td, Th } from "@renderer/components/ui/table";
@@ -198,6 +200,7 @@ export const ProductVariantsPanel = ({
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<VariantFormState>(emptyVariantForm);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [historyVariant, setHistoryVariant] = useState<ProductVariantRecord | null>(null);
   const initialVariantAppliedRef = useRef(false);
   const [saving, setSaving] = useState(false);
 
@@ -223,6 +226,7 @@ export const ProductVariantsPanel = ({
         );
         if (initialVariant) {
           setEditingId(initialVariant.id);
+          setHistoryVariant(initialVariant);
           setForm(variantToForm(initialVariant));
         }
 
@@ -256,6 +260,7 @@ export const ProductVariantsPanel = ({
 
   const resetForm = (): void => {
     setEditingId(null);
+    setHistoryVariant(null);
     initialVariantAppliedRef.current = true;
     setForm(emptyVariantForm);
   };
@@ -620,6 +625,14 @@ export const ProductVariantsPanel = ({
             </div>
           </div>
 
+          {(editingId || historyVariant) && (
+            <AuditHistoryPanel
+              entityType="variant"
+              entityId={historyVariant?.id ?? editingId ?? ""}
+              title={`Histórico da variação ${historyVariant?.name ?? form.name}`}
+            />
+          )}
+
           <Table>
             <thead>
               <tr>
@@ -718,10 +731,19 @@ export const ProductVariantsPanel = ({
                           disabled={!canEditProducts}
                           onClick={() => {
                             setEditingId(variant.id);
+                            setHistoryVariant(variant);
                             setForm(variantToForm(variant));
                           }}
                         >
                           <Edit3 size={15} />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Histórico"
+                          onClick={() => setHistoryVariant(variant)}
+                        >
+                          <History size={15} />
                         </Button>
                         <Button
                           size="icon"

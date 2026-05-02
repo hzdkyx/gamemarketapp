@@ -32,6 +32,32 @@ vi.mock("../../database/database", () => ({
         };
       }
 
+      if (sql.includes("FROM orders") && sql.includes("WHERE id = ?")) {
+        return {
+          get: (orderId: string) =>
+            orderId === "local-order-1"
+              ? {
+                  id: "local-order-1",
+                  order_code: "GMK-ORD-1",
+                  external_order_id: "gm-order-1",
+                  status: state.completedOrders.includes(orderId) ? "completed" : "payment_confirmed",
+                  external_status: "processing",
+                  action_required: state.actionRequiredOrders.includes(orderId) ? 1 : 0,
+                  sale_price_cents: 1500,
+                  net_value_cents: 1305,
+                  profit_cents: 1305,
+                  buyer_name: "comprador",
+                  product_id: "product-1",
+                  product_variant_id: null,
+                  completed_at: state.completedOrders.includes(orderId) ? "2026-04-29T12:00:00.000Z" : null,
+                  delivered_at: null,
+                  notes: null,
+                  updated_at: "2026-04-29T12:00:00.000Z"
+                }
+              : undefined
+        };
+      }
+
       if (sql.includes("FROM orders")) {
         return {
           get: (externalOrderId: string) =>

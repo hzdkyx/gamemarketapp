@@ -21,6 +21,7 @@ import { orderRepository, type OrderWriteRecord } from "../repositories/order-re
 import { productVariantRepository } from "../repositories/product-variant-repository";
 import { productRepository } from "../repositories/product-repository";
 import { isGameMarketCompletedStatus } from "../integrations/gamemarket/gamemarket-mappers";
+import { auditHistoryService, type AuditFieldDefinition } from "./audit-history-service";
 import { eventService } from "./event-service";
 import { inventoryService } from "./inventory-service";
 import { moneyToCents } from "./money";
@@ -95,6 +96,52 @@ const statusLabel: Record<OrderStatus, string> = {
   mediation: "mediação",
   problem: "problema",
   archived: "arquivado"
+};
+
+const orderAuditFields: Array<AuditFieldDefinition<OrderRecord>> = [
+  { field: "orderCode", label: "Código do pedido", read: (order) => order.orderCode },
+  { field: "externalOrderId", label: "ID externo GameMarket", read: (order) => order.externalOrderId },
+  { field: "status", label: "Status local", read: (order) => order.status },
+  { field: "externalStatus", label: "Status externo GameMarket", read: (order) => order.externalStatus },
+  { field: "action", label: "Ação pendente", read: (order) => order.actionRequired },
+  { field: "grossAmount", label: "Valor bruto", read: (order) => order.salePrice },
+  { field: "netAmount", label: "Valor líquido", read: (order) => order.netValue },
+  { field: "profitAmount", label: "Lucro snapshot", read: (order) => order.profit },
+  { field: "buyerName", label: "Comprador", read: (order) => order.buyerName },
+  { field: "productId", label: "Produto vinculado", read: (order) => order.productId },
+  { field: "variantId", label: "Variação vinculada", read: (order) => order.productVariantId },
+  { field: "inventoryItemId", label: "Item de estoque", read: (order) => order.inventoryItemId },
+  { field: "completedAt", label: "Concluído em", read: (order) => order.completedAt },
+  { field: "deliveredAt", label: "Entregue em", read: (order) => order.deliveredAt },
+  { field: "notes", label: "Observações", read: (order) => order.notes }
+];
+
+const recordOrderAudit = (
+  before: OrderRecord | null,
+  after: OrderRecord,
+  input: {
+    action: "created" | "updated" | "status_changed";
+    source?: "manual" | "gamemarket_api" | "webhook";
+    actorUserId?: string | null;
+    title: string;
+    message: string;
+  }
+): void => {
+  auditHistoryService.record({
+    entityType: "order",
+    entityId: after.id,
+    source: input.source ?? "manual",
+    action: input.action,
+    title: input.title,
+    message: input.message,
+    actorUserId: input.actorUserId ?? null,
+    relatedProductId: after.productId,
+    relatedVariantId: after.productVariantId,
+    relatedOrderId: after.id,
+    inventoryItemId: after.inventoryItemId,
+    createdAt: after.updatedAt,
+    changes: auditHistoryService.buildChanges(before, after, orderAuditFields)
+  });
 };
 
 const makeFinancials = (input: { salePrice: number; unitCost: number; feePercent: number }) => {
@@ -596,6 +643,12 @@ export const orderService = {
       });
 
       createStatusEvent(created, null, actorUserId);
+      recordOrderAudit(null, created, {
+        action: "created",
+        actorUserId,
+        title: "Pedido criado",
+        message: `Pedido ${created.orderCode} criado localmente.`
+      });
       applyInventoryTransition(created, actorUserId);
 
       return created;
@@ -668,6 +721,13 @@ export const orderService = {
 
       const updated = orderRepository.update(writeRecord);
 
+      recordOrderAudit(current, updated, {
+        action: "updated",
+        actorUserId,
+        title: "Pedido atualizado",
+        message: `Pedido ${updated.orderCode} teve dados operacionais alterados.`
+      });
+
       if (Object.hasOwn(data, "inventoryItemId")) {
         if (data.inventoryItemId) {
           return this.linkInventoryItem(updated.id, data.inventoryItemId, actorUserId);
@@ -716,6 +776,12 @@ export const orderService = {
       const updated = orderRepository.update(updatedWrite);
 
       createStatusEvent(updated, current.status, actorUserId);
+      recordOrderAudit(current, updated, {
+        action: "status_changed",
+        actorUserId,
+        title: "Status do pedido alterado",
+        message: `Pedido ${updated.orderCode} mudou de ${statusLabel[current.status]} para ${statusLabel[updated.status]}.`
+      });
       applyInventoryTransition(updated, actorUserId);
 
       return updated;
@@ -744,6 +810,12 @@ export const orderService = {
         updatedAt: nowIso()
       });
 
+      recordOrderAudit(current, updated, {
+        action: "updated",
+        actorUserId,
+        title: "Item de estoque vinculado",
+        message: `Pedido ${updated.orderCode} foi vinculado ao item de estoque.`
+      });
       applyInventoryTransition(updated, actorUserId);
       return updated;
     })();
@@ -755,12 +827,21 @@ export const orderService = {
       const current = this.get(orderId).order;
       releaseInventoryForOrder(current, actorUserId);
 
-      return orderRepository.update({
+      const updated = orderRepository.update({
         ...recordToWrite(current),
         inventoryItemId: null,
         updatedByUserId: actorUserId ?? current.updatedByUserId,
         updatedAt: nowIso()
       });
+
+      recordOrderAudit(current, updated, {
+        action: "updated",
+        actorUserId,
+        title: "Item de estoque desvinculado",
+        message: `Pedido ${updated.orderCode} teve o item de estoque removido.`
+      });
+
+      return updated;
     })();
   },
 

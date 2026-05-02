@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { AuditHistoryPanel } from "@renderer/components/audit/audit-history-panel";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@renderer/components/ui/card";
@@ -852,7 +853,7 @@ export const OrdersPage = (): JSX.Element => {
 
         <Card className="self-start">
           <CardHeader>
-            <CardTitle>Detalhe e timeline</CardTitle>
+            <CardTitle>Detalhe e histórico</CardTitle>
             {selected?.order ? <Badge tone={statusTone[selected.order.status]}>{statusLabels[selected.order.status]}</Badge> : <Badge>vazio</Badge>}
           </CardHeader>
           <CardContent className="space-y-4">
@@ -947,39 +948,16 @@ export const OrdersPage = (): JSX.Element => {
                   </Button>
                 </div>
 
-                <div className="space-y-3">
-                  {selected.timeline.map((event) => (
-                    <div key={event.id} className="border-l border-cyan/40 pl-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold text-white">{event.title}</div>
-                        <Badge
-                          tone={
-                            event.severity === "critical"
-                              ? "danger"
-                              : event.severity === "warning"
-                                ? "warning"
-                                : event.severity === "success"
-                                  ? "success"
-                                  : "neutral"
-                          }
-                        >
-                          {event.type}
-                        </Badge>
-                      </div>
-                      {event.message && <div className="mt-1 text-xs leading-5 text-slate-400">{event.message}</div>}
-                      <div className="mt-1 text-xs text-slate-500">{new Date(event.createdAt).toLocaleString("pt-BR")}</div>
-                    </div>
-                  ))}
-                  {selected.timeline.length === 0 && (
-                    <div className="rounded-lg border border-dashed border-line bg-panelSoft p-4 text-sm text-slate-400">
-                      Sem eventos para este pedido.
-                    </div>
-                  )}
-                </div>
+                <AuditHistoryPanel
+                  entityType="order"
+                  entityId={selected.order.id}
+                  title="Histórico do pedido"
+                  compact
+                />
               </>
             ) : (
               <div className="rounded-lg border border-dashed border-line bg-panelSoft p-6 text-center text-sm text-slate-400">
-                Selecione ou crie um pedido para ver a timeline.
+                Selecione ou crie um pedido para ver o histórico.
               </div>
             )}
           </CardContent>

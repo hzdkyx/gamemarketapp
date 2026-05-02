@@ -52,6 +52,8 @@ import type {
   InventoryRecord,
   InventoryRevealSecretInput,
   InventoryUpdateInput,
+  ListAuditHistoryInput,
+  ListAuditHistoryResult,
   LocalRecoveryUserRecord,
   NotificationSettings,
   NotificationSettingsUpdateInput,
@@ -395,6 +397,34 @@ const api = {
         "events:exportCsv",
         payload,
       ) as Promise<CsvExportResult>,
+  },
+  audit: {
+    listEntityHistory: (payload: ListAuditHistoryInput) =>
+      ipcRenderer.invoke(
+        "audit:listEntityHistory",
+        payload,
+      ) as Promise<ListAuditHistoryResult>,
+    listProductHistory: (
+      payload: Omit<ListAuditHistoryInput, "entityType">,
+    ) =>
+      ipcRenderer.invoke(
+        "audit:listProductHistory",
+        payload,
+      ) as Promise<ListAuditHistoryResult>,
+    listVariantHistory: (
+      payload: Omit<ListAuditHistoryInput, "entityType">,
+    ) =>
+      ipcRenderer.invoke(
+        "audit:listVariantHistory",
+        payload,
+      ) as Promise<ListAuditHistoryResult>,
+    listOrderHistory: (
+      payload: Omit<ListAuditHistoryInput, "entityType">,
+    ) =>
+      ipcRenderer.invoke(
+        "audit:listOrderHistory",
+        payload,
+      ) as Promise<ListAuditHistoryResult>,
   },
   profit: {
     list: (payload?: ProfitListInput) =>
