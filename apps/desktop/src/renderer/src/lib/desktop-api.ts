@@ -3,6 +3,9 @@ import type {
   AppNotificationListResult,
   BackupStatus,
   CloudSyncAutoSyncStatus,
+  CloudSyncConflictDetail,
+  CloudSyncConflictListResult,
+  CloudSyncConflictResolutionResult,
   CloudSyncSettingsView,
   GameMarketSettingsView,
   GameMarketPollingStatus,
@@ -531,6 +534,27 @@ const fallbackApi: HzdKyxDesktopApi = {
       errors: ["Sync exige execução no Electron."],
     }),
     getLastSyncSummary: async () => null,
+    listConflicts: async (): Promise<CloudSyncConflictListResult> => ({
+      items: [],
+      total: 0,
+      pending: 0,
+      filters: {
+        status: "pending",
+        entityType: "all",
+        severity: "all",
+        source: "all",
+        search: "",
+        dateFrom: null,
+        dateTo: null,
+        limit: 100,
+      },
+    }),
+    getConflictDetail: async (): Promise<CloudSyncConflictDetail> => {
+      throw new Error("Conflitos de sync exigem execução no Electron.");
+    },
+    resolveConflict: async (): Promise<CloudSyncConflictResolutionResult> => {
+      throw new Error("Resolver conflitos exige execução no Electron.");
+    },
     getAutoSyncStatus: async (): Promise<CloudSyncAutoSyncStatus> => ({
       active: false,
       paused: false,

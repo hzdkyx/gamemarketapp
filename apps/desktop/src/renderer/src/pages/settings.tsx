@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
+  Archive,
   BellRing,
+  CheckCircle2,
   Cloud,
   Copy,
   Database,
@@ -10,6 +12,7 @@ import {
   Eye,
   FileText,
   FolderOpen,
+  GitCompareArrows,
   HardDrive,
   History,
   KeyRound,
@@ -43,6 +46,15 @@ import type {
   CloudAuditLogView,
   EventType,
   CloudSyncAutoSyncStatus,
+  CloudSyncConflictDetail,
+  CloudSyncConflictListInput,
+  CloudSyncConflictListItem,
+  CloudSyncConflictListResult,
+  CloudSyncConflictResolutionType,
+  CloudSyncConflictSeverity,
+  CloudSyncConflictSource,
+  CloudSyncConflictStatus,
+  CloudSyncEntityType,
   CloudRole,
   CloudSyncSettingsView,
   CloudSyncSummary,
@@ -120,6 +132,12 @@ const eventLabels: Record<EventType, string> = {
   "integration.webhook_server.review_received": "Avaliação GameMarket recebida",
   "integration.webhook_server.variant_sold_out": "Variante GameMarket esgotada",
   "integration.webhook_server.unknown_event": "Evento GameMarket desconhecido",
+  "cloud.conflict_detected": "Conflito cloud detectado",
+  "cloud.conflict_resolved_local": "Conflito resolvido com versão local",
+  "cloud.conflict_resolved_remote": "Conflito resolvido com versão da nuvem",
+  "cloud.conflict_resolved_manual": "Conflito resolvido manualmente",
+  "cloud.conflict_ignored": "Conflito cloud ignorado",
+  "cloud.conflict_resolution_failed": "Falha ao resolver conflito cloud",
   "system.backup_created": "Backup local criado",
   "system.backup_failed": "Backup local falhou",
   "system.backup_deleted": "Backup local excluído",
@@ -206,6 +224,11 @@ interface CloudMemberStatusActionState {
 interface CloudMemberAuditState {
   member: CloudWorkspaceMemberView;
   logs: CloudAuditLogView[];
+}
+
+interface CloudConflictManualState {
+  values: Record<string, string>;
+  note: string;
 }
 
 interface UserFormState {
@@ -460,6 +483,107 @@ const cloudRoleTone = (role: CloudRole): "success" | "warning" | "danger" | "cya
   return "neutral";
 };
 
+const defaultCloudConflictFilters: CloudSyncConflictListInput = {
+  status: "pending",
+  entityType: "all",
+  severity: "all",
+  source: "all",
+  search: "",
+  dateFrom: null,
+  dateTo: null,
+  limit: 100
+};
+
+const cloudConflictEntityLabels: Record<CloudSyncEntityType, string> = {
+  products: "Produtos",
+  product_variants: "Variações",
+  inventory_items: "Estoque",
+  orders: "Pedidos",
+  events: "Eventos",
+  app_notifications: "Notificações",
+  settings: "Configurações"
+};
+
+const cloudConflictStatusLabels: Record<CloudSyncConflictStatus, string> = {
+  pending: "Pendente",
+  resolved_local: "Resolvido local",
+  resolved_remote: "Resolvido nuvem",
+  resolved_manual: "Resolvido manual",
+  ignored: "Ignorado",
+  failed: "Falhou"
+};
+
+const cloudConflictSeverityLabels: Record<CloudSyncConflictSeverity, string> = {
+  low: "Baixo",
+  medium: "Médio",
+  high: "Alto",
+  critical: "Crítico"
+};
+
+const cloudConflictSourceLabels: Record<CloudSyncConflictSource, string> = {
+  local_pull: "Download cloud",
+  remote_dependency: "Dependência ausente",
+  cloud_push: "Envio local",
+  manual: "Manual"
+};
+
+const cloudConflictStatusTone = (status: CloudSyncConflictStatus): "success" | "warning" | "danger" | "cyan" | "neutral" => {
+  if (status === "pending") {
+    return "warning";
+  }
+  if (status === "failed") {
+    return "danger";
+  }
+  if (status === "ignored") {
+    return "neutral";
+  }
+  return "success";
+};
+
+const cloudConflictSeverityTone = (
+  severity: CloudSyncConflictSeverity
+): "success" | "warning" | "danger" | "cyan" | "neutral" => {
+  if (severity === "critical") {
+    return "danger";
+  }
+  if (severity === "high") {
+    return "warning";
+  }
+  if (severity === "medium") {
+    return "cyan";
+  }
+  return "neutral";
+};
+
+const formatConflictValue = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return JSON.stringify(value);
+};
+
+const valueToManualInput = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+};
+
+const parseManualInputValue = (value: string): unknown => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return value;
+  }
+};
+
 type SettingsSectionId = "users" | "cloud" | "system" | "gamemarket" | "webhook" | "notifications";
 
 const settingsSections: Array<{ id: SettingsSectionId; panelId: string; label: string; icon: LucideIcon }> = [
@@ -616,6 +740,17 @@ export const SettingsPage = (): JSX.Element => {
   const [cloudMemberPasswordReset, setCloudMemberPasswordReset] = useState<CloudMemberPasswordResetState | null>(null);
   const [cloudMemberStatusAction, setCloudMemberStatusAction] = useState<CloudMemberStatusActionState | null>(null);
   const [cloudMemberAudit, setCloudMemberAudit] = useState<CloudMemberAuditState | null>(null);
+  const [cloudConflictFilters, setCloudConflictFilters] =
+    useState<CloudSyncConflictListInput>(defaultCloudConflictFilters);
+  const [cloudConflicts, setCloudConflicts] = useState<CloudSyncConflictListResult | null>(null);
+  const [cloudConflictDetail, setCloudConflictDetail] = useState<CloudSyncConflictDetail | null>(null);
+  const [cloudConflictBusy, setCloudConflictBusy] = useState<"loading" | "detail" | "resolving" | null>(null);
+  const [cloudConflictAction, setCloudConflictAction] = useState<CloudSyncConflictResolutionType | null>(null);
+  const [cloudConflictManual, setCloudConflictManual] = useState<CloudConflictManualState>({
+    values: {},
+    note: ""
+  });
+  const [cloudConflictResult, setCloudConflictResult] = useState("");
   const [cloudBusy, setCloudBusy] = useState<
     | "saving"
     | "testing"
@@ -672,10 +807,11 @@ export const SettingsPage = (): JSX.Element => {
         api.webhookServer.getSettings(),
         api.webhookServer.getLastSyncSummary()
       ]);
-      const [loadedCloudSyncSettings, loadedCloudSyncSummary, loadedCloudAutoSyncStatus] = await Promise.all([
+      const [loadedCloudSyncSettings, loadedCloudSyncSummary, loadedCloudAutoSyncStatus, loadedCloudConflicts] = await Promise.all([
         api.cloudSync.getSettings(),
         api.cloudSync.getLastSyncSummary(),
-        api.cloudSync.getAutoSyncStatus()
+        api.cloudSync.getAutoSyncStatus(),
+        api.cloudSync.listConflicts(defaultCloudConflictFilters)
       ]);
       setDatabaseStatus(dbStatus);
       setAppMeta(meta);
@@ -707,6 +843,7 @@ export const SettingsPage = (): JSX.Element => {
       });
       setCloudSyncSummary(loadedCloudSyncSummary);
       setCloudAutoSyncStatus(loadedCloudAutoSyncStatus);
+      setCloudConflicts(loadedCloudConflicts);
       setCloudSyncCustomInterval(!cloudSyncPresetValues.includes(loadedCloudSyncSettings.syncIntervalSeconds as 10 | 30 | 60 | 300));
       if (loadedCloudSyncSettings.workspaceRole === "owner" || loadedCloudSyncSettings.workspaceRole === "admin") {
         try {
@@ -979,11 +1116,23 @@ export const SettingsPage = (): JSX.Element => {
     }
   };
 
+  const refreshCloudConflicts = async (filters: CloudSyncConflictListInput = cloudConflictFilters): Promise<void> => {
+    setCloudConflictBusy((currentValue) => currentValue ?? "loading");
+    try {
+      const result = await api.cloudSync.listConflicts(filters);
+      setCloudConflicts(result);
+      setCloudConflictFilters(filters);
+    } finally {
+      setCloudConflictBusy((currentValue) => (currentValue === "loading" ? null : currentValue));
+    }
+  };
+
   const refreshCloudSyncSettings = async (): Promise<void> => {
-    const [loadedCloudSyncSettings, loadedCloudSummary, loadedCloudAutoSyncStatus] = await Promise.all([
+    const [loadedCloudSyncSettings, loadedCloudSummary, loadedCloudAutoSyncStatus, loadedCloudConflicts] = await Promise.all([
       api.cloudSync.getSettings(),
       api.cloudSync.getLastSyncSummary(),
-      api.cloudSync.getAutoSyncStatus()
+      api.cloudSync.getAutoSyncStatus(),
+      api.cloudSync.listConflicts(cloudConflictFilters)
     ]);
     setCloudSyncSettings(loadedCloudSyncSettings);
     setCloudSyncSummary(loadedCloudSummary);
@@ -995,6 +1144,7 @@ export const SettingsPage = (): JSX.Element => {
       syncIntervalSeconds: loadedCloudSyncSettings.syncIntervalSeconds
     });
     setCloudAutoSyncStatus(loadedCloudAutoSyncStatus);
+    setCloudConflicts(loadedCloudConflicts);
     setCloudSyncCustomInterval(!cloudSyncPresetValues.includes(loadedCloudSyncSettings.syncIntervalSeconds as 10 | 30 | 60 | 300));
 
     if (loadedCloudSyncSettings.workspaceRole === "owner" || loadedCloudSyncSettings.workspaceRole === "admin") {
@@ -1257,6 +1407,76 @@ export const SettingsPage = (): JSX.Element => {
       );
     } finally {
       setCloudBusy(null);
+    }
+  };
+
+  const openCloudConflictDetail = async (conflict: CloudSyncConflictListItem): Promise<void> => {
+    setCloudConflictBusy("detail");
+    setCloudConflictResult("");
+    setCloudConflictAction(null);
+    setCloudConflictManual({ values: {}, note: "" });
+
+    try {
+      const detail = await api.cloudSync.getConflictDetail(conflict.id);
+      setCloudConflictDetail(detail);
+      setCloudConflictManual({
+        values: Object.fromEntries(
+          detail.editableFields.map((field) => [field, valueToManualInput(detail.localPayload[field])])
+        ),
+        note: ""
+      });
+    } catch (detailError) {
+      setCloudConflictResult(detailError instanceof Error ? detailError.message : "Falha ao abrir conflito.");
+    } finally {
+      setCloudConflictBusy(null);
+    }
+  };
+
+  const resolveCloudConflict = async (resolutionType: CloudSyncConflictResolutionType): Promise<void> => {
+    if (!cloudConflictDetail) {
+      return;
+    }
+
+    const confirmationByType: Record<CloudSyncConflictResolutionType, string> = {
+      keep_local: "Manter a versão local e enviar esta versão no próximo sync?",
+      use_remote: "Aplicar a versão da nuvem neste desktop?",
+      manual: "Salvar a resolução manual localmente e enviar no próximo sync?",
+      ignore: "Ignorar este conflito sem alterar dados locais?"
+    };
+
+    if (!window.confirm(confirmationByType[resolutionType])) {
+      return;
+    }
+
+    setCloudConflictBusy("resolving");
+    setCloudConflictResult("");
+
+    try {
+      const manualPayload =
+        resolutionType === "manual"
+          ? Object.fromEntries(
+              Object.entries(cloudConflictManual.values).map(([field, value]) => [field, parseManualInputValue(value)])
+            )
+          : undefined;
+      const result = await api.cloudSync.resolveConflict({
+        id: cloudConflictDetail.id,
+        resolutionType,
+        manualPayload,
+        note: cloudConflictManual.note || undefined,
+        confirm: resolutionType === "ignore"
+      });
+      setCloudConflictDetail(result.conflict);
+      setCloudConflictAction(null);
+      setCloudConflictResult(result.safeMessage);
+      setCloudResult(result.safeMessage);
+      await refreshCloudSyncSettings();
+    } catch (resolveError) {
+      const message = resolveError instanceof Error ? resolveError.message : "Falha ao resolver conflito.";
+      setCloudConflictResult(message);
+      setCloudResult(message);
+      await refreshCloudConflicts();
+    } finally {
+      setCloudConflictBusy(null);
     }
   };
 
@@ -1689,6 +1909,7 @@ export const SettingsPage = (): JSX.Element => {
   const cloudMemberRemovalExpected = cloudMemberRemoval
     ? getCloudMemberConfirmation(cloudMemberRemoval.member)
     : "";
+  const pendingCloudConflicts = cloudConflicts?.pending ?? cloudSyncSettings?.conflictCount ?? 0;
 
   return (
     <div className="space-y-6">
@@ -1710,6 +1931,11 @@ export const SettingsPage = (): JSX.Element => {
               >
                 <Icon size={14} />
                 {section.label}
+                {section.id === "cloud" && pendingCloudConflicts > 0 && (
+                  <span className="rounded bg-warning/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
+                    {pendingCloudConflicts}
+                  </span>
+                )}
               </Button>
             );
           })}
@@ -2187,6 +2413,244 @@ export const SettingsPage = (): JSX.Element => {
             ) : (
               <div className="mt-2 text-sm text-slate-400">Nenhuma sincronização cloud registrada.</div>
             )}
+          </div>
+
+          <div className="rounded-lg border border-line bg-panelSoft p-4">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                  <GitCompareArrows size={16} className="text-cyan" />
+                  Conflitos de Sincronização
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  Compare versões locais e remotas antes de manter, aplicar, resolver manualmente ou arquivar.
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone={pendingCloudConflicts > 0 ? "warning" : "success"}>
+                  {pendingCloudConflicts} pendente(s)
+                </Badge>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={cloudConflictBusy !== null}
+                  onClick={() => void refreshCloudConflicts()}
+                >
+                  <RefreshCw size={14} />
+                  {cloudConflictBusy === "loading" ? "Atualizando..." : "Atualizar"}
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Entidade</span>
+                <select
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={cloudConflictFilters.entityType}
+                  onChange={(event) => {
+                    const next = {
+                      ...cloudConflictFilters,
+                      entityType: event.target.value as CloudSyncConflictListInput["entityType"]
+                    };
+                    setCloudConflictFilters(next);
+                    void refreshCloudConflicts(next);
+                  }}
+                >
+                  <option value="all">Todas</option>
+                  {Object.entries(cloudConflictEntityLabels).map(([entityType, label]) => (
+                    <option key={entityType} value={entityType}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Status</span>
+                <select
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={cloudConflictFilters.status}
+                  onChange={(event) => {
+                    const next = {
+                      ...cloudConflictFilters,
+                      status: event.target.value as CloudSyncConflictListInput["status"]
+                    };
+                    setCloudConflictFilters(next);
+                    void refreshCloudConflicts(next);
+                  }}
+                >
+                  <option value="all">Todos</option>
+                  {Object.entries(cloudConflictStatusLabels).map(([status, label]) => (
+                    <option key={status} value={status}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Risco</span>
+                <select
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={cloudConflictFilters.severity}
+                  onChange={(event) => {
+                    const next = {
+                      ...cloudConflictFilters,
+                      severity: event.target.value as CloudSyncConflictListInput["severity"]
+                    };
+                    setCloudConflictFilters(next);
+                    void refreshCloudConflicts(next);
+                  }}
+                >
+                  <option value="all">Todos</option>
+                  {Object.entries(cloudConflictSeverityLabels).map(([severity, label]) => (
+                    <option key={severity} value={severity}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Tipo</span>
+                <select
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={cloudConflictFilters.source}
+                  onChange={(event) => {
+                    const next = {
+                      ...cloudConflictFilters,
+                      source: event.target.value as CloudSyncConflictListInput["source"]
+                    };
+                    setCloudConflictFilters(next);
+                    void refreshCloudConflicts(next);
+                  }}
+                >
+                  <option value="all">Todos</option>
+                  {Object.entries(cloudConflictSourceLabels).map(([source, label]) => (
+                    <option key={source} value={source}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Busca</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  value={cloudConflictFilters.search}
+                  placeholder="produto, campo, ID"
+                  onChange={(event) => setCloudConflictFilters({ ...cloudConflictFilters, search: event.target.value })}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      void refreshCloudConflicts();
+                    }
+                  }}
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Data inicial</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  type="date"
+                  value={cloudConflictFilters.dateFrom?.slice(0, 10) ?? ""}
+                  onChange={(event) => {
+                    const next = { ...cloudConflictFilters, dateFrom: event.target.value || null };
+                    setCloudConflictFilters(next);
+                    void refreshCloudConflicts(next);
+                  }}
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs font-semibold text-slate-400">Data final</span>
+                <input
+                  className="focus-ring h-10 w-full rounded-md border border-line bg-panel px-3 text-sm text-white"
+                  type="date"
+                  value={cloudConflictFilters.dateTo?.slice(0, 10) ?? ""}
+                  onChange={(event) => {
+                    const next = { ...cloudConflictFilters, dateTo: event.target.value || null };
+                    setCloudConflictFilters(next);
+                    void refreshCloudConflicts(next);
+                  }}
+                />
+              </label>
+            </div>
+
+            {cloudConflictResult && (
+              <div className="mt-3 rounded-md border border-line bg-panel px-3 py-2 text-sm text-slate-300">
+                {cloudConflictResult}
+              </div>
+            )}
+
+            <div className="mt-4 overflow-x-auto rounded-lg border border-line">
+              {cloudConflicts?.items.length ? (
+                <table className="w-full border-collapse text-left text-sm">
+                  <thead className="bg-panel text-xs uppercase tracking-[0.12em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Entidade</th>
+                      <th className="px-4 py-3">Campos</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Origem</th>
+                      <th className="px-4 py-3">Data</th>
+                      <th className="px-4 py-3">Ação</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line bg-panel/40">
+                    {cloudConflicts.items.map((conflict) => (
+                      <tr key={conflict.id} className="hover:bg-slate-900/45">
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-white">{conflict.entityLabel}</div>
+                          <div className="mt-1 font-mono text-xs text-slate-500">
+                            local {conflict.localId} · cloud {conflict.cloudId}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex max-w-md flex-wrap gap-1">
+                            {conflict.affectedFields.slice(0, 4).map((field) => (
+                              <Badge key={field} tone="neutral">
+                                {field}
+                              </Badge>
+                            ))}
+                            {conflict.affectedFields.length > 4 && (
+                              <Badge tone="neutral">+{conflict.affectedFields.length - 4}</Badge>
+                            )}
+                          </div>
+                          {conflict.reason && <div className="mt-1 text-xs text-amber-200">{conflict.reason}</div>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-2">
+                            <Badge tone={cloudConflictStatusTone(conflict.status)}>
+                              {cloudConflictStatusLabels[conflict.status]}
+                            </Badge>
+                            <Badge tone={cloudConflictSeverityTone(conflict.severity)}>
+                              {cloudConflictSeverityLabels[conflict.severity]}
+                            </Badge>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-400">{cloudConflictSourceLabels[conflict.source]}</td>
+                        <td className="px-4 py-3 text-slate-400">{formatDateTime(conflict.createdAt)}</td>
+                        <td className="px-4 py-3">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={cloudConflictBusy !== null}
+                            onClick={() => void openCloudConflictDetail(conflict)}
+                          >
+                            <Eye size={14} />
+                            Detalhes
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="flex min-h-40 flex-col items-center justify-center px-4 py-8 text-center">
+                  <CheckCircle2 size={28} className="text-emerald-300" />
+                  <div className="mt-3 text-sm font-semibold text-white">Nenhum conflito pendente</div>
+                  <div className="mt-1 max-w-lg text-sm text-slate-400">
+                    Quando dois desktops divergirem em dados sincronizados, o conflito aparecerá aqui antes de qualquer decisão manual.
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {cloudCanManageUsers && (
@@ -3460,6 +3924,212 @@ export const SettingsPage = (): JSX.Element => {
                 </div>
               )}
             </div>
+        </WorkspaceMemberModal>
+      )}
+
+      {cloudConflictDetail && (
+        <WorkspaceMemberModal
+          titleId="cloud-conflict-detail-title"
+          panelClassName="w-full max-w-6xl"
+          onClose={() => (cloudConflictBusy === "resolving" ? undefined : setCloudConflictDetail(null))}
+        >
+          <div className="flex items-start justify-between gap-4 border-b border-line p-5">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">
+                  Resolução de conflito
+                </div>
+                <Badge tone={cloudConflictStatusTone(cloudConflictDetail.status)}>
+                  {cloudConflictStatusLabels[cloudConflictDetail.status]}
+                </Badge>
+                <Badge tone={cloudConflictSeverityTone(cloudConflictDetail.severity)}>
+                  {cloudConflictSeverityLabels[cloudConflictDetail.severity]}
+                </Badge>
+              </div>
+              <h2 id="cloud-conflict-detail-title" className="mt-2 text-lg font-bold text-white">
+                {cloudConflictDetail.entityLabel}
+              </h2>
+              <div className="mt-1 font-mono text-xs text-slate-500">
+                local {cloudConflictDetail.localId} · cloud {cloudConflictDetail.cloudId} · remoto v
+                {cloudConflictDetail.remoteVersion}
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              data-autofocus="true"
+              disabled={cloudConflictBusy === "resolving"}
+              onClick={() => setCloudConflictDetail(null)}
+            >
+              Fechar
+            </Button>
+          </div>
+
+          <div className="space-y-5 p-5">
+            {cloudConflictDetail.safeMessage && (
+              <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-amber-100">
+                {cloudConflictDetail.safeMessage}
+              </div>
+            )}
+            {cloudConflictResult && (
+              <div className="rounded-md border border-line bg-panelSoft p-3 text-sm text-slate-300">
+                {cloudConflictResult}
+              </div>
+            )}
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-lg border border-line bg-panelSoft p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Origem</div>
+                <div className="mt-2 text-sm text-white">{cloudConflictSourceLabels[cloudConflictDetail.source]}</div>
+              </div>
+              <div className="rounded-lg border border-line bg-panelSoft p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Local atualizado</div>
+                <div className="mt-2 text-sm text-white">{formatDateTime(cloudConflictDetail.localUpdatedAt)}</div>
+                <div className="mt-1 text-xs text-slate-500">{cloudConflictDetail.localActorUserId ?? "-"}</div>
+              </div>
+              <div className="rounded-lg border border-line bg-panelSoft p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Nuvem atualizada</div>
+                <div className="mt-2 text-sm text-white">{formatDateTime(cloudConflictDetail.remoteUpdatedAt)}</div>
+                <div className="mt-1 text-xs text-slate-500">{cloudConflictDetail.remoteActorUserId ?? "-"}</div>
+              </div>
+              <div className="rounded-lg border border-line bg-panelSoft p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Base</div>
+                <div className="mt-2 text-sm text-white">
+                  local v{cloudConflictDetail.localVersion ?? "-"} · cloud v{cloudConflictDetail.remoteVersion}
+                </div>
+                <div className="mt-1 text-xs text-slate-500">{formatDateTime(cloudConflictDetail.createdAt)}</div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-lg border border-line bg-panelSoft p-4">
+                <div className="mb-2 text-sm font-semibold text-white">Versão local</div>
+                <pre className="max-h-72 overflow-auto rounded-md bg-black/30 p-3 text-xs leading-5 text-slate-300">
+                  {JSON.stringify(cloudConflictDetail.localPayload, null, 2)}
+                </pre>
+              </div>
+              <div className="rounded-lg border border-line bg-panelSoft p-4">
+                <div className="mb-2 text-sm font-semibold text-white">Versão da nuvem</div>
+                <pre className="max-h-72 overflow-auto rounded-md bg-black/30 p-3 text-xs leading-5 text-slate-300">
+                  {JSON.stringify(cloudConflictDetail.remotePayload, null, 2)}
+                </pre>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border border-line">
+              <table className="w-full border-collapse text-left text-sm">
+                <thead className="bg-panel text-xs uppercase tracking-[0.12em] text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Campo</th>
+                    <th className="px-4 py-3">Local</th>
+                    <th className="px-4 py-3">Nuvem</th>
+                    <th className="px-4 py-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line bg-panel/40">
+                  {cloudConflictDetail.diff.map((field) => (
+                    <tr key={field.field} className={field.changed ? "bg-warning/5" : undefined}>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-300">{field.field}</td>
+                      <td className="max-w-xs break-words px-4 py-3 text-slate-400">{formatConflictValue(field.localValue)}</td>
+                      <td className="max-w-xs break-words px-4 py-3 text-slate-400">{formatConflictValue(field.remoteValue)}</td>
+                      <td className="px-4 py-3">
+                        <Badge tone={field.sensitive ? "warning" : field.changed ? "cyan" : "neutral"}>
+                          {field.sensitive ? "omitido" : field.changed ? "diferente" : "igual"}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {cloudConflictAction === "manual" && (
+              <div className="rounded-lg border border-cyan/25 bg-cyan/5 p-4">
+                <div className="mb-3 text-sm font-semibold text-white">Resolver manualmente</div>
+                {cloudConflictDetail.editableFields.length === 0 ? (
+                  <div className="text-sm text-slate-400">
+                    Este conflito não possui campos editáveis seguros para resolução manual.
+                  </div>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {cloudConflictDetail.editableFields.map((field) => (
+                      <label key={field} className="space-y-2">
+                        <span className="text-xs font-semibold text-slate-400">{field}</span>
+                        <textarea
+                          className="focus-ring min-h-24 w-full rounded-md border border-line bg-panel px-3 py-2 font-mono text-xs text-white"
+                          value={cloudConflictManual.values[field] ?? ""}
+                          onChange={(event) =>
+                            setCloudConflictManual({
+                              ...cloudConflictManual,
+                              values: {
+                                ...cloudConflictManual.values,
+                                [field]: event.target.value
+                              }
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                    <label className="space-y-2 md:col-span-2">
+                      <span className="text-xs font-semibold text-slate-400">Nota de resolução</span>
+                      <textarea
+                        className="focus-ring min-h-20 w-full rounded-md border border-line bg-panel px-3 py-2 text-sm text-white"
+                        value={cloudConflictManual.note}
+                        maxLength={500}
+                        onChange={(event) =>
+                          setCloudConflictManual({ ...cloudConflictManual, note: event.target.value })
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-wrap justify-end gap-2 border-t border-line pt-4">
+              <Button
+                variant="secondary"
+                disabled={cloudConflictBusy !== null || !cloudConflictDetail.canResolve}
+                onClick={() => void resolveCloudConflict("keep_local")}
+              >
+                <HardDrive size={16} />
+                {cloudConflictBusy === "resolving" ? "Aplicando..." : "Manter local"}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={cloudConflictBusy !== null || !cloudConflictDetail.canResolve}
+                onClick={() => void resolveCloudConflict("use_remote")}
+              >
+                <DownloadCloud size={16} />
+                Usar nuvem
+              </Button>
+              <Button
+                variant={cloudConflictAction === "manual" ? "primary" : "secondary"}
+                disabled={cloudConflictBusy !== null || !cloudConflictDetail.canResolve}
+                onClick={() =>
+                  cloudConflictAction === "manual"
+                    ? void resolveCloudConflict("manual")
+                    : setCloudConflictAction("manual")
+                }
+              >
+                <Edit3 size={16} />
+                {cloudConflictAction === "manual" ? "Salvar manual" : "Resolver manualmente"}
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={cloudConflictBusy !== null || !cloudConflictDetail.canResolve}
+                onClick={() => void resolveCloudConflict("ignore")}
+              >
+                <Archive size={16} />
+                Ignorar
+              </Button>
+            </div>
+
+            {!cloudConflictDetail.canResolve && (
+              <div className="rounded-md border border-line bg-panelSoft p-3 text-sm text-slate-400">
+                Seu papel cloud atual permite visualizar, mas não resolver este conflito.
+              </div>
+            )}
+          </div>
         </WorkspaceMemberModal>
       )}
 

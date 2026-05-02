@@ -1460,4 +1460,171 @@ export const runtimeMigrations: RuntimeMigration[] = [
       PRAGMA foreign_keys = ON;
     `,
   },
+  {
+    id: "0012_cloud_sync_conflict_resolution",
+    sql: `
+      ALTER TABLE cloud_sync_conflicts ADD COLUMN status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'resolved_local', 'resolved_remote', 'resolved_manual', 'ignored', 'failed'));
+      ALTER TABLE cloud_sync_conflicts ADD COLUMN resolved_by_local_user_id TEXT;
+      ALTER TABLE cloud_sync_conflicts ADD COLUMN resolution_type TEXT CHECK (resolution_type IS NULL OR resolution_type IN ('keep_local', 'use_remote', 'manual', 'ignore'));
+      ALTER TABLE cloud_sync_conflicts ADD COLUMN resolution_note TEXT;
+      ALTER TABLE cloud_sync_conflicts ADD COLUMN diff_json TEXT;
+      ALTER TABLE cloud_sync_conflicts ADD COLUMN severity TEXT NOT NULL DEFAULT 'medium' CHECK (severity IN ('low', 'medium', 'high', 'critical'));
+      ALTER TABLE cloud_sync_conflicts ADD COLUMN source TEXT NOT NULL DEFAULT 'local_pull' CHECK (source IN ('local_pull', 'remote_dependency', 'cloud_push', 'manual'));
+      ALTER TABLE cloud_sync_conflicts ADD COLUMN last_error TEXT;
+      ALTER TABLE cloud_sync_conflicts ADD COLUMN updated_at TEXT;
+
+      UPDATE cloud_sync_conflicts
+      SET
+        status = CASE WHEN resolved_at IS NULL THEN 'pending' ELSE 'resolved_manual' END,
+        updated_at = COALESCE(resolved_at, created_at);
+
+      CREATE INDEX IF NOT EXISTS idx_cloud_sync_conflicts_status ON cloud_sync_conflicts(workspace_id, status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_cloud_sync_conflicts_entity ON cloud_sync_conflicts(entity_type, local_id, cloud_id);
+
+      PRAGMA foreign_keys = OFF;
+
+      CREATE TABLE events_new (
+        id TEXT PRIMARY KEY,
+        event_code TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL CHECK (source IN ('manual', 'system', 'gamemarket_api', 'gamemarket_future', 'webhook_future', 'webhook_server')),
+        type TEXT NOT NULL CHECK (type IN (
+          'auth.local_password_reset',
+          'order.created',
+          'order.payment_confirmed',
+          'order.awaiting_delivery',
+          'order.delivered',
+          'order.completed',
+          'order.status_corrected',
+          'order.cancelled',
+          'order.refunded',
+          'order.mediation',
+          'order.problem',
+          'inventory.reserved',
+          'inventory.released',
+          'inventory.sold',
+          'inventory.delivered',
+          'inventory.problem',
+          'product.low_stock',
+          'product.out_of_stock',
+          'security.secret_revealed',
+          'integration.gamemarket.settings_updated',
+          'integration.gamemarket.connection_tested',
+          'integration.gamemarket.connection_failed',
+          'integration.gamemarket.token_revealed',
+          'integration.gamemarket.sync_started',
+          'integration.gamemarket.sync_completed',
+          'integration.gamemarket.sync_failed',
+          'integration.gamemarket.order_imported',
+          'integration.gamemarket.order_updated',
+          'integration.gamemarket.product_imported',
+          'integration.gamemarket.product_updated',
+          'integration.webhook_server.settings_updated',
+          'integration.webhook_server.connection_tested',
+          'integration.webhook_server.connection_failed',
+          'integration.webhook_server.token_revealed',
+          'integration.webhook_server.sync_started',
+          'integration.webhook_server.sync_completed',
+          'integration.webhook_server.sync_failed',
+          'integration.webhook_server.test_event_sent',
+          'integration.webhook_server.event_imported',
+          'integration.webhook_server.review_received',
+          'integration.webhook_server.variant_sold_out',
+          'integration.webhook_server.unknown_event',
+          'cloud.conflict_detected',
+          'cloud.conflict_resolved_local',
+          'cloud.conflict_resolved_remote',
+          'cloud.conflict_resolved_manual',
+          'cloud.conflict_ignored',
+          'cloud.conflict_resolution_failed',
+          'system.backup_created',
+          'system.backup_failed',
+          'system.backup_deleted',
+          'system.restore_started',
+          'system.restore_completed',
+          'system.restore_failed',
+          'system.restore_safety_backup_created',
+          'system.notification_test'
+        )),
+        severity TEXT NOT NULL DEFAULT 'info' CHECK (severity IN ('info', 'success', 'warning', 'critical')),
+        title TEXT NOT NULL,
+        message TEXT,
+        order_id TEXT REFERENCES orders(id) ON DELETE SET NULL,
+        product_id TEXT REFERENCES products(id) ON DELETE SET NULL,
+        inventory_item_id TEXT REFERENCES inventory_items(id) ON DELETE SET NULL,
+        actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        read_at TEXT,
+        raw_payload TEXT,
+        created_at TEXT NOT NULL,
+        cloud_id TEXT,
+        workspace_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_cloud_synced_at TEXT,
+        sync_revision INTEGER NOT NULL DEFAULT 0,
+        updated_by_cloud_user_id TEXT,
+        deleted_at TEXT
+      );
+
+      INSERT INTO events_new (
+        id,
+        event_code,
+        source,
+        type,
+        severity,
+        title,
+        message,
+        order_id,
+        product_id,
+        inventory_item_id,
+        actor_user_id,
+        read_at,
+        raw_payload,
+        created_at,
+        cloud_id,
+        workspace_id,
+        sync_status,
+        last_cloud_synced_at,
+        sync_revision,
+        updated_by_cloud_user_id,
+        deleted_at
+      )
+      SELECT
+        id,
+        event_code,
+        source,
+        type,
+        severity,
+        title,
+        message,
+        order_id,
+        product_id,
+        inventory_item_id,
+        actor_user_id,
+        read_at,
+        raw_payload,
+        created_at,
+        cloud_id,
+        workspace_id,
+        sync_status,
+        last_cloud_synced_at,
+        sync_revision,
+        updated_by_cloud_user_id,
+        deleted_at
+      FROM events;
+
+      DROP TABLE events;
+      ALTER TABLE events_new RENAME TO events;
+
+      CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
+      CREATE INDEX IF NOT EXISTS idx_events_read ON events(read_at);
+      CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
+      CREATE INDEX IF NOT EXISTS idx_events_order ON events(order_id);
+      CREATE INDEX IF NOT EXISTS idx_events_product ON events(product_id);
+      CREATE INDEX IF NOT EXISTS idx_events_inventory_item ON events(inventory_item_id);
+      CREATE INDEX IF NOT EXISTS idx_events_actor ON events(actor_user_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_events_cloud_id ON events(cloud_id) WHERE cloud_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_events_workspace_sync ON events(workspace_id, sync_status);
+
+      PRAGMA foreign_keys = ON;
+    `,
+  },
 ];

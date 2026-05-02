@@ -164,6 +164,12 @@ export const eventTypeValues = [
   "integration.webhook_server.review_received",
   "integration.webhook_server.variant_sold_out",
   "integration.webhook_server.unknown_event",
+  "cloud.conflict_detected",
+  "cloud.conflict_resolved_local",
+  "cloud.conflict_resolved_remote",
+  "cloud.conflict_resolved_manual",
+  "cloud.conflict_ignored",
+  "cloud.conflict_resolution_failed",
   "system.backup_created",
   "system.backup_failed",
   "system.backup_deleted",
@@ -238,6 +244,32 @@ export const cloudSyncEntityTypeValues = [
   "events",
   "app_notifications",
   "settings",
+] as const;
+export const cloudSyncConflictStatusValues = [
+  "pending",
+  "resolved_local",
+  "resolved_remote",
+  "resolved_manual",
+  "ignored",
+  "failed",
+] as const;
+export const cloudSyncConflictSeverityValues = [
+  "low",
+  "medium",
+  "high",
+  "critical",
+] as const;
+export const cloudSyncConflictSourceValues = [
+  "local_pull",
+  "remote_dependency",
+  "cloud_push",
+  "manual",
+] as const;
+export const cloudSyncConflictResolutionTypeValues = [
+  "keep_local",
+  "use_remote",
+  "manual",
+  "ignore",
 ] as const;
 export const inventorySecretFieldValues = [
   "accountLogin",
@@ -450,6 +482,18 @@ export const cloudSyncConnectionStatusSchema = z.enum(
   cloudSyncConnectionStatusValues,
 );
 export const cloudSyncEntityTypeSchema = z.enum(cloudSyncEntityTypeValues);
+export const cloudSyncConflictStatusSchema = z.enum(
+  cloudSyncConflictStatusValues,
+);
+export const cloudSyncConflictSeveritySchema = z.enum(
+  cloudSyncConflictSeverityValues,
+);
+export const cloudSyncConflictSourceSchema = z.enum(
+  cloudSyncConflictSourceValues,
+);
+export const cloudSyncConflictResolutionTypeSchema = z.enum(
+  cloudSyncConflictResolutionTypeValues,
+);
 
 export const productCreateInputSchema = z
   .object({
@@ -1064,6 +1108,43 @@ export const cloudSyncResetMemberPasswordInputSchema = z
     path: ["confirmPassword"],
   });
 
+export const cloudSyncConflictListInputSchema = z
+  .object({
+    status: z
+      .union([cloudSyncConflictStatusSchema, z.literal("all")])
+      .default("pending"),
+    entityType: z
+      .union([cloudSyncEntityTypeSchema, z.literal("all")])
+      .default("all"),
+    severity: z
+      .union([cloudSyncConflictSeveritySchema, z.literal("all")])
+      .default("all"),
+    source: z
+      .union([cloudSyncConflictSourceSchema, z.literal("all")])
+      .default("all"),
+    search: z.string().trim().max(120).optional().default(""),
+    dateFrom: z.string().trim().max(40).nullable().optional(),
+    dateTo: z.string().trim().max(40).nullable().optional(),
+    limit: z.number().int().min(1).max(250).optional().default(100),
+  })
+  .strict();
+
+export const cloudSyncConflictDetailInputSchema = z
+  .object({
+    id: idSchema,
+  })
+  .strict();
+
+export const cloudSyncConflictResolveInputSchema = z
+  .object({
+    id: idSchema,
+    resolutionType: cloudSyncConflictResolutionTypeSchema,
+    manualPayload: z.record(z.string(), z.unknown()).optional(),
+    note: z.string().trim().max(500).optional(),
+    confirm: z.boolean().optional(),
+  })
+  .strict();
+
 export const cloudSyncEmptyInputSchema = z.object({}).strict();
 
 export const authLoginInputSchema = z
@@ -1199,6 +1280,14 @@ export type CloudSyncMode = (typeof cloudSyncModeValues)[number];
 export type CloudSyncConnectionStatus =
   (typeof cloudSyncConnectionStatusValues)[number];
 export type CloudSyncEntityType = (typeof cloudSyncEntityTypeValues)[number];
+export type CloudSyncConflictStatus =
+  (typeof cloudSyncConflictStatusValues)[number];
+export type CloudSyncConflictSeverity =
+  (typeof cloudSyncConflictSeverityValues)[number];
+export type CloudSyncConflictSource =
+  (typeof cloudSyncConflictSourceValues)[number];
+export type CloudSyncConflictResolutionType =
+  (typeof cloudSyncConflictResolutionTypeValues)[number];
 
 export type ProductCreateInput = z.infer<typeof productCreateInputSchema>;
 export type ProductUpdateData = z.infer<typeof productUpdateDataSchema>;
@@ -1297,6 +1386,15 @@ export type CloudSyncRemoveMemberInput = z.infer<
 >;
 export type CloudSyncResetMemberPasswordInput = z.infer<
   typeof cloudSyncResetMemberPasswordInputSchema
+>;
+export type CloudSyncConflictListInput = z.infer<
+  typeof cloudSyncConflictListInputSchema
+>;
+export type CloudSyncConflictDetailInput = z.infer<
+  typeof cloudSyncConflictDetailInputSchema
+>;
+export type CloudSyncConflictResolveInput = z.infer<
+  typeof cloudSyncConflictResolveInputSchema
 >;
 export type AuthLoginInput = z.infer<typeof authLoginInputSchema>;
 export type AuthSetupAdminInput = z.infer<typeof authSetupAdminInputSchema>;
@@ -2115,6 +2213,66 @@ export interface CloudSyncConflictView {
   remoteVersion: number;
   incomingBaseVersion: number;
   createdAt: string;
+}
+
+export interface CloudSyncConflictFieldDiff {
+  field: string;
+  localValue: unknown;
+  remoteValue: unknown;
+  changed: boolean;
+  sensitive: boolean;
+}
+
+export interface CloudSyncConflictListItem {
+  id: string;
+  workspaceId: string;
+  entityType: CloudSyncEntityType;
+  entityLabel: string;
+  localId: string;
+  cloudId: string;
+  status: CloudSyncConflictStatus;
+  severity: CloudSyncConflictSeverity;
+  source: CloudSyncConflictSource;
+  remoteVersion: number;
+  incomingBaseVersion: number;
+  localVersion: number | null;
+  affectedFields: string[];
+  reason: string | null;
+  lastError: string | null;
+  localActorUserId: string | null;
+  remoteActorUserId: string | null;
+  localUpdatedAt: string | null;
+  remoteUpdatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+  resolutionType: CloudSyncConflictResolutionType | null;
+  resolutionNote: string | null;
+}
+
+export interface CloudSyncConflictListResult {
+  items: CloudSyncConflictListItem[];
+  total: number;
+  pending: number;
+  filters: CloudSyncConflictListInput;
+}
+
+export interface CloudSyncConflictDetail extends CloudSyncConflictListItem {
+  localPayload: Record<string, unknown>;
+  remotePayload: Record<string, unknown>;
+  diff: CloudSyncConflictFieldDiff[];
+  editableFields: string[];
+  omittedSensitiveFields: string[];
+  sensitiveFieldsOmitted: boolean;
+  canResolve: boolean;
+  safeMessage: string | null;
+}
+
+export interface CloudSyncConflictResolutionResult {
+  conflict: CloudSyncConflictDetail;
+  status: CloudSyncConflictStatus;
+  pushScheduled: boolean;
+  safeMessage: string;
 }
 
 export interface CloudSyncSummary {

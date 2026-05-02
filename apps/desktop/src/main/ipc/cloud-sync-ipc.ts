@@ -2,6 +2,9 @@ import type { IpcMain } from "electron";
 import {
   cloudSyncBootstrapOwnerInputSchema,
   cloudSyncChangePasswordInputSchema,
+  cloudSyncConflictDetailInputSchema,
+  cloudSyncConflictListInputSchema,
+  cloudSyncConflictResolveInputSchema,
   cloudSyncEmptyInputSchema,
   cloudSyncInviteUserInputSchema,
   cloudSyncLoginInputSchema,
@@ -11,6 +14,7 @@ import {
   cloudSyncSettingsUpdateInputSchema,
   cloudSyncUpdateMemberInputSchema
 } from "../../shared/contracts";
+import { cloudSyncConflictService } from "../integrations/cloud-sync/cloud-sync-conflict-service";
 import { cloudSyncPollingService } from "../integrations/cloud-sync/cloud-sync-polling-service";
 import { cloudSyncService } from "../integrations/cloud-sync/cloud-sync-service";
 import { requirePermission, requireSession } from "../services/auth-session";
@@ -145,6 +149,27 @@ export const registerCloudSyncIpc = (ipcMain: IpcMain): void => {
     requireSession();
     cloudSyncEmptyInputSchema.parse(payload ?? {});
     return cloudSyncService.getLastSyncSummary();
+  });
+
+  ipcMain.handle("cloudSync:listConflicts", (_event, payload: unknown) => {
+    requireSession();
+    return cloudSyncConflictService.list(cloudSyncConflictListInputSchema.parse(payload ?? {}));
+  });
+
+  ipcMain.handle("cloudSync:getConflictDetail", (_event, payload: unknown) => {
+    requireSession();
+    const input = cloudSyncConflictDetailInputSchema.parse(payload);
+    return cloudSyncConflictService.getDetail(input.id);
+  });
+
+  ipcMain.handle("cloudSync:resolveConflict", (_event, payload: unknown) => {
+    const session = requireSession();
+    const input = cloudSyncConflictResolveInputSchema.parse(payload);
+    const result = cloudSyncConflictService.resolve(input, session.user.id);
+    if (result.pushScheduled) {
+      cloudSyncPollingService.refresh();
+    }
+    return result;
   });
 
   ipcMain.handle("cloudSync:getAutoSyncStatus", (_event, payload: unknown) => {

@@ -149,7 +149,9 @@ export const cloudSyncSettingsService = {
       lastPushAt: readSetting<string | null>(keys.lastPushAt, null),
       lastError: readSetting<string | null>(keys.lastError, null),
       pendingChanges: countPendingChanges(),
-      conflictCount: countRows("SELECT COUNT(*) AS total FROM cloud_sync_conflicts WHERE resolved_at IS NULL")
+      conflictCount: countRows(
+        "SELECT COUNT(*) AS total FROM cloud_sync_conflicts WHERE resolved_at IS NULL AND COALESCE(status, 'pending') IN ('pending', 'failed')"
+      )
     };
   },
 

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { CloudSyncEntityType, CloudSyncEntityView } from "../../../shared/contracts";
 import { getSqliteDatabase } from "../../database/database";
+import { logger } from "../../logger";
 import type { CloudSyncChange } from "./cloud-sync-client";
+import { summarizeChangedFields } from "./cloud-sync-conflict-utils";
 import { isSensitiveSettingKey, isSensitiveSyncKey, sanitizeSyncPayloadObjectWithStats } from "./sync-sanitizer";
 
 const syncMetaColumns = new Set([
@@ -260,6 +262,13 @@ export interface CloudSyncApplyRemoteResult {
   skipped: number;
 }
 
+export interface CloudSyncApplyResolvedEntityResult {
+  applied: number;
+  ignored: number;
+  skipped: number;
+  reason: string | null;
+}
+
 const dependencyRulesByEntityType: Partial<Record<CloudSyncEntityType, ForeignKeyRule[]>> = {
   products: [
     {
@@ -420,6 +429,66 @@ const isDirtyRow = (row: Row, updatedAtColumn: string): boolean => {
   return syncStatus !== "synced" || !lastSyncedAt || Boolean(updatedAt && updatedAt > lastSyncedAt);
 };
 
+const highRiskFields = new Set([
+  "status",
+  "external_status",
+  "sale_price_cents",
+  "unit_cost_cents",
+  "purchase_cost_cents",
+  "net_value_cents",
+  "estimated_profit_cents",
+  "profit_cents",
+  "margin_percent",
+  "stock_current",
+  "stock_min",
+  "value_json"
+]);
+
+const getConflictSeverity = (entityType: CloudSyncEntityType, changedFields: string[]): "low" | "medium" | "high" | "critical" => {
+  if (changedFields.some((field) => isSensitiveSyncKey(field))) {
+    return "critical";
+  }
+  if (entityType === "settings") {
+    return "high";
+  }
+  if (entityType === "orders" || entityType === "inventory_items") {
+    return "high";
+  }
+  if (changedFields.some((field) => highRiskFields.has(field))) {
+    return "high";
+  }
+  if (entityType === "events" || entityType === "app_notifications") {
+    return "low";
+  }
+  return "medium";
+};
+
+const getRecordedConflictStatus = (
+  entity: CloudSyncEntityView
+): { status: string; resolved_at: string | null } | null => {
+  const row = getSqliteDatabase()
+    .prepare(
+      `
+        SELECT status, resolved_at
+        FROM cloud_sync_conflicts
+        WHERE workspace_id = ?
+          AND entity_type = ?
+          AND local_id = ?
+          AND cloud_id = ?
+          AND remote_version = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `
+    )
+    .get(entity.workspaceId, entity.entityType, entity.localId, entity.cloudId, entity.version) as
+    | { status?: string; resolved_at: string | null }
+    | undefined;
+
+  return row ? { status: row.status ?? (row.resolved_at ? "resolved_manual" : "pending"), resolved_at: row.resolved_at } : null;
+};
+
+const isOpenConflictStatus = (status: string): boolean => status === "pending" || status === "failed";
+
 const selectRows = (config: SyncTableConfig, includeAll: boolean): Row[] => {
   const where = [config.where].filter(Boolean);
   const rows = getSqliteDatabase()
@@ -458,8 +527,103 @@ const toNonEmptyString = (value: unknown): string | null => {
 const rowExists = (table: string, column: string, value: string): boolean =>
   Boolean(getSqliteDatabase().prepare(`SELECT 1 FROM ${table} WHERE ${column} = ? LIMIT 1`).get(value));
 
-const insertConflict = (config: SyncTableConfig, localRow: Row, entity: CloudSyncEntityView): void => {
+const readString = (payload: Record<string, unknown>, key: string): string | null => {
+  const value = payload[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+};
+
+const recordConflictDetected = (
+  config: SyncTableConfig,
+  input: {
+    conflictId: string;
+    entity: CloudSyncEntityView;
+    changedFields: string[];
+    reason: string | null;
+    payload: Record<string, unknown>;
+  }
+): void => {
+  try {
+    const now = new Date().toISOString();
+    getSqliteDatabase()
+      .prepare(
+        `
+          INSERT INTO events (
+            id,
+            event_code,
+            source,
+            type,
+            severity,
+            title,
+            message,
+            order_id,
+            product_id,
+            inventory_item_id,
+            actor_user_id,
+            read_at,
+            raw_payload,
+            created_at
+          )
+          VALUES (
+            @id,
+            @eventCode,
+            'system',
+            'cloud.conflict_detected',
+            @severity,
+            @title,
+            @message,
+            @orderId,
+            @productId,
+            @inventoryItemId,
+            NULL,
+            NULL,
+            @rawPayload,
+            @createdAt
+          )
+        `
+      )
+      .run({
+        id: randomUUID(),
+        eventCode: `EVT-CLOUD-CONFLICT-DETECTED-${randomUUID().slice(0, 8).toUpperCase()}`,
+        severity: config.entityType === "orders" || config.entityType === "inventory_items" ? "warning" : "info",
+        title: "Conflito de sincronização detectado",
+        message: `${config.entityType} ${input.entity.localId}: ${input.reason ?? "versões divergentes."}`,
+        orderId:
+          config.entityType === "orders"
+            ? input.entity.localId
+            : readString(input.payload, "order_id"),
+        productId:
+          config.entityType === "products"
+            ? input.entity.localId
+            : readString(input.payload, "product_id"),
+        inventoryItemId:
+          config.entityType === "inventory_items"
+            ? input.entity.localId
+            : readString(input.payload, "inventory_item_id"),
+        rawPayload: JSON.stringify({
+          conflictId: input.conflictId,
+          entityType: config.entityType,
+          entityId: input.entity.localId,
+          changedFields: input.changedFields,
+          timestamp: now
+        }),
+        createdAt: now
+      });
+  } catch (error) {
+    logger.warn({ error }, "cloudSync conflict detected audit failed");
+  }
+};
+
+const insertConflict = (
+  config: SyncTableConfig,
+  localRow: Row,
+  entity: CloudSyncEntityView,
+  source: "local_pull" | "cloud_push" | "manual" = "local_pull"
+): void => {
+  const localPayload = toPayload(localRow, config.columns).payload;
   const remotePayload = sanitizeSyncPayloadObjectWithStats(entity.payload).payload;
+  const changedFields = summarizeChangedFields(localPayload, remotePayload);
+  const now = new Date().toISOString();
+  const conflictId = randomUUID();
 
   getSqliteDatabase()
     .prepare(
@@ -475,27 +639,63 @@ const insertConflict = (config: SyncTableConfig, localRow: Row, entity: CloudSyn
           local_payload_json,
           remote_payload_json,
           created_at,
-          resolved_at
+          resolved_at,
+          status,
+          diff_json,
+          severity,
+          source,
+          updated_at
         )
-        VALUES (@id, @workspaceId, @entityType, @localId, @cloudId, @remoteVersion, @incomingBaseVersion, @localPayloadJson, @remotePayloadJson, @createdAt, NULL)
+        VALUES (
+          @id,
+          @workspaceId,
+          @entityType,
+          @localId,
+          @cloudId,
+          @remoteVersion,
+          @incomingBaseVersion,
+          @localPayloadJson,
+          @remotePayloadJson,
+          @createdAt,
+          NULL,
+          'pending',
+          @diffJson,
+          @severity,
+          @source,
+          @updatedAt
+        )
       `
     )
     .run({
-      id: randomUUID(),
+      id: conflictId,
       workspaceId: entity.workspaceId,
       entityType: entity.entityType,
       localId: entity.localId,
       cloudId: entity.cloudId,
       remoteVersion: entity.version,
       incomingBaseVersion: Number(localRow.sync_revision ?? 0),
-      localPayloadJson: JSON.stringify(toPayload(localRow, config.columns).payload),
+      localPayloadJson: JSON.stringify(localPayload),
       remotePayloadJson: JSON.stringify(remotePayload),
-      createdAt: new Date().toISOString()
+      createdAt: now,
+      diffJson: JSON.stringify(changedFields),
+      severity: getConflictSeverity(config.entityType, changedFields),
+      source,
+      updatedAt: now
     });
+  recordConflictDetected(config, {
+    conflictId,
+    entity,
+    changedFields,
+    reason: null,
+    payload: remotePayload
+  });
 };
 
 const insertRemoteDependencyConflict = (config: SyncTableConfig, entity: CloudSyncEntityView, reason: string): void => {
   const remotePayload = sanitizeSyncPayloadObjectWithStats(entity.payload).payload;
+  const changedFields = ["dependency", ...summarizeChangedFields({}, remotePayload)];
+  const now = new Date().toISOString();
+  const conflictId = randomUUID();
 
   getSqliteDatabase()
     .prepare(
@@ -511,13 +711,37 @@ const insertRemoteDependencyConflict = (config: SyncTableConfig, entity: CloudSy
           local_payload_json,
           remote_payload_json,
           created_at,
-          resolved_at
+          resolved_at,
+          status,
+          diff_json,
+          severity,
+          source,
+          last_error,
+          updated_at
         )
-        VALUES (@id, @workspaceId, @entityType, @localId, @cloudId, @remoteVersion, @incomingBaseVersion, @localPayloadJson, @remotePayloadJson, @createdAt, NULL)
+        VALUES (
+          @id,
+          @workspaceId,
+          @entityType,
+          @localId,
+          @cloudId,
+          @remoteVersion,
+          @incomingBaseVersion,
+          @localPayloadJson,
+          @remotePayloadJson,
+          @createdAt,
+          NULL,
+          'pending',
+          @diffJson,
+          @severity,
+          'remote_dependency',
+          @lastError,
+          @updatedAt
+        )
       `
     )
     .run({
-      id: randomUUID(),
+      id: conflictId,
       workspaceId: entity.workspaceId,
       entityType: entity.entityType,
       localId: entity.localId,
@@ -526,8 +750,19 @@ const insertRemoteDependencyConflict = (config: SyncTableConfig, entity: CloudSy
       incomingBaseVersion: 0,
       localPayloadJson: JSON.stringify({ reason }),
       remotePayloadJson: JSON.stringify({ reason, payload: remotePayload }),
-      createdAt: new Date().toISOString()
+      createdAt: now,
+      diffJson: JSON.stringify(changedFields),
+      severity: "high",
+      lastError: reason,
+      updatedAt: now
     });
+  recordConflictDetected(config, {
+    conflictId,
+    entity,
+    changedFields,
+    reason,
+    payload: remotePayload
+  });
 };
 
 const isTruthySecretFlag = (value: unknown): boolean =>
@@ -771,6 +1006,92 @@ export const cloudSyncLocalStore = {
     }
   },
 
+  markResolutionPending(entityType: CloudSyncEntityType, localId: string, baseVersion?: number): void {
+    const config = configByEntityType.get(entityType);
+    if (!config) {
+      throw new Error("Tipo de entidade não suportado para resolução de conflito.");
+    }
+
+    const result = getSqliteDatabase()
+      .prepare(
+        `
+          UPDATE ${config.table}
+          SET
+            sync_status = 'pending',
+            sync_revision = CASE WHEN @baseVersion IS NULL THEN sync_revision ELSE @baseVersion END
+          WHERE ${config.localIdColumn} = @localId
+        `
+      )
+      .run({ localId, baseVersion: baseVersion ?? null });
+    if (result.changes === 0) {
+      throw new Error("Registro local do conflito não foi encontrado.");
+    }
+  },
+
+  applyResolvedRemoteEntity(entity: CloudSyncEntityView, syncedAt: string): CloudSyncApplyResolvedEntityResult {
+    const config = configByEntityType.get(entity.entityType);
+    if (!config) {
+      return { applied: 0, ignored: 1, skipped: 0, reason: "Tipo de entidade não suportado." };
+    }
+
+    const normalized = normalizeRemoteEntity(config, entity);
+    if (normalized.skipped) {
+      return {
+        applied: 0,
+        ignored: normalized.ignored,
+        skipped: 1,
+        reason: normalized.reason ?? "Dependência obrigatória ausente."
+      };
+    }
+    if (!normalized.entity) {
+      return {
+        applied: 0,
+        ignored: Math.max(1, normalized.ignored),
+        skipped: 0,
+        reason: "Payload remoto foi ignorado por conter configuração sensível ou inválida."
+      };
+    }
+
+    try {
+      upsertEntity(config, normalized.entity, syncedAt);
+      const deferred = applyDeferredForeignKeys(normalized.deferred);
+      return {
+        applied: 1,
+        ignored: normalized.ignored + deferred.ignored,
+        skipped: 0,
+        reason: deferred.ignored > 0 ? "Algumas referências locais ausentes foram preservadas sem quebrar o banco." : null
+      };
+    } catch (error) {
+      if (!isSqliteConstraintFailure(error)) {
+        throw error;
+      }
+
+      return {
+        applied: 0,
+        ignored: normalized.ignored,
+        skipped: 1,
+        reason: "Versão remota não pôde ser aplicada por violar uma restrição local."
+      };
+    }
+  },
+
+  applyManualResolutionEntity(entity: CloudSyncEntityView, actorUserId: string, syncedAt: string): CloudSyncApplyResolvedEntityResult {
+    const result = this.applyResolvedRemoteEntity(
+      {
+        ...entity,
+        updatedByUserId: actorUserId,
+        updatedAt: syncedAt
+      },
+      syncedAt
+    );
+    if (result.applied === 0) {
+      return result;
+    }
+
+    this.markResolutionPending(entity.entityType, entity.localId, entity.version);
+    return result;
+  },
+
   applyRemote(entities: CloudSyncEntityView[], syncedAt: string): CloudSyncApplyRemoteResult {
     const ordered = [...entities].sort(
       (left, right) =>
@@ -793,8 +1114,15 @@ export const cloudSyncLocalStore = {
         ignored += normalized.ignored;
         if (normalized.skipped) {
           skipped += 1;
-          conflicts += 1;
-          insertRemoteDependencyConflict(config, entity, normalized.reason ?? "Dependência obrigatória ausente.");
+          const recorded = getRecordedConflictStatus(entity);
+          if (!recorded) {
+            conflicts += 1;
+            insertRemoteDependencyConflict(config, entity, normalized.reason ?? "Dependência obrigatória ausente.");
+          } else if (isOpenConflictStatus(recorded.status)) {
+            conflicts += 1;
+          } else {
+            ignored += 1;
+          }
           continue;
         }
         if (!normalized.entity) {
@@ -804,8 +1132,15 @@ export const cloudSyncLocalStore = {
         const localRow = getExistingRow(config, normalized.entity);
         if (localRow && isDirtyRow(localRow, config.updatedAtColumn)) {
           if (Number(localRow.sync_revision ?? 0) < normalized.entity.version) {
-            insertConflict(config, localRow, normalized.entity);
-            conflicts += 1;
+            const recorded = getRecordedConflictStatus(normalized.entity);
+            if (!recorded) {
+              insertConflict(config, localRow, normalized.entity);
+              conflicts += 1;
+            } else if (isOpenConflictStatus(recorded.status)) {
+              conflicts += 1;
+            } else {
+              ignored += 1;
+            }
           } else {
             ignored += 1;
           }
@@ -821,12 +1156,19 @@ export const cloudSyncLocalStore = {
           }
 
           skipped += 1;
-          conflicts += 1;
-          insertRemoteDependencyConflict(
-            config,
-            normalized.entity,
-            "Registro remoto não pôde ser aplicado por violar uma restrição local."
-          );
+          const recorded = getRecordedConflictStatus(normalized.entity);
+          if (!recorded) {
+            conflicts += 1;
+            insertRemoteDependencyConflict(
+              config,
+              normalized.entity,
+              "Registro remoto não pôde ser aplicado por violar uma restrição local."
+            );
+          } else if (isOpenConflictStatus(recorded.status)) {
+            conflicts += 1;
+          } else {
+            ignored += 1;
+          }
         }
       }
 

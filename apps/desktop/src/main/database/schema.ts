@@ -272,6 +272,12 @@ export const events = sqliteTable("events", {
       "integration.webhook_server.review_received",
       "integration.webhook_server.variant_sold_out",
       "integration.webhook_server.unknown_event",
+      "cloud.conflict_detected",
+      "cloud.conflict_resolved_local",
+      "cloud.conflict_resolved_remote",
+      "cloud.conflict_resolved_manual",
+      "cloud.conflict_ignored",
+      "cloud.conflict_resolution_failed",
       "system.backup_created",
       "system.backup_failed",
       "system.backup_deleted",
@@ -386,7 +392,16 @@ export const cloudSyncConflicts = sqliteTable("cloud_sync_conflicts", {
   localPayloadJson: text("local_payload_json").notNull(),
   remotePayloadJson: text("remote_payload_json").notNull(),
   createdAt: text("created_at").notNull(),
-  resolvedAt: text("resolved_at")
+  resolvedAt: text("resolved_at"),
+  status: text("status").notNull().default("pending"),
+  resolvedByLocalUserId: text("resolved_by_local_user_id"),
+  resolutionType: text("resolution_type"),
+  resolutionNote: text("resolution_note"),
+  diffJson: text("diff_json"),
+  severity: text("severity").notNull().default("medium"),
+  source: text("source").notNull().default("local_pull"),
+  lastError: text("last_error"),
+  updatedAt: text("updated_at")
 });
 
 export const productRelations = relations(products, ({ many }) => ({

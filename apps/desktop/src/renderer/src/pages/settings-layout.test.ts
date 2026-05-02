@@ -38,6 +38,15 @@ describe("settings page scroll layout", () => {
     expect(settingsPage).toContain("backup.restore");
     expect(settingsPage).toContain("backup.openFolder");
     expect(settingsPage).toContain("Usuários do Workspace");
+    expect(settingsPage).toContain("Conflitos de Sincronização");
+    expect(settingsPage).toContain("cloudSync.listConflicts");
+    expect(settingsPage).toContain("cloudSync.getConflictDetail");
+    expect(settingsPage).toContain("cloudSync.resolveConflict");
+    expect(settingsPage).toContain("cloud-conflict-detail-title");
+    expect(settingsPage).toContain("Manter local");
+    expect(settingsPage).toContain("Usar nuvem");
+    expect(settingsPage).toContain("Resolver manualmente");
+    expect(settingsPage).toContain("Ignorar");
     expect(settingsPage).toContain("Editar membro do workspace");
     expect(settingsPage).toContain("Resetar senha cloud");
     expect(settingsPage).toContain("Troca de senha cloud obrigatória");

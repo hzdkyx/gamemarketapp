@@ -106,6 +106,18 @@ describe("runtime migrations", () => {
     expect(migration?.sql).toContain("CREATE TABLE events_new");
   });
 
+  it("defines cloud sync conflict resolution metadata migration", () => {
+    const migration = runtimeMigrations.find(
+      (item) => item.id === "0012_cloud_sync_conflict_resolution",
+    );
+
+    expect(migration).toBeTruthy();
+    expect(migration?.sql).toContain("ALTER TABLE cloud_sync_conflicts ADD COLUMN status");
+    expect(migration?.sql).toContain("resolution_type");
+    expect(migration?.sql).toContain("cloud.conflict_resolved_manual");
+    expect(migration?.sql).toContain("idx_cloud_sync_conflicts_status");
+  });
+
   it("applies the local password recovery migration to an existing SQLite database", () => {
     const migration = runtimeMigrations.find((item) => item.id === "0010_local_password_recovery");
     const db = new DatabaseSync(":memory:");
@@ -233,6 +245,112 @@ describe("runtime migrations", () => {
         )
         .run(),
     ).not.toThrow();
+
+    db.close();
+  });
+
+  it("applies the cloud conflict resolution migration to an existing SQLite database", () => {
+    const migration = runtimeMigrations.find((item) => item.id === "0012_cloud_sync_conflict_resolution");
+    const db = new DatabaseSync(":memory:");
+
+    db.exec(`
+      CREATE TABLE users (id TEXT PRIMARY KEY);
+      CREATE TABLE products (id TEXT PRIMARY KEY);
+      CREATE TABLE orders (id TEXT PRIMARY KEY);
+      CREATE TABLE inventory_items (id TEXT PRIMARY KEY);
+      CREATE TABLE events (
+        id TEXT PRIMARY KEY,
+        event_code TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('system.notification_test')),
+        severity TEXT NOT NULL DEFAULT 'info',
+        title TEXT NOT NULL,
+        message TEXT,
+        order_id TEXT,
+        product_id TEXT,
+        inventory_item_id TEXT,
+        actor_user_id TEXT,
+        read_at TEXT,
+        raw_payload TEXT,
+        created_at TEXT NOT NULL,
+        cloud_id TEXT,
+        workspace_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_cloud_synced_at TEXT,
+        sync_revision INTEGER NOT NULL DEFAULT 0,
+        updated_by_cloud_user_id TEXT,
+        deleted_at TEXT
+      );
+      CREATE TABLE cloud_sync_conflicts (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        local_id TEXT NOT NULL,
+        cloud_id TEXT NOT NULL,
+        remote_version INTEGER NOT NULL,
+        incoming_base_version INTEGER NOT NULL,
+        local_payload_json TEXT NOT NULL,
+        remote_payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        resolved_at TEXT
+      );
+      INSERT INTO cloud_sync_conflicts (
+        id,
+        workspace_id,
+        entity_type,
+        local_id,
+        cloud_id,
+        remote_version,
+        incoming_base_version,
+        local_payload_json,
+        remote_payload_json,
+        created_at,
+        resolved_at
+      )
+      VALUES (
+        'conflict-1',
+        'workspace-1',
+        'products',
+        'product-1',
+        'cloud-1',
+        2,
+        1,
+        '{}',
+        '{}',
+        '2026-05-01T00:00:00.000Z',
+        NULL
+      );
+    `);
+
+    expect(() => db.exec(migration?.sql ?? "")).not.toThrow();
+
+    const columns = db.prepare("PRAGMA table_info(cloud_sync_conflicts)").all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(["status", "resolution_type", "diff_json"]));
+    expect(() =>
+      db
+        .prepare(
+          `
+            INSERT INTO events (
+              id,
+              event_code,
+              source,
+              type,
+              severity,
+              title,
+              created_at
+            )
+            VALUES ('evt-cloud-1', 'EVT-CLOUD-CONFLICT-1', 'system', 'cloud.conflict_resolved_local', 'info', 'Conflito resolvido', '2026-05-01T00:00:00.000Z')
+          `,
+        )
+        .run()
+    ).not.toThrow();
+
+    const conflict = db.prepare("SELECT status, updated_at FROM cloud_sync_conflicts WHERE id = 'conflict-1'").get() as {
+      status: string;
+      updated_at: string;
+    };
+    expect(conflict.status).toBe("pending");
+    expect(conflict.updated_at).toBe("2026-05-01T00:00:00.000Z");
 
     db.close();
   });

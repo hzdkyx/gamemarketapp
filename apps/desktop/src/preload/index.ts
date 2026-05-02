@@ -20,6 +20,11 @@ import type {
   CloudSyncBootstrapOwnerInput,
   CloudSyncAutoSyncStatus,
   CloudSyncChangePasswordInput,
+  CloudSyncConflictDetail,
+  CloudSyncConflictListInput,
+  CloudSyncConflictListResult,
+  CloudSyncConflictResolutionResult,
+  CloudSyncConflictResolveInput,
   CloudSyncInviteUserInput,
   CloudSyncLoginInput,
   CloudSyncMemberActionInput,
@@ -599,6 +604,21 @@ const api = {
         "cloudSync:getLastSyncSummary",
         {},
       ) as Promise<CloudSyncSummary | null>,
+    listConflicts: (payload: CloudSyncConflictListInput) =>
+      ipcRenderer.invoke(
+        "cloudSync:listConflicts",
+        payload,
+      ) as Promise<CloudSyncConflictListResult>,
+    getConflictDetail: (id: string) =>
+      ipcRenderer.invoke(
+        "cloudSync:getConflictDetail",
+        { id },
+      ) as Promise<CloudSyncConflictDetail>,
+    resolveConflict: (payload: CloudSyncConflictResolveInput) =>
+      ipcRenderer.invoke(
+        "cloudSync:resolveConflict",
+        payload,
+      ) as Promise<CloudSyncConflictResolutionResult>,
     getAutoSyncStatus: () =>
       ipcRenderer.invoke(
         "cloudSync:getAutoSyncStatus",
