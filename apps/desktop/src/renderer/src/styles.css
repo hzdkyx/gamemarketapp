@@ -142,6 +142,99 @@ textarea {
   .modal-panel {
     animation: modal-enter 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   }
+
+  .auth-cinematic-stage {
+    isolation: isolate;
+  }
+
+  .auth-motion-backdrop {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    background:
+      linear-gradient(130deg, rgba(39, 215, 242, 0.1), transparent 32%),
+      linear-gradient(225deg, rgba(139, 92, 246, 0.16), transparent 38%),
+      linear-gradient(180deg, #030408 0%, #070712 52%, #020306 100%);
+  }
+
+  .auth-fallback-aura {
+    position: absolute;
+    inset: -18%;
+    background:
+      conic-gradient(
+        from 218deg at 52% 46%,
+        rgba(39, 215, 242, 0.08),
+        rgba(139, 92, 246, 0.2),
+        rgba(8, 13, 24, 0.12),
+        rgba(39, 215, 242, 0.08)
+      ),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.035), transparent 42%);
+    filter: saturate(1.12);
+  }
+
+  .auth-fallback-grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.045) 1px, transparent 1px);
+    background-size: 52px 52px;
+    mask-image: linear-gradient(180deg, transparent 0%, #000 18%, #000 82%, transparent 100%);
+    opacity: 0.42;
+  }
+
+  .auth-motion-video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: saturate(1.08) contrast(1.06) brightness(0.92);
+  }
+
+  .auth-motion-overlay {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, rgba(2, 3, 6, 0.76), rgba(2, 3, 6, 0.28) 48%, rgba(2, 3, 6, 0.72)),
+      linear-gradient(180deg, rgba(2, 3, 6, 0.36), rgba(2, 3, 6, 0.72));
+  }
+
+  .auth-motion-overlay-intro {
+    background:
+      linear-gradient(90deg, rgba(2, 3, 6, 0.7), rgba(2, 3, 6, 0.26) 50%, rgba(2, 3, 6, 0.72)),
+      linear-gradient(180deg, rgba(2, 3, 6, 0.32), rgba(2, 3, 6, 0.76));
+  }
+
+  .auth-motion-overlay-login {
+    background:
+      linear-gradient(90deg, rgba(2, 3, 6, 0.82), rgba(2, 3, 6, 0.42) 48%, rgba(2, 3, 6, 0.78)),
+      linear-gradient(180deg, rgba(2, 3, 6, 0.48), rgba(2, 3, 6, 0.82));
+  }
+
+  .auth-intro-panel {
+    animation: auth-intro-enter 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
+  .auth-login-card {
+    background:
+      linear-gradient(135deg, rgba(39, 215, 242, 0.34), rgba(139, 92, 246, 0.34), rgba(255, 255, 255, 0.08)),
+      rgba(8, 10, 18, 0.66);
+    box-shadow:
+      0 26px 90px rgba(0, 0, 0, 0.54),
+      0 0 54px rgba(139, 92, 246, 0.12);
+    backdrop-filter: blur(18px);
+    animation: auth-login-enter 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
+  .auth-login-surface {
+    border: 1px solid rgba(226, 232, 240, 0.11);
+    background: rgba(5, 7, 11, 0.62);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.045),
+      0 18px 60px rgba(0, 0, 0, 0.34);
+    backdrop-filter: blur(24px);
+  }
 }
 
 @keyframes page-enter {
@@ -201,6 +294,30 @@ textarea {
   }
 }
 
+@keyframes auth-intro-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes auth-login-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -209,5 +326,9 @@ textarea {
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.001ms !important;
+  }
+
+  .auth-motion-video {
+    display: none;
   }
 }

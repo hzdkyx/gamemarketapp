@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle,
+  ArrowRight,
   HelpCircle,
   KeyRound,
   LockKeyhole,
@@ -10,7 +12,9 @@ import {
 } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
 import { useAuth } from "@renderer/lib/auth-context";
+import { BRAND_ASSETS } from "@renderer/lib/branding";
 import { getDesktopApi } from "@renderer/lib/desktop-api";
+import { cn } from "@renderer/lib/utils";
 import {
   LOCAL_RECOVERY_TEMPORARY_PASSWORD,
   isPasswordHintTooSimilar,
@@ -36,47 +40,162 @@ const statusLabels: Record<UserStatus, string> = {
 const formatDateTime = (value: string | null | undefined): string =>
   value ? new Date(value).toLocaleString("pt-BR") : "-";
 
+const usePrefersReducedMotion = (): boolean => {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const syncPreference = (): void => {
+      setPrefersReducedMotion(mediaQuery.matches);
+    };
+
+    syncPreference();
+    mediaQuery.addEventListener("change", syncPreference);
+
+    return () => mediaQuery.removeEventListener("change", syncPreference);
+  }, []);
+
+  return prefersReducedMotion;
+};
+
+const AuthMotionBackdrop = ({
+  variant,
+}: {
+  variant: "intro" | "login";
+}): JSX.Element => {
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const [videoFailed, setVideoFailed] = useState(false);
+  const shouldRenderVideo = !prefersReducedMotion && !videoFailed;
+
+  return (
+    <div className="auth-motion-backdrop" aria-hidden="true">
+      <div className="auth-fallback-aura" />
+      <div className="auth-fallback-grid" />
+      {shouldRenderVideo && (
+        <video
+          className="auth-motion-video"
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="metadata"
+          poster={BRAND_ASSETS.introPoster ?? undefined}
+          onError={() => setVideoFailed(true)}
+        >
+          <source
+            src={BRAND_ASSETS.introVideo}
+            type={BRAND_ASSETS.introVideoType}
+          />
+        </video>
+      )}
+      <div
+        className={
+          variant === "intro"
+            ? "auth-motion-overlay auth-motion-overlay-intro"
+            : "auth-motion-overlay auth-motion-overlay-login"
+        }
+      />
+    </div>
+  );
+};
+
+const IntroWelcome = ({ onStart }: { onStart: () => void }): JSX.Element => (
+  <section className="relative min-h-screen overflow-hidden bg-background text-slate-100">
+    <AuthMotionBackdrop variant="intro" />
+    <main className="relative z-10 grid min-h-screen place-items-center px-6 py-10">
+      <div className="auth-intro-panel w-full max-w-[720px] text-center">
+        <h1 className="sr-only">HzdKyx GameMarket Manager</h1>
+        <img
+          className="mx-auto h-auto w-[320px] max-w-[76vw] object-contain drop-shadow-[0_0_34px_rgba(139,92,246,0.28)]"
+          src={BRAND_ASSETS.logoFull}
+          alt="HzdKyx"
+        />
+        <p className="mt-3 text-sm font-semibold uppercase tracking-[0.22em] text-slate-300">
+          GameMarket Manager
+        </p>
+        <div className="mx-auto mt-10 h-px w-64 max-w-[70vw] bg-gradient-to-r from-transparent via-purple/60 to-transparent" />
+        <Button
+          className="mx-auto mt-10 h-12 min-w-48 justify-center text-sm font-black tracking-[0.22em]"
+          variant="primary"
+          type="button"
+          onClick={onStart}
+        >
+          INICIAR
+          <ArrowRight size={17} />
+        </Button>
+      </div>
+    </main>
+  </section>
+);
+
 const AuthFrame = ({
   eyebrow,
   title,
   helper,
   children,
+  showIntro = false,
+  cinematic = true,
 }: {
   eyebrow: string;
   title: string;
   helper: string;
   children: ReactNode;
-}): JSX.Element => (
-  <div className="premium-grid grid min-h-screen place-items-center bg-background px-6 py-10 text-slate-100">
-    <div className="w-full max-w-md">
-      <div className="mb-7 flex items-center gap-3">
-        <div className="grid h-12 w-12 place-items-center rounded-lg border border-cyan/30 bg-cyan/10 text-cyan shadow-glowCyan">
-          <ShieldCheck size={24} />
-        </div>
-        <div>
-          <div className="text-sm font-bold tracking-wide text-white">
-            HzdKyx
-          </div>
-          <div className="text-xs font-medium text-slate-400">
-            GameMarket Manager
-          </div>
-        </div>
-      </div>
+  showIntro?: boolean;
+  cinematic?: boolean;
+}): JSX.Element => {
+  const [introComplete, setIntroComplete] = useState(!showIntro);
 
-      <div className="premium-surface overflow-hidden rounded-lg">
-        <div className="h-px bg-gradient-to-r from-cyan/60 via-purple/35 to-transparent" />
-        <div className="p-6">
-          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan">
-            {eyebrow}
+  if (!introComplete) {
+    return <IntroWelcome onStart={() => setIntroComplete(true)} />;
+  }
+
+  return (
+    <div
+      className={cn(
+        "relative grid min-h-screen place-items-center overflow-hidden bg-background px-6 py-10 text-slate-100",
+        cinematic ? "auth-cinematic-stage" : "premium-grid",
+      )}
+    >
+      {cinematic && <AuthMotionBackdrop variant="login" />}
+      <div
+        className={cn(
+          "relative z-10 w-full max-w-md",
+          cinematic && "auth-login-card rounded-[22px] p-[1px]",
+        )}
+      >
+        <div className={cn(cinematic ? "p-6 sm:p-7" : "")}>
+          <div className="mb-7">
+            <img
+              className="h-auto w-[178px] max-w-full object-contain drop-shadow-[0_0_22px_rgba(139,92,246,0.2)]"
+              src={BRAND_ASSETS.logoFull}
+              alt="HzdKyx"
+            />
+            <div className="mt-2 text-xs font-medium text-slate-400">
+              GameMarket Manager
+            </div>
           </div>
-          <h1 className="mt-2 text-2xl font-bold text-white">{title}</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-400">{helper}</p>
-          <div className="mt-6">{children}</div>
+
+          <div
+            className={cn(
+              "overflow-hidden rounded-lg",
+              cinematic ? "auth-login-surface" : "premium-surface",
+            )}
+          >
+            <div className="h-px bg-gradient-to-r from-cyan/60 via-purple/45 to-transparent" />
+            <div className="p-6">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan">
+                {eyebrow}
+              </div>
+              <h2 className="mt-2 text-2xl font-bold text-white">{title}</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-400">{helper}</p>
+              <div className="mt-6">{children}</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 const Field = ({
   label,
@@ -182,6 +301,46 @@ const LocalRecoveryDialog = ({
   onConfirmationChange: (value: string) => void;
   onReset: () => void;
 }): JSX.Element | null => {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    const focusTimer = window.setTimeout(() => {
+      const autofocusTarget =
+        panelRef.current?.querySelector<HTMLElement>("[data-autofocus]") ??
+        panelRef.current;
+      autofocusTarget?.focus();
+    }, 0);
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        onCloseRef.current();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocusRef.current?.focus();
+    };
+  }, [open]);
+
   if (!open) {
     return null;
   }
@@ -193,19 +352,34 @@ const LocalRecoveryDialog = ({
       selectedUser?.username.toLowerCase() &&
     !resetting;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
-      <div className="modal-panel max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-lg border border-line bg-background shadow-premium">
+      <div
+        ref={panelRef}
+        className="modal-panel max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-lg border border-line bg-background shadow-premium"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="local-recovery-title"
+        tabIndex={-1}
+      >
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-5">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan">
               Recuperação local
             </div>
-            <h2 className="mt-1 text-lg font-bold text-white">
+            <h2
+              id="local-recovery-title"
+              className="mt-1 text-lg font-bold text-white"
+            >
               Esqueci minha senha
             </h2>
           </div>
-          <Button variant="ghost" type="button" onClick={onClose}>
+          <Button
+            variant="ghost"
+            type="button"
+            data-autofocus
+            onClick={onClose}
+          >
             Fechar
           </Button>
         </div>
@@ -312,7 +486,8 @@ const LocalRecoveryDialog = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 
@@ -410,8 +585,9 @@ export const LoginPage = (): JSX.Element => {
   return (
     <AuthFrame
       eyebrow="Acesso local"
-      title="HzdKyx GameMarket Manager"
+      title="Entrar na operação"
       helper="Entre com seu usuário local para acessar a operação."
+      showIntro
     >
       <form className="space-y-4" onSubmit={(event) => void submit(event)}>
         <Field
@@ -609,6 +785,7 @@ export const ChangePasswordPage = (): JSX.Element => {
       eyebrow="Senha obrigatória"
       title="Trocar senha"
       helper="Defina uma nova senha antes de continuar."
+      cinematic={false}
     >
       <form className="space-y-4" onSubmit={(event) => void submit(event)}>
         <Field

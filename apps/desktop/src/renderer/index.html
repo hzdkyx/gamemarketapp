@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self';"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link
@@ -32,17 +32,28 @@
         gap: 12px;
       }
       #boot-splash .boot-mark {
-        width: 62px;
-        height: 62px;
+        width: 86px;
+        height: 86px;
         display: grid;
         place-items: center;
-        border-radius: 18px;
-        border: 1px solid rgba(39, 215, 242, 0.34);
-        background: linear-gradient(135deg, rgba(39, 215, 242, 0.96), rgba(125, 211, 252, 0.88));
-        box-shadow: 0 22px 60px rgba(39, 215, 242, 0.22), inset 0 1px 0 rgba(255,255,255,0.26);
-        font-weight: 900;
-        color: #031018;
+        overflow: hidden;
+        border-radius: 22px;
+        border: 1px solid rgba(139, 92, 246, 0.36);
+        background: #05070b;
+        box-shadow: 0 24px 68px rgba(139, 92, 246, 0.2), inset 0 1px 0 rgba(255,255,255,0.08);
         animation: boot-pulse 1.8s ease-in-out infinite;
+        position: relative;
+        color: #c4b5fd;
+        font-size: 24px;
+        font-weight: 900;
+      }
+      #boot-splash .boot-mark img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
       }
       #boot-splash h1 {
         margin: 0;
@@ -72,7 +83,7 @@
         width: 16px;
         height: 16px;
         border: 2px solid rgba(148, 163, 184, 0.25);
-        border-top-color: #27d7f2;
+        border-top-color: #a78bfa;
         border-radius: 999px;
         animation: boot-spin 0.9s linear infinite;
       }
@@ -92,7 +103,10 @@
   <body>
     <div id="boot-splash" role="status" aria-live="polite">
       <section class="boot-brand">
-        <div class="boot-mark">Hz</div>
+        <div class="boot-mark">
+          <span>HK</span>
+          <img src="./branding/hzdkyx-logo-mark.png" alt="" aria-hidden="true" />
+        </div>
         <h1>HzdKyx</h1>
         <p>GameMarket Manager</p>
       </section>

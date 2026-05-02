@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   LogOut,
   PackageOpen,
-  ShieldCheck,
   UserCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -14,6 +13,7 @@ import { navItems } from "./nav-items";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { useAuth } from "@renderer/lib/auth-context";
+import { BRAND_ASSETS } from "@renderer/lib/branding";
 import { getDesktopApi } from "@renderer/lib/desktop-api";
 import { playSaleAlertSound } from "@renderer/lib/notification-sound";
 import { cn } from "@renderer/lib/utils";
@@ -151,11 +151,16 @@ export const AppShell = (): JSX.Element => {
       <aside className="flex min-h-0 flex-col border-r border-line/80 bg-slate-950/[0.82] shadow-[10px_0_46px_rgba(0,0,0,0.24)]">
         <div className="border-b border-line/80 p-5">
           <div className="flex items-center gap-3">
-            <div className="grid h-11 w-11 place-items-center rounded-lg border border-cyan/30 bg-cyan/10 text-cyan shadow-glowCyan">
-              <ShieldCheck size={22} />
+            <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-purple/35 bg-slate-950 shadow-[0_0_26px_rgba(139,92,246,0.18)]">
+              <img
+                className="h-full w-full object-cover"
+                src={BRAND_ASSETS.logoMark}
+                alt=""
+                aria-hidden="true"
+              />
             </div>
-            <div>
-              <div className="text-sm font-bold tracking-wide text-white">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-bold tracking-wide text-white">
                 HzdKyx
               </div>
               <div className="text-xs font-medium text-slate-400">

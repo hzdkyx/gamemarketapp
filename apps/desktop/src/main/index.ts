@@ -1,4 +1,5 @@
 import { BrowserWindow, Menu, app, ipcMain, shell } from "electron";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { initializeDatabase, getDatabaseStatus } from "./database/database";
 import { registerAppNotificationsIpc } from "./ipc/app-notifications-ipc";
@@ -31,6 +32,20 @@ const rendererStartupMarks = new Set<string>();
 const appUserModelId = "com.hzdk.gamemarket.manager";
 const minimumProductionSplashMs = 1200;
 
+const getWindowIconPath = (): string | undefined => {
+  const candidates = app.isPackaged
+    ? [
+        join(process.resourcesPath, "branding/icon.png"),
+        join(__dirname, "../renderer/branding/hzdkyx-logo-icon.png"),
+      ]
+    : [
+        join(app.getAppPath(), "buildResources/icon.png"),
+        join(__dirname, "../renderer/branding/hzdkyx-logo-icon.png"),
+      ];
+
+  return candidates.find((candidate) => existsSync(candidate));
+};
+
 if (process.platform === "win32") {
   app.setAppUserModelId(appUserModelId);
 }
@@ -52,13 +67,15 @@ const startBackgroundServices = (): void => {
 
 const createWindow = (): void => {
   startupProfiler.mark("main_window_create_start");
-  mainWindow = new BrowserWindow({
+  const windowIconPath = getWindowIconPath();
+  const browserWindowOptions: Electron.BrowserWindowConstructorOptions = {
     width: 1440,
     height: 920,
     minWidth: 1120,
     minHeight: 720,
     title: "HzdKyx GameMarket Manager",
     backgroundColor: "#07080d",
+    autoHideMenuBar: app.isPackaged,
     show: false,
     webPreferences: {
       preload: join(__dirname, "../preload/index.mjs"),
@@ -66,7 +83,13 @@ const createWindow = (): void => {
       nodeIntegration: false,
       sandbox: false,
     },
-  });
+  };
+
+  if (windowIconPath) {
+    browserWindowOptions.icon = windowIconPath;
+  }
+
+  mainWindow = new BrowserWindow(browserWindowOptions);
 
   startupProfiler.mark("main_created");
   startupProfiler.mark("main_window_create_end");

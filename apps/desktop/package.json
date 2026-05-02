@@ -64,14 +64,22 @@
     "appId": "com.hzdk.gamemarket.manager",
     "productName": "HzdKyx GameMarket Manager",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "buildResources"
     },
     "files": [
       "out/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "buildResources/icon.png",
+        "to": "branding/icon.png"
+      }
+    ],
     "win": {
       "executableName": "HzdKyx GameMarket Manager",
+      "icon": "buildResources/icon.ico",
       "target": [
         {
           "target": "nsis",

@@ -1,4 +1,6 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, app } from "electron";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 export interface SplashWindowController {
   window: BrowserWindow;
@@ -8,12 +10,34 @@ export interface SplashWindowController {
   close(): void;
 }
 
-const splashHtml = `
+const resolveSplashLogoDataUrl = (): string | null => {
+  const candidates = [
+    join(__dirname, "../renderer/branding/hzdkyx-logo-mark.png"),
+    join(app.getAppPath(), "buildResources/icon.png"),
+    join(process.resourcesPath, "branding/icon.png"),
+  ];
+
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) {
+      continue;
+    }
+
+    try {
+      return `data:image/png;base64,${readFileSync(candidate).toString("base64")}`;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+};
+
+const createSplashHtml = (logoDataUrl: string | null): string => `
 <!doctype html>
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
     <style>
       * { box-sizing: border-box; }
       body {
@@ -43,17 +67,25 @@ const splashHtml = `
         gap: 12px;
       }
       .mark {
-        width: 62px;
-        height: 62px;
+        width: 92px;
+        height: 92px;
         display: grid;
         place-items: center;
-        border-radius: 18px;
-        background: linear-gradient(135deg, rgba(34, 211, 238, 0.95), rgba(168, 85, 247, 0.88));
-        box-shadow: 0 22px 60px rgba(34, 211, 238, 0.22);
+        overflow: hidden;
+        border-radius: 24px;
+        border: 1px solid rgba(168, 85, 247, 0.32);
+        background: #05070b;
+        box-shadow: 0 24px 70px rgba(168, 85, 247, 0.2);
         font-weight: 900;
         letter-spacing: 0;
         color: #031018;
         animation: pulse 1.8s ease-in-out infinite;
+      }
+      .mark img {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: cover;
       }
       h1 {
         margin: 0;
@@ -82,7 +114,7 @@ const splashHtml = `
         width: 16px;
         height: 16px;
         border: 2px solid rgba(148, 163, 184, 0.25);
-        border-top-color: #22d3ee;
+        border-top-color: #a78bfa;
         border-radius: 999px;
         animation: spin 0.9s linear infinite;
       }
@@ -101,7 +133,7 @@ const splashHtml = `
   <body>
     <main class="shell">
       <section class="brand">
-        <div class="mark">Hz</div>
+        <div class="mark">${logoDataUrl ? `<img src="${logoDataUrl}" alt="" aria-hidden="true" />` : "HK"}</div>
         <h1>HzdKyx</h1>
         <p>GameMarket Manager</p>
       </section>
@@ -122,6 +154,7 @@ const splashHtml = `
 </html>`;
 
 export const createSplashWindow = (): SplashWindowController => {
+  const splashHtml = createSplashHtml(resolveSplashLogoDataUrl());
   let ready = false;
   let lastMessage = "Inicializando aplicativo...";
   let visibleSince = Date.now();
